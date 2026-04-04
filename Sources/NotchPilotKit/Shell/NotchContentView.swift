@@ -5,8 +5,6 @@ public struct NotchContentView: View {
     private let closeSpring = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
     private let closedCornerInsets = (top: CGFloat(6), bottom: CGFloat(14))
     private let openedCornerInsets = (top: CGFloat(19), bottom: CGFloat(24))
-    private let closedInteractionHorizontalPadding: CGFloat = 30
-    private let closedInteractionBottomPadding: CGFloat = 10
     @State private var gestureProgress: CGFloat = 0
 
     @ObservedObject private var session: ScreenSessionModel
@@ -25,8 +23,9 @@ public struct NotchContentView: View {
             notchGeometry: session.geometry,
             isPrimaryScreen: session.descriptor.isPrimary
         )
-        let displaySize = preferredDisplaySize(plugins: plugins, context: context)
-        let interactionSize = preferredInteractionSize(for: displaySize)
+        let layoutMetrics = NotchLayoutMetrics.resolve(session: session, plugins: plugins)
+        let displaySize = layoutMetrics.displaySize
+        let interactionSize = layoutMetrics.interactionSize
 
         ZStack(alignment: .top) {
             Color.clear
@@ -54,9 +53,6 @@ public struct NotchContentView: View {
             }
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
-            .onHover { hovering in
-                session.setHover(hovering, fallbackPluginID: plugins.first?.id)
-            }
             .onTapGesture {
                 session.toggleOpen(defaultPluginID: plugins.first?.id)
             }
@@ -198,39 +194,5 @@ public struct NotchContentView: View {
                     session.close()
                 }
             }
-    }
-
-    private func preferredDisplaySize(plugins: [any NotchPlugin], context: NotchContext) -> CGSize {
-        switch session.notchState {
-        case .open:
-            return session.geometry.expandedSize
-        case .closed:
-            let compactWidth = max(
-                session.geometry.compactSize.width,
-                plugins.compactMap { $0.compactWidth(context: context) }.max() ?? 0
-            )
-            return CGSize(width: compactWidth, height: session.geometry.compactSize.height)
-        case .sneakPeek:
-            let compactWidth = max(
-                session.geometry.compactSize.width,
-                plugins.compactMap { $0.compactWidth(context: context) }.max() ?? 0
-            )
-            let sneakPeekWidth = max(
-                compactWidth,
-                plugins.compactMap { $0.sneakPeekWidth(context: context) }.max() ?? 0
-            )
-            return CGSize(width: sneakPeekWidth, height: max(session.geometry.compactSize.height + 86, 120))
-        }
-    }
-
-    private func preferredInteractionSize(for displaySize: CGSize) -> CGSize {
-        guard session.notchState != .open else {
-            return displaySize
-        }
-
-        return CGSize(
-            width: displaySize.width + (closedInteractionHorizontalPadding * 2),
-            height: displaySize.height + closedInteractionBottomPadding
-        )
     }
 }

@@ -91,6 +91,15 @@ public final class ScreenSessionModel: ObservableObject {
         return CGRect(origin: origin, size: size)
     }
 
+    public func interactionFrame(for interactionSize: CGSize) -> CGRect {
+        let currentWindowFrame = windowFrame
+        let origin = CGPoint(
+            x: currentWindowFrame.midX - (interactionSize.width / 2),
+            y: currentWindowFrame.maxY - interactionSize.height
+        )
+        return CGRect(origin: origin, size: interactionSize)
+    }
+
     public func updateScreen(_ descriptor: ScreenDescriptor) {
         self.descriptor = descriptor
         layoutDidChange?()
