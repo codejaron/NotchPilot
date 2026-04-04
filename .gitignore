@@ -1,0 +1,14 @@
+.DS_Store
+/.build
+/Packages
+.deriveddata/
+.tmp/
+.xcode-cache/
+.xcode-home/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.swiftpm/
+.netrc
+__pycache__/
+*.pyc
