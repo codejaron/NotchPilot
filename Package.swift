@@ -14,7 +14,10 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "NotchPilotKit"
+            name: "NotchPilotKit",
+            resources: [
+                .copy("Resources/notch-bridge.py"),
+            ]
         ),
         .testTarget(
             name: "NotchPilotKitTests",

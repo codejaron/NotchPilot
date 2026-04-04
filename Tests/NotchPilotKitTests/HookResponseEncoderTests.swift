@@ -2,24 +2,42 @@ import XCTest
 @testable import NotchPilotKit
 
 final class HookResponseEncoderTests: XCTestCase {
-    func testClaudePersistentApprovalAddsPersistFlag() throws {
+    func testClaudePermissionRequestAllowUsesHookSpecificDecisionPayload() throws {
         let data = try HookResponseEncoder().encode(
-            decision: .persistAllowRule,
-            for: .claude
+            decision: .allowOnce,
+            for: .claude,
+            eventType: .permissionRequest
         )
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
 
-        XCTAssertTrue(json.contains("\"decision\":\"allow\""))
-        XCTAssertTrue(json.contains("\"persist\":true"))
+        XCTAssertEqual(
+            json,
+            #"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#
+        )
     }
 
-    func testCodexDenyUsesActionKey() throws {
+    func testClaudePreToolUsePersistentApprovalUsesPermissionDecisionEnvelope() throws {
         let data = try HookResponseEncoder().encode(
-            decision: .denyOnce,
-            for: .codex
+            decision: .persistAllowRule,
+            for: .claude,
+            eventType: .preToolUse
         )
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
 
-        XCTAssertEqual(json, #"{"action":"deny"}"#)
+        XCTAssertEqual(
+            json,
+            #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Always allowed via NotchPilot"}}"#
+        )
+    }
+
+    func testCodexPreToolUseAllowFailsOpen() throws {
+        let data = try HookResponseEncoder().encode(
+            decision: .allowOnce,
+            for: .codex,
+            eventType: .preToolUse
+        )
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(json, "{}")
     }
 }

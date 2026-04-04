@@ -118,7 +118,11 @@ public final class AIAgentPlugin: NotchPlugin {
         }
 
         do {
-            let data = try encoder.encode(decision: effectiveDecision, for: approval.host)
+            let data = try encoder.encode(
+                decision: effectiveDecision,
+                for: approval.host,
+                eventType: approval.eventType
+            )
             responder(data)
         } catch {
             responder(Data("{}".utf8))
@@ -398,13 +402,28 @@ private struct AIExpandedView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("AI Control Tower")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-            Text("Claude and Codex bridge activity surfaces here.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.65))
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("AI Control Tower")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Claude and Codex bridge activity surfaces here.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.65))
+            }
+
+            Spacer()
+
+            Button {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            } label: {
+                Image(systemName: "gear")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(6)
+                    .background(Circle().fill(Color.white.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
         }
     }
 

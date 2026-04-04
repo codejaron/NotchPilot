@@ -1,0 +1,164 @@
+import XCTest
+@testable import NotchPilotKit
+
+final class HookInstallerTests: XCTestCase {
+    private var tempHomeURL: URL!
+
+    override func setUpWithError() throws {
+        tempHomeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHomeURL, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: tempHomeURL)
+        tempHomeURL = nil
+    }
+
+    func testInstallClaudeHooksPreservesExistingEntriesAndAddsManagedCommand() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        try Data(
+            """
+            {
+              "theme": "dark",
+              "hooks": {
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo keep"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installClaudeHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let json = try loadJSONObject(at: settingsURL)
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        let commands = stopEntries.flatMap(commandStrings(in:))
+        XCTAssertEqual(stopEntries.count, 2)
+        XCTAssertTrue(commands.contains { $0.contains("/tmp/notch-bridge.py") && $0.contains("--host claude") })
+    }
+
+    func testUninstallClaudeHooksRemovesOnlyManagedEntries() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        try Data(
+            """
+            {
+              "hooks": {
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo keep"
+                      }
+                    ]
+                  },
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.uninstallClaudeHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let json = try loadJSONObject(at: settingsURL)
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        XCTAssertEqual(stopEntries.count, 1)
+        XCTAssertTrue(serializedJSONString(json).contains("echo keep"))
+        XCTAssertFalse(serializedJSONString(json).contains("notch-bridge.py"))
+    }
+
+    func testInstallCodexHooksEnablesFeatureFlagAndMergesHooksFile() throws {
+        let codexDirectory = tempHomeURL.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+
+        let configURL = codexDirectory.appendingPathComponent("config.toml")
+        try "[features]\nverbose = true\n".write(to: configURL, atomically: true, encoding: .utf8)
+
+        let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
+        try Data(
+            """
+            {
+              "hooks": {
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo keep"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: hooksURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installCodexHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let config = try String(contentsOf: configURL)
+        XCTAssertTrue(config.contains("codex_hooks = true"))
+
+        let json = try loadJSONObject(at: hooksURL)
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        let commands = stopEntries.flatMap(commandStrings(in:))
+        XCTAssertEqual(stopEntries.count, 2)
+        XCTAssertTrue(commands.contains { $0.contains("/tmp/notch-bridge.py") && $0.contains("--host codex") })
+    }
+
+    func testInstallBridgeScriptCopiesFileIntoNotchPilotDirectory() throws {
+        let sourceURL = tempHomeURL.appendingPathComponent("notch-bridge.py")
+        try "#!/usr/bin/env python3\nprint('ok')\n".write(to: sourceURL, atomically: true, encoding: .utf8)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        let installedPath = try installer.installBridgeScript(fromBundle: sourceURL.path)
+
+        XCTAssertEqual(installedPath, tempHomeURL.appendingPathComponent(".notchpilot/notch-bridge.py").path)
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: installedPath))
+    }
+
+    private func loadJSONObject(at url: URL) throws -> [String: Any] {
+        let data = try Data(contentsOf: url)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func serializedJSONString(_ object: [String: Any]) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data ?? Data(), encoding: .utf8) ?? ""
+    }
+
+    private func commandStrings(in entry: [String: Any]) -> [String] {
+        let hooks = entry["hooks"] as? [[String: Any]] ?? []
+        return hooks.compactMap { $0["command"] as? String }
+    }
+}

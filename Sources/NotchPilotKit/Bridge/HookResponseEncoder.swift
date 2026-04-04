@@ -3,22 +3,28 @@ import Foundation
 public struct HookResponseEncoder {
     public init() {}
 
-    public func encode(decision: ApprovalDecision, for host: AIHost) throws -> Data {
+    public func encode(decision: ApprovalDecision, for host: AIHost, eventType: AIBridgeEventType) throws -> Data {
         let response: String
 
-        switch (host, decision) {
-        case (.claude, .allowOnce):
-            response = #"{"decision":"allow"}"#
-        case (.claude, .denyOnce):
-            response = #"{"decision":"deny"}"#
-        case (.claude, .persistAllowRule):
-            response = #"{"decision":"allow","persist":true}"#
-        case (.codex, .allowOnce):
-            response = #"{"action":"allow"}"#
-        case (.codex, .denyOnce):
-            response = #"{"action":"deny"}"#
-        case (.codex, .persistAllowRule):
-            response = #"{"action":"allow","persist":true}"#
+        switch (host, eventType, decision) {
+        case (.claude, .permissionRequest, .allowOnce):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#
+        case (.claude, .permissionRequest, .denyOnce):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}"#
+        case (.claude, .permissionRequest, .persistAllowRule):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","applyPermissionRule":true}}}"#
+        case (.claude, .preToolUse, .allowOnce):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved via NotchPilot"}}"#
+        case (.claude, .preToolUse, .denyOnce):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
+        case (.claude, .preToolUse, .persistAllowRule):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Always allowed via NotchPilot"}}"#
+        case (.codex, .preToolUse, .denyOnce):
+            response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
+        case (.codex, .preToolUse, _):
+            response = "{}"
+        default:
+            response = "{}"
         }
 
         return Data(response.utf8)

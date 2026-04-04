@@ -40,6 +40,7 @@ public struct PendingApproval: Equatable, Sendable, Identifiable {
     public let requestID: String
     public let sessionID: String
     public let host: AIHost
+    public let eventType: AIBridgeEventType
     public let payload: ApprovalPayload
     public let capabilities: AIBridgeCapabilities
     public var status: ApprovalStatus
@@ -49,6 +50,7 @@ public struct PendingApproval: Equatable, Sendable, Identifiable {
         requestID: String,
         sessionID: String,
         host: AIHost,
+        eventType: AIBridgeEventType,
         payload: ApprovalPayload,
         capabilities: AIBridgeCapabilities,
         status: ApprovalStatus,
@@ -57,6 +59,7 @@ public struct PendingApproval: Equatable, Sendable, Identifiable {
         self.requestID = requestID
         self.sessionID = sessionID
         self.host = host
+        self.eventType = eventType
         self.payload = payload
         self.capabilities = capabilities
         self.status = status
@@ -91,6 +94,7 @@ public final class AIAgentRuntime {
             requestID: envelope.requestID,
             sessionID: envelope.sessionID,
             host: envelope.host,
+            eventType: envelope.eventType,
             payload: payload,
             capabilities: envelope.capabilities,
             status: .pending

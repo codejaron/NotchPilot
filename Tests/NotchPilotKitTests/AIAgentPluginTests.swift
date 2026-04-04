@@ -106,7 +106,7 @@ final class AIAgentPluginTests: XCTestCase {
         }
     }
 
-    func testApprovingRequestReturnsHostSpecificResponse() async throws {
+    func testApprovingRequestReturnsEventSpecificResponse() async throws {
         let plugin = await MainActor.run { AIAgentPlugin() }
         let bus = await MainActor.run { EventBus() }
         let responseBox = ResponseBox()
@@ -119,7 +119,7 @@ final class AIAgentPluginTests: XCTestCase {
                     requestID: "req-3",
                     rawJSON: """
                     {
-                      "event": "approval_request",
+                      "event": "PreToolUse",
                       "sessionId": "session-3",
                       "tool": {
                         "name": "shell",
@@ -136,7 +136,10 @@ final class AIAgentPluginTests: XCTestCase {
             plugin.respond(to: "req-3", with: .denyOnce)
         }
 
-        XCTAssertEqual(String(data: try XCTUnwrap(responseBox.data), encoding: .utf8), #"{"action":"deny"}"#)
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(responseBox.data), encoding: .utf8),
+            #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
+        )
         let pendingCount = await MainActor.run { plugin.pendingApprovals.count }
         XCTAssertEqual(pendingCount, 0)
     }

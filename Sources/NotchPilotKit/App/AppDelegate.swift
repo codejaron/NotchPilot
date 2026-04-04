@@ -6,10 +6,13 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let bus = EventBus()
     private let pluginManager = PluginManager()
     private let aiPlugin = AIAgentPlugin()
+    private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
     private var statusItemController: StatusItemController?
     private var socketServer: UnixDomainSocketServer?
+    private var settingsObserver: NSObjectProtocol?
+    private var socketPreferenceObserver: NSObjectProtocol?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
 #if DEBUG
@@ -33,10 +36,75 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             closeHandler: { [weak self] in
                 self?.bus.emit(.closeRequested(target: .allScreens))
             },
+            settingsHandler: { [weak self] in
+                self?.settingsController.showSettings()
+            },
             quitHandler: {
                 NSApp.terminate(nil)
             }
         )
+
+        applySocketPreference()
+
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: .openSettings,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.settingsController.showSettings()
+            }
+        }
+
+        socketPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .bridgeSocketPreferenceChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.applySocketPreference()
+            }
+        }
+
+#if DEBUG
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+#endif
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        if let settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+        }
+        if let socketPreferenceObserver {
+            NotificationCenter.default.removeObserver(socketPreferenceObserver)
+        }
+        socketServer?.stop()
+        multiScreenManager?.stop()
+        pluginManager.deactivateAll()
+    }
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
+    }
+
+    private func applySocketPreference() {
+        if SettingsStore.shared.autoStartSocket {
+            startSocketServer()
+        } else {
+            stopSocketServer()
+        }
+    }
+
+    private func startSocketServer() {
+        guard socketServer == nil else {
+            return
+        }
 
         let server = UnixDomainSocketServer(socketPath: BridgeSocketConfiguration.default.socketPath)
         do {
@@ -56,25 +124,15 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSLog("NotchPilot failed to start the bridge socket: \(error.localizedDescription)")
         }
-
-#if DEBUG
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-#endif
     }
 
-    public func applicationWillTerminate(_ notification: Notification) {
+    private func stopSocketServer() {
         socketServer?.stop()
-        multiScreenManager?.stop()
-        pluginManager.deactivateAll()
+        socketServer = nil
     }
+}
 
-    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-#if DEBUG
-        true
-#else
-        false
-#endif
-    }
+public extension Notification.Name {
+    static let openSettings = Notification.Name("NotchPilot.openSettings")
+    static let bridgeSocketPreferenceChanged = Notification.Name("NotchPilot.bridgeSocketPreferenceChanged")
 }

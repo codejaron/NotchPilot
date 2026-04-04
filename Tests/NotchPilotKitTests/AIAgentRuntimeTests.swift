@@ -49,4 +49,28 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(expired?.status, .expired)
         XCTAssertTrue(runtime.pendingApprovals.isEmpty)
     }
+
+    func testPendingApprovalRetainsOriginalEventType() {
+        let runtime = AIAgentRuntime()
+        let envelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-4",
+            sessionID: "session-4",
+            eventType: .preToolUse,
+            capabilities: .none,
+            needsResponse: true,
+            payload: .permissionRequest(
+                ApprovalPayload(
+                    title: "Bash wants approval",
+                    toolName: "Bash",
+                    previewText: "ls -la"
+                )
+            )
+        )
+
+        let result = runtime.handle(envelope: envelope)
+
+        XCTAssertEqual(result, .awaitDecision(requestID: "req-4"))
+        XCTAssertEqual(runtime.pendingApprovals.first?.eventType, .preToolUse)
+    }
 }
