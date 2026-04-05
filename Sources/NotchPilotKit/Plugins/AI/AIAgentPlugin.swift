@@ -17,18 +17,46 @@ public final class AIAgentPlugin: NotchPlugin {
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
     private let encoder = HookResponseEncoder()
+    private let settingsStore: SettingsStore
+    private let codexMonitor: CodexDesktopMonitor
 
     private weak var bus: EventBus?
-    private var responders: [String: @Sendable (Data) -> Void] = [:]
+    private var responders: [String: ApprovalResponder] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
 
-    public init() {}
+    public init(
+        settingsStore: SettingsStore = .shared,
+        codexMonitor: CodexDesktopMonitor = CodexDesktopMonitor()
+    ) {
+        self.settingsStore = settingsStore
+        self.codexMonitor = codexMonitor
+    }
 
     public func activate(bus: EventBus) {
         self.bus = bus
+        codexMonitor.onReducerOutput = { [weak self] output in
+            Task { @MainActor [weak self] in
+                self?.handleCodexReducerOutput(output)
+            }
+        }
+        codexMonitor.onApprovalRequest = { [weak self] approval, responder in
+            Task { @MainActor [weak self] in
+                self?.handleCodexApprovalRequest(approval, responder: responder)
+            }
+        }
+        codexMonitor.onConnectionStateChanged = { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleCodexConnectionStateChange(state)
+            }
+        }
+        codexMonitor.start()
     }
 
     public func deactivate() {
+        codexMonitor.stop()
+        codexMonitor.onReducerOutput = nil
+        codexMonitor.onApprovalRequest = nil
+        codexMonitor.onConnectionStateChanged = nil
         responders.removeAll()
         sneakPeekIDs.removeAll()
         sessions = []
@@ -65,6 +93,11 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     public func handle(frame: BridgeFrame, respond: @escaping @Sendable (Data) -> Void) {
+        guard frame.host == .claude else {
+            respond(Data("{}".utf8))
+            return
+        }
+
         do {
             let envelope = try parser.parse(frame: frame)
             let result = runtime.handle(envelope: envelope)
@@ -74,16 +107,8 @@ public final class AIAgentPlugin: NotchPlugin {
             case let .respondNow(data):
                 respond(data)
             case let .awaitDecision(requestID):
-                responders[requestID] = respond
-                let request = SneakPeekRequest(
-                    pluginID: id,
-                    priority: 1000,
-                    target: .activeScreen,
-                    isInteractive: true,
-                    autoDismissAfter: nil
-                )
-                sneakPeekIDs[requestID] = request.id
-                bus?.emit(.sneakPeekRequested(request))
+                responders[requestID] = .claude(respond)
+                presentSneakPeek(for: requestID)
             }
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
@@ -103,6 +128,21 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     public func respond(to requestID: String, with decision: ApprovalDecision) {
+        guard let approval = pendingApprovals.first(where: { $0.requestID == requestID }) else {
+            return
+        }
+
+        let action = approval.availableActions.first(where: { $0.legacyClaudeDecision == decision })
+            ?? ApprovalAction(
+                id: "claude-fallback-\(decision)",
+                title: "",
+                style: .primary,
+                payload: .claude(decision)
+            )
+        respond(to: requestID, with: action)
+    }
+
+    public func respond(to requestID: String, with action: ApprovalAction) {
         guard
             let approval = pendingApprovals.first(where: { $0.requestID == requestID }),
             let responder = responders.removeValue(forKey: requestID)
@@ -110,27 +150,108 @@ public final class AIAgentPlugin: NotchPlugin {
             return
         }
 
-        let effectiveDecision: ApprovalDecision
-        if decision == .persistAllowRule && !approval.capabilities.supportsPersistentRules {
-            effectiveDecision = .allowOnce
-        } else {
-            effectiveDecision = decision
-        }
+        switch responder {
+        case let .claude(send):
+            guard case let .claude(decision) = action.payload else {
+                send(Data("{}".utf8))
+                return
+            }
 
-        do {
-            let data = try encoder.encode(
-                decision: effectiveDecision,
-                for: approval.host,
-                eventType: approval.eventType
-            )
-            responder(data)
-        } catch {
-            responder(Data("{}".utf8))
+            let effectiveDecision: ApprovalDecision
+            if decision == .persistAllowRule && !approval.capabilities.supportsPersistentRules {
+                effectiveDecision = .allowOnce
+            } else {
+                effectiveDecision = decision
+            }
+
+            do {
+                let data = try encoder.encode(
+                    decision: effectiveDecision,
+                    for: approval.host,
+                    eventType: approval.eventType ?? .permissionRequest
+                )
+                send(data)
+            } catch {
+                send(Data("{}".utf8))
+            }
+        case let .codex(send):
+            send(action)
         }
 
         _ = runtime.resolvePendingApproval(requestID: requestID)
         syncState()
         dismissSneakPeek(for: requestID)
+    }
+
+    private func handleCodexReducerOutput(_ output: CodexDesktopReducerOutput) {
+        let effects: [AIAgentRuntime.RuntimeEffect]
+
+        switch output {
+        case let .sessionUpsert(session):
+            effects = runtime.apply(event: .sessionUpsert(session))
+        case let .approvalRequested(approval):
+            effects = runtime.apply(event: .approvalRequested(approval))
+        case let .approvalResolved(requestID):
+            effects = runtime.apply(event: .approvalResolved(requestID: requestID))
+        }
+
+        syncState()
+        applyRuntimeEffects(effects)
+    }
+
+    private func handleCodexApprovalRequest(
+        _ approval: PendingApproval,
+        responder: @escaping CodexDesktopMonitor.ApprovalResponder
+    ) {
+        responders[approval.requestID] = .codex(responder)
+        let effects = runtime.apply(event: .approvalRequested(approval))
+        syncState()
+        applyRuntimeEffects(effects)
+    }
+
+    private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
+        settingsStore.updateCodexDesktopConnection(state)
+
+        guard state.status != .connected, state.status != .connecting else {
+            return
+        }
+
+        let effects = runtime.apply(event: .expireApprovals(host: .codex))
+        syncState()
+        applyRuntimeEffects(effects)
+    }
+
+    private func applyRuntimeEffects(_ effects: [AIAgentRuntime.RuntimeEffect]) {
+        for effect in effects {
+            switch effect {
+            case let .approvalRequested(requestID):
+                presentSneakPeek(for: requestID)
+            case let .approvalDismissed(requestID):
+                responders.removeValue(forKey: requestID)
+                dismissSneakPeek(for: requestID)
+            }
+        }
+    }
+
+    private func presentSneakPeek(for requestID: String) {
+        guard sneakPeekIDs[requestID] == nil else {
+            return
+        }
+
+        let request = SneakPeekRequest(
+            pluginID: id,
+            priority: 1000,
+            target: .activeScreen,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+        sneakPeekIDs[requestID] = request.id
+        bus?.emit(.sneakPeekRequested(request))
+    }
+
+    private enum ApprovalResponder {
+        case claude(@Sendable (Data) -> Void)
+        case codex(CodexDesktopMonitor.ApprovalResponder)
     }
 
     private func syncState() {
@@ -248,8 +369,13 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     func expandedSessionSubtitle(for session: AISession, approval: PendingApproval?) -> String {
-        if let approval, approval.payload.toolName.isEmpty == false {
-            return approval.payload.toolName
+        if let approval {
+            if approval.approvalKind == .networkAccess {
+                return "Network Access"
+            }
+            if approval.payload.toolName.isEmpty == false {
+                return approval.payload.toolName
+            }
         }
 
         return session.activityLabel
@@ -343,6 +469,12 @@ struct AIApprovalReviewState: Equatable {
             isReviewingApprovals = false
         }
     }
+}
+
+private struct ApprovalMetadataRow: Equatable {
+    let label: String
+    let value: String
+    let monospaced: Bool
 }
 
 enum ApprovalDiffLineKind: Equatable {
@@ -785,7 +917,7 @@ private struct AIExpandedView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
-                    Text("Permission Request")
+                    Text(approvalHeading(for: approval))
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(.orange)
                 }
@@ -879,7 +1011,7 @@ private struct AIExpandedView: View {
                     .fill(hostColor(for: approval.host))
                     .frame(width: 8, height: 8)
 
-                Text("Permission Request")
+                Text(approvalHeading(for: approval))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
             }
@@ -904,8 +1036,12 @@ private struct AIExpandedView: View {
                 Spacer()
             }
 
+            approvalMetadata(approval)
+
             if let command = approval.payload.command {
                 commandPreview(command, icon: "terminal")
+            } else if let networkApprovalContext = approval.networkApprovalContext {
+                commandPreview(networkApprovalSummary(networkApprovalContext), icon: "network")
             } else if approval.payload.previewText.isEmpty == false {
                 commandPreview(
                     approval.payload.previewText,
@@ -928,6 +1064,35 @@ private struct AIExpandedView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func approvalMetadata(_ approval: PendingApproval) -> some View {
+        let rows = approvalMetadataRows(for: approval)
+        if rows.isEmpty == false {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(row.label)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.42))
+                            .frame(width: 62, alignment: .leading)
+
+                        Text(row.value)
+                            .font(.system(size: 11, weight: .medium, design: row.monospaced ? .monospaced : .rounded))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(3)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+        }
     }
 
     private func commandPreview(_ text: String, icon: String) -> some View {
@@ -1003,73 +1168,119 @@ private struct AIExpandedView: View {
     }
 
     private func approvalButtons(_ approval: PendingApproval) -> some View {
-        HStack(spacing: 10) {
-            approvalActionButton(
-                title: "Deny",
-                shortcutHint: "⌘N",
-                titleColor: .white,
-                shortcutColor: .white.opacity(0.4),
-                backgroundFill: Color.white.opacity(0.12)
-            ) {
-                plugin.respond(to: approval.requestID, with: .denyOnce)
-            }
+        let columns = [
+            GridItem(.flexible(minimum: 120), spacing: 10),
+            GridItem(.flexible(minimum: 120), spacing: 10),
+        ]
 
-            if approval.host == .claude {
-                approvalActionButton(
-                    title: "Allow",
-                    shortcutHint: "⌘Y",
-                    titleColor: .black,
-                    shortcutColor: .black.opacity(0.4),
-                    backgroundFill: Color.white.opacity(0.92)
-                ) {
-                    plugin.respond(to: approval.requestID, with: .allowOnce)
-                }
-
-                if approval.capabilities.supportsPersistentRules {
-                    Button {
-                        plugin.respond(to: approval.requestID, with: .persistAllowRule)
-                    } label: {
-                        Text("Always Allow")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            ForEach(approval.availableActions) { action in
+                approvalActionButton(action) {
+                    plugin.respond(to: approval.requestID, with: action)
                 }
             }
         }
     }
 
-    private func approvalActionButton(
-        title: String,
-        shortcutHint: String,
-        titleColor: Color,
-        shortcutColor: Color,
-        backgroundFill: Color,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func approvalActionButton(_ actionModel: ApprovalAction, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                Text(shortcutHint)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(shortcutColor)
-            }
-            .foregroundStyle(titleColor)
+            Text(actionModel.title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(foregroundColor(for: actionModel.style))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(backgroundFill)
+                    .fill(backgroundFill(for: actionModel.style))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(borderColor(for: actionModel.style), lineWidth: borderLineWidth(for: actionModel.style))
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func approvalHeading(for approval: PendingApproval) -> String {
+        switch approval.approvalKind {
+        case .toolRequest:
+            return "Tool Approval"
+        case .commandExecution:
+            return "Command Approval"
+        case .fileChange:
+            return "File Change Approval"
+        case .networkAccess:
+            return "Network Approval"
+        }
+    }
+
+    private func approvalMetadataRows(for approval: PendingApproval) -> [ApprovalMetadataRow] {
+        var rows: [ApprovalMetadataRow] = []
+
+        if let reason = approval.reason, reason.isEmpty == false {
+            rows.append(ApprovalMetadataRow(label: "Reason", value: reason, monospaced: false))
+        }
+        if let cwd = approval.cwd, cwd.isEmpty == false {
+            rows.append(ApprovalMetadataRow(label: "CWD", value: cwd, monospaced: true))
+        }
+        if let grantRoot = approval.grantRoot, grantRoot.isEmpty == false {
+            rows.append(ApprovalMetadataRow(label: "Root", value: grantRoot, monospaced: true))
+        }
+        if let threadID = approval.threadID, threadID.isEmpty == false {
+            rows.append(ApprovalMetadataRow(label: "Thread", value: threadID, monospaced: true))
+        }
+
+        return rows
+    }
+
+    private func networkApprovalSummary(_ context: NetworkApprovalContext) -> String {
+        let portSuffix = context.port.map { ":\($0)" } ?? ""
+        return "\(context.protocolName.uppercased()) \(context.host)\(portSuffix)"
+    }
+
+    private func foregroundColor(for style: ApprovalActionStyle) -> Color {
+        switch style {
+        case .primary:
+            return .black
+        case .secondary:
+            return .white
+        case .destructive:
+            return .white
+        case .outline:
+            return .white.opacity(0.82)
+        }
+    }
+
+    private func backgroundFill(for style: ApprovalActionStyle) -> Color {
+        switch style {
+        case .primary:
+            return Color.white.opacity(0.92)
+        case .secondary:
+            return Color.blue.opacity(0.28)
+        case .destructive:
+            return Color.red.opacity(0.28)
+        case .outline:
+            return Color.white.opacity(0.08)
+        }
+    }
+
+    private func borderColor(for style: ApprovalActionStyle) -> Color {
+        switch style {
+        case .primary:
+            return .clear
+        case .secondary:
+            return Color.blue.opacity(0.32)
+        case .destructive:
+            return Color.red.opacity(0.32)
+        case .outline:
+            return Color.white.opacity(0.16)
+        }
+    }
+
+    private func borderLineWidth(for style: ApprovalActionStyle) -> CGFloat {
+        style == .primary ? 0 : 1
     }
 
     private func diffForegroundColor(for kind: ApprovalDiffLineKind) -> Color {

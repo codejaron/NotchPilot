@@ -94,47 +94,6 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertFalse(serializedJSONString(json).contains("notch-bridge.py"))
     }
 
-    func testInstallCodexHooksEnablesFeatureFlagAndMergesHooksFile() throws {
-        let codexDirectory = tempHomeURL.appendingPathComponent(".codex", isDirectory: true)
-        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
-
-        let configURL = codexDirectory.appendingPathComponent("config.toml")
-        try "[features]\nverbose = true\n".write(to: configURL, atomically: true, encoding: .utf8)
-
-        let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
-        try Data(
-            """
-            {
-              "hooks": {
-                "Stop": [
-                  {
-                    "hooks": [
-                      {
-                        "type": "command",
-                        "command": "echo keep"
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-            """.utf8
-        ).write(to: hooksURL)
-
-        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
-        try installer.installCodexHooks(bridgeScript: "/tmp/notch-bridge.py")
-
-        let config = try String(contentsOf: configURL)
-        XCTAssertTrue(config.contains("codex_hooks = true"))
-
-        let json = try loadJSONObject(at: hooksURL)
-        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
-        let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
-        let commands = stopEntries.flatMap(commandStrings(in:))
-        XCTAssertEqual(stopEntries.count, 2)
-        XCTAssertTrue(commands.contains { $0.contains("/tmp/notch-bridge.py") && $0.contains("--host codex") })
-    }
-
     func testInstallBridgeScriptCopiesFileIntoNotchPilotDirectory() throws {
         let sourceURL = tempHomeURL.appendingPathComponent("notch-bridge.py")
         try "#!/usr/bin/env python3\nprint('ok')\n".write(to: sourceURL, atomically: true, encoding: .utf8)
@@ -188,17 +147,6 @@ final class HookInstallerTests: XCTestCase {
 
         XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: "/tmp/notch-bridge.py"))
         XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
-    }
-
-    func testCodexHooksNeedUpdateReturnsFalseAfterFreshInstall() throws {
-        let codexDirectory = tempHomeURL.appendingPathComponent(".codex", isDirectory: true)
-        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
-        try "".write(to: codexDirectory.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-
-        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
-        try installer.installCodexHooks(bridgeScript: "/tmp/notch-bridge.py")
-
-        XCTAssertFalse(installer.codexHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
     }
 
     private func loadJSONObject(at url: URL) throws -> [String: Any] {

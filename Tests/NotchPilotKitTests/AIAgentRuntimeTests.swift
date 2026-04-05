@@ -2,6 +2,34 @@ import XCTest
 @testable import NotchPilotKit
 
 final class AIAgentRuntimeTests: XCTestCase {
+    func testRealtimeApprovalResolutionRemovesPendingApproval() {
+        let runtime = AIAgentRuntime()
+        let approval = PendingApproval(
+            requestID: "req-live",
+            sessionID: "thr-live",
+            host: .codex,
+            approvalKind: .commandExecution,
+            eventType: nil,
+            payload: ApprovalPayload(
+                title: "Command wants approval",
+                toolName: "Command",
+                previewText: "npm test",
+                command: "npm test"
+            ),
+            capabilities: .none,
+            availableActions: ApprovalAction.codexDefaultActions(for: .commandExecution),
+            status: .pending
+        )
+
+        _ = runtime.apply(event: .approvalRequested(approval))
+        XCTAssertEqual(runtime.pendingApprovals.map(\.requestID), ["req-live"])
+
+        let effects = runtime.apply(event: .approvalResolved(requestID: "req-live"))
+
+        XCTAssertEqual(effects, [.approvalDismissed(requestID: "req-live")])
+        XCTAssertTrue(runtime.pendingApprovals.isEmpty)
+    }
+
     func testNotificationEventsReturnImmediateEmptyResponse() {
         let runtime = AIAgentRuntime()
         let envelope = AIBridgeEnvelope(

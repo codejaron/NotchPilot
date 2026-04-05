@@ -56,7 +56,7 @@ public struct HookEventParser {
         ]) ?? "unknown"
 
         switch rawType.lowercased() {
-        case "permissionrequest", "approval_request":
+        case "permissionrequest":
             return .permissionRequest
         case "pretooluse":
             return .preToolUse
@@ -66,7 +66,7 @@ public struct HookEventParser {
             return .sessionStart
         case "stop", "sessionstop", "session_stop":
             return .stop
-        case "userpromptsubmit", "user_prompt_submit":
+        case "userpromptsubmit":
             return .userPromptSubmit
         default:
             return .unknown(rawType)

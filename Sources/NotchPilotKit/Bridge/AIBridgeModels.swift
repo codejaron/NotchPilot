@@ -5,6 +5,32 @@ public enum AIHost: String, Codable, Equatable, Sendable {
     case codex
 }
 
+public enum ApprovalKind: Equatable, Sendable {
+    case toolRequest
+    case commandExecution
+    case fileChange
+    case networkAccess
+}
+
+public enum ApprovalActionStyle: Equatable, Sendable {
+    case primary
+    case secondary
+    case destructive
+    case outline
+}
+
+public struct NetworkApprovalContext: Equatable, Sendable {
+    public let host: String
+    public let protocolName: String
+    public let port: Int?
+
+    public init(host: String, protocolName: String, port: Int? = nil) {
+        self.host = host
+        self.protocolName = protocolName
+        self.port = port
+    }
+}
+
 public struct BridgeFrame: Codable, Equatable, Sendable {
     public let host: AIHost
     public let requestID: String
@@ -107,4 +133,230 @@ public enum ApprovalDecision: Equatable, Sendable {
     case allowOnce
     case denyOnce
     case persistAllowRule
+}
+
+public enum ApprovalActionPayload: Equatable, Sendable {
+    case claude(ApprovalDecision)
+    case codex(JSONValue)
+}
+
+public struct ApprovalAction: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let style: ApprovalActionStyle
+    public let payload: ApprovalActionPayload
+
+    public init(id: String, title: String, style: ApprovalActionStyle, payload: ApprovalActionPayload) {
+        self.id = id
+        self.title = title
+        self.style = style
+        self.payload = payload
+    }
+
+    public var legacyClaudeDecision: ApprovalDecision? {
+        guard case let .claude(decision) = payload else {
+            return nil
+        }
+        return decision
+    }
+
+    public static func claudeActions(
+        eventType: AIBridgeEventType,
+        supportsPersistentRules: Bool
+    ) -> [ApprovalAction] {
+        switch eventType {
+        case .permissionRequest:
+            var actions: [ApprovalAction] = [
+                ApprovalAction(
+                    id: "claude-deny",
+                    title: "Deny",
+                    style: .destructive,
+                    payload: .claude(.denyOnce)
+                ),
+                ApprovalAction(
+                    id: "claude-allow",
+                    title: "Allow",
+                    style: .primary,
+                    payload: .claude(.allowOnce)
+                ),
+            ]
+            if supportsPersistentRules {
+                actions.append(
+                    ApprovalAction(
+                        id: "claude-always-allow",
+                        title: "Always Allow",
+                        style: .outline,
+                        payload: .claude(.persistAllowRule)
+                    )
+                )
+            }
+            return actions
+        case .preToolUse:
+            var actions: [ApprovalAction] = [
+                ApprovalAction(
+                    id: "claude-deny",
+                    title: "Deny",
+                    style: .destructive,
+                    payload: .claude(.denyOnce)
+                ),
+                ApprovalAction(
+                    id: "claude-allow",
+                    title: "Allow",
+                    style: .primary,
+                    payload: .claude(.allowOnce)
+                ),
+            ]
+            if supportsPersistentRules {
+                actions.append(
+                    ApprovalAction(
+                        id: "claude-always-allow",
+                        title: "Always Allow",
+                        style: .outline,
+                        payload: .claude(.persistAllowRule)
+                    )
+                )
+            }
+            return actions
+        default:
+            return []
+        }
+    }
+
+    public static func codexDefaultActions(for kind: ApprovalKind) -> [ApprovalAction] {
+        let actions: [ApprovalAction] = [
+            ApprovalAction(
+                id: "codex-accept",
+                title: "Allow",
+                style: .primary,
+                payload: .codex(.string("accept"))
+            ),
+            ApprovalAction(
+                id: "codex-accept-session",
+                title: "Allow for Session",
+                style: .secondary,
+                payload: .codex(.string("acceptForSession"))
+            ),
+            ApprovalAction(
+                id: "codex-decline",
+                title: "Decline",
+                style: .destructive,
+                payload: .codex(.string("decline"))
+            ),
+            ApprovalAction(
+                id: "codex-cancel",
+                title: "Cancel",
+                style: .outline,
+                payload: .codex(.string("cancel"))
+            ),
+        ]
+
+        if kind == .commandExecution || kind == .networkAccess {
+            return actions
+        }
+
+        return actions
+    }
+
+    public static func codexActions(
+        for kind: ApprovalKind,
+        availableDecisions: [JSONValue]?,
+        proposedExecpolicyAmendment: JSONValue?
+    ) -> [ApprovalAction] {
+        let fallback = codexDefaultActions(for: kind)
+        guard let availableDecisions, availableDecisions.isEmpty == false else {
+            return fallback
+        }
+
+        let actions = availableDecisions.compactMap { decision -> ApprovalAction? in
+            switch decision {
+            case let .string(value):
+                switch value {
+                case "accept":
+                    return ApprovalAction(
+                        id: "codex-accept",
+                        title: "Allow",
+                        style: .primary,
+                        payload: .codex(.string("accept"))
+                    )
+                case "acceptForSession":
+                    return ApprovalAction(
+                        id: "codex-accept-session",
+                        title: "Allow for Session",
+                        style: .secondary,
+                        payload: .codex(.string("acceptForSession"))
+                    )
+                case "decline":
+                    return ApprovalAction(
+                        id: "codex-decline",
+                        title: "Decline",
+                        style: .destructive,
+                        payload: .codex(.string("decline"))
+                    )
+                case "cancel":
+                    return ApprovalAction(
+                        id: "codex-cancel",
+                        title: "Cancel",
+                        style: .outline,
+                        payload: .codex(.string("cancel"))
+                    )
+                default:
+                    return nil
+                }
+            case let .object(object):
+                if let amendment = object["acceptWithExecpolicyAmendment"] {
+                    return ApprovalAction(
+                        id: "codex-execpolicy-amendment",
+                        title: "Allow & Save Rule",
+                        style: .outline,
+                        payload: .codex(
+                            .object([
+                                "acceptWithExecpolicyAmendment": amendment,
+                            ])
+                        )
+                    )
+                }
+                if let amendment = object["applyNetworkPolicyAmendment"] {
+                    return ApprovalAction(
+                        id: "codex-network-policy-amendment",
+                        title: "Allow & Save Network Rule",
+                        style: .outline,
+                        payload: .codex(
+                            .object([
+                                "applyNetworkPolicyAmendment": amendment,
+                            ])
+                        )
+                    )
+                }
+                return nil
+            default:
+                return nil
+            }
+        }
+
+        if actions.isEmpty == false {
+            return actions
+        }
+
+        if let proposedExecpolicyAmendment,
+           kind == .commandExecution || kind == .networkAccess
+        {
+            var fallbackWithAmendment = fallback
+            fallbackWithAmendment.insert(
+                ApprovalAction(
+                    id: "codex-execpolicy-amendment",
+                    title: "Allow & Save Rule",
+                    style: .outline,
+                    payload: .codex(
+                        .object([
+                            "acceptWithExecpolicyAmendment": proposedExecpolicyAmendment,
+                        ])
+                    )
+                ),
+                at: 1
+            )
+            return fallbackWithAmendment
+        }
+
+        return fallback
+    }
 }

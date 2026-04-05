@@ -1,7 +1,6 @@
 import XCTest
 @testable import NotchPilotKit
 
-@MainActor
 final class SettingsStoreTests: XCTestCase {
     private var tempHomeURL: URL!
     private var defaults: UserDefaults!
@@ -25,6 +24,7 @@ final class SettingsStoreTests: XCTestCase {
         suiteName = nil
     }
 
+    @MainActor
     func testSynchronizeInstallationStateSetsNeedUpdateFlags() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
@@ -52,13 +52,33 @@ final class SettingsStoreTests: XCTestCase {
             fileManager: .default,
             homeDirectoryURL: tempHomeURL
         )
-        store.bridgeScriptPath = "/tmp/notch-bridge.py"
 
+        store.bridgeScriptPath = "/tmp/notch-bridge.py"
         store.synchronizeInstallationState()
 
         XCTAssertTrue(store.claudeHookInstalled)
         XCTAssertTrue(store.claudeHooksNeedUpdate)
-        XCTAssertFalse(store.codexHookInstalled)
-        XCTAssertFalse(store.codexHooksNeedUpdate)
+        XCTAssertEqual(
+            store.codexDesktopConnection.status,
+            store.codexDetected ? .disconnected : .notFound
+        )
+    }
+
+    @MainActor
+    func testCodexDetectedUsesDesktopBundleOrCodexHomeDirectory() throws {
+        let applicationsDirectory = tempHomeURL.appendingPathComponent("Applications", isDirectory: true)
+        try FileManager.default.createDirectory(at: applicationsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: applicationsDirectory.appendingPathComponent("Codex.app", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.codexDetected)
     }
 }

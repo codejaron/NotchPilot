@@ -29,29 +29,4 @@ final class HookResponseEncoderTests: XCTestCase {
             #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Always allowed via NotchPilot"}}"#
         )
     }
-
-    func testCodexPreToolUseAllowFailsOpen() throws {
-        let data = try HookResponseEncoder().encode(
-            decision: .allowOnce,
-            for: .codex,
-            eventType: .preToolUse
-        )
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-
-        XCTAssertEqual(json, "{}")
-    }
-
-    func testCodexPreToolUseDenyUsesSchemaValidHookSpecificOutput() throws {
-        let data = try HookResponseEncoder().encode(
-            decision: .denyOnce,
-            for: .codex,
-            eventType: .preToolUse
-        )
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-
-        XCTAssertEqual(
-            json,
-            #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
-        )
-    }
 }

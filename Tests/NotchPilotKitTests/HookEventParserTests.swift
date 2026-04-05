@@ -34,30 +34,6 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(payload.previewText, "rm -rf /tmp/demo")
     }
 
-    func testCodexPermissionRequestWithoutPersistentRulesStaysNonPersistent() throws {
-        let frame = BridgeFrame(
-            host: .codex,
-            requestID: "req-2",
-            rawJSON: """
-            {
-              "event": "approval_request",
-              "sessionId": "codex-session",
-              "tool": {
-                "name": "shell",
-                "input": { "command": "ls -la" }
-              },
-              "capabilities": { "supportsPersistentRules": false }
-            }
-            """
-        )
-
-        let envelope = try HookEventParser().parse(frame: frame)
-
-        XCTAssertEqual(envelope.eventType, .permissionRequest)
-        XCTAssertTrue(envelope.needsResponse)
-        XCTAssertFalse(envelope.capabilities.supportsPersistentRules)
-    }
-
     func testNotificationEventReturnsNeedsResponseFalse() throws {
         let frame = BridgeFrame(
             host: .claude,
@@ -78,35 +54,10 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertFalse(envelope.needsResponse)
     }
 
-    func testUserPromptSubmitNormalizesPromptIntoGenericPayload() throws {
-        let frame = BridgeFrame(
-            host: .codex,
-            requestID: "req-4",
-            rawJSON: """
-            {
-              "event": "user_prompt_submit",
-              "sessionId": "codex-session",
-              "user_prompt": "Build a backend server with express"
-            }
-            """
-        )
-
-        let envelope = try HookEventParser().parse(frame: frame)
-
-        XCTAssertEqual(envelope.eventType, .userPromptSubmit)
-        XCTAssertFalse(envelope.needsResponse)
-
-        guard case let .generic(values) = envelope.payload else {
-            return XCTFail("expected generic payload")
-        }
-
-        XCTAssertEqual(values["prompt"], "Build a backend server with express")
-    }
-
     func testPermissionPayloadExtractsCommandFileAndDiffPreview() throws {
         let frame = BridgeFrame(
             host: .claude,
-            requestID: "req-5",
+            requestID: "req-3",
             rawJSON: """
             {
               "hook_event_name": "PermissionRequest",
@@ -141,7 +92,7 @@ final class HookEventParserTests: XCTestCase {
 
         let frame = BridgeFrame(
             host: .claude,
-            requestID: "req-6",
+            requestID: "req-4",
             rawJSON: """
             {
               "hook_event_name": "PermissionRequest",

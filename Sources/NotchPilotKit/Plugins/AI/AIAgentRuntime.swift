@@ -43,9 +43,18 @@ public struct PendingApproval: Equatable, Sendable, Identifiable {
     public let requestID: String
     public let sessionID: String
     public let host: AIHost
-    public let eventType: AIBridgeEventType
+    public let approvalKind: ApprovalKind
+    public let eventType: AIBridgeEventType?
     public let payload: ApprovalPayload
     public let capabilities: AIBridgeCapabilities
+    public let availableActions: [ApprovalAction]
+    public let threadID: String?
+    public let turnID: String?
+    public let itemID: String?
+    public let reason: String?
+    public let cwd: String?
+    public let grantRoot: String?
+    public let networkApprovalContext: NetworkApprovalContext?
     public var status: ApprovalStatus
     public let createdAt: Date
 
@@ -53,27 +62,57 @@ public struct PendingApproval: Equatable, Sendable, Identifiable {
         requestID: String,
         sessionID: String,
         host: AIHost,
-        eventType: AIBridgeEventType,
+        approvalKind: ApprovalKind,
+        eventType: AIBridgeEventType? = nil,
         payload: ApprovalPayload,
         capabilities: AIBridgeCapabilities,
+        availableActions: [ApprovalAction],
+        threadID: String? = nil,
+        turnID: String? = nil,
+        itemID: String? = nil,
+        reason: String? = nil,
+        cwd: String? = nil,
+        grantRoot: String? = nil,
+        networkApprovalContext: NetworkApprovalContext? = nil,
         status: ApprovalStatus,
         createdAt: Date = Date()
     ) {
         self.requestID = requestID
         self.sessionID = sessionID
         self.host = host
+        self.approvalKind = approvalKind
         self.eventType = eventType
         self.payload = payload
         self.capabilities = capabilities
+        self.availableActions = availableActions
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.reason = reason
+        self.cwd = cwd
+        self.grantRoot = grantRoot
+        self.networkApprovalContext = networkApprovalContext
         self.status = status
         self.createdAt = createdAt
     }
+}
+
+public enum AIRealtimeEvent: Equatable {
+    case sessionUpsert(AISession)
+    case approvalRequested(PendingApproval)
+    case approvalResolved(requestID: String)
+    case expireApprovals(host: AIHost)
 }
 
 public final class AIAgentRuntime {
     public enum HandleResult: Equatable {
         case respondNow(Data)
         case awaitDecision(requestID: String)
+    }
+
+    public enum RuntimeEffect: Equatable {
+        case approvalRequested(requestID: String)
+        case approvalDismissed(requestID: String)
     }
 
     public private(set) var sessions: [AISession] = []
@@ -97,17 +136,44 @@ public final class AIAgentRuntime {
             requestID: envelope.requestID,
             sessionID: envelope.sessionID,
             host: envelope.host,
+            approvalKind: .toolRequest,
             eventType: envelope.eventType,
             payload: payload,
             capabilities: envelope.capabilities,
+            availableActions: ApprovalAction.claudeActions(
+                eventType: envelope.eventType,
+                supportsPersistentRules: envelope.capabilities.supportsPersistentRules
+            ),
             status: .pending
         )
 
-        pendingApprovals.removeAll(where: { $0.requestID == envelope.requestID })
-        pendingApprovals.append(approval)
-        pendingApprovals.sort { $0.createdAt < $1.createdAt }
-
+        _ = apply(event: .approvalRequested(approval))
         return .awaitDecision(requestID: envelope.requestID)
+    }
+
+    @discardableResult
+    public func apply(event: AIRealtimeEvent) -> [RuntimeEffect] {
+        switch event {
+        case let .sessionUpsert(session):
+            upsertSession(session)
+            return []
+        case let .approvalRequested(approval):
+            pendingApprovals.removeAll(where: { $0.requestID == approval.requestID })
+            pendingApprovals.append(approval)
+            pendingApprovals.sort { $0.createdAt < $1.createdAt }
+            return [.approvalRequested(requestID: approval.requestID)]
+        case let .approvalResolved(requestID):
+            guard resolvePendingApproval(requestID: requestID) != nil else {
+                return []
+            }
+            return [.approvalDismissed(requestID: requestID)]
+        case let .expireApprovals(host):
+            let requestIDs = pendingApprovals
+                .filter { $0.host == host }
+                .map(\.requestID)
+            pendingApprovals.removeAll(where: { $0.host == host })
+            return requestIDs.map { .approvalDismissed(requestID: $0) }
+        }
     }
 
     @discardableResult
@@ -120,28 +186,37 @@ public final class AIAgentRuntime {
         mutatePendingApproval(requestID: requestID, newStatus: .expired)
     }
 
-    private func refreshSession(id: String, host: AIHost, eventType: AIBridgeEventType, payload: AIBridgePayload) {
-        let activity = SessionActivity(eventType: eventType, payload: payload)
-        let sessionTitle = extractSessionTitle(from: payload, eventType: eventType)
-
-        if let index = sessions.firstIndex(where: { $0.id == id }) {
-            sessions[index].lastEventType = eventType
-            sessions[index].activityLabel = activity.label
-            if let inputTokenCount = activity.inputTokenCount {
-                sessions[index].inputTokenCount = inputTokenCount
+    private func upsertSession(_ session: AISession) {
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            var merged = sessions[index]
+            merged.lastEventType = session.lastEventType
+            merged.activityLabel = session.activityLabel
+            if let inputTokenCount = session.inputTokenCount {
+                merged.inputTokenCount = inputTokenCount
             }
-            if let outputTokenCount = activity.outputTokenCount {
-                sessions[index].outputTokenCount = outputTokenCount
+            if let outputTokenCount = session.outputTokenCount {
+                merged.outputTokenCount = outputTokenCount
             }
-            if sessions[index].sessionTitle == nil, let sessionTitle {
-                sessions[index].sessionTitle = sessionTitle
+            if let sessionTitle = session.sessionTitle, sessionTitle.isEmpty == false {
+                if merged.sessionTitle?.isEmpty != false {
+                    merged.sessionTitle = sessionTitle
+                }
             }
-            sessions[index].updatedAt = Date()
+            merged.updatedAt = Date()
+            sessions[index] = merged
             sessions.sort { $0.updatedAt > $1.updatedAt }
             return
         }
 
-        sessions.append(
+        sessions.append(session)
+        sessions.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func refreshSession(id: String, host: AIHost, eventType: AIBridgeEventType, payload: AIBridgePayload) {
+        let activity = SessionActivity(eventType: eventType, payload: payload)
+        let sessionTitle = extractSessionTitle(from: payload, eventType: eventType)
+
+        upsertSession(
             AISession(
                 id: id,
                 host: host,
@@ -152,7 +227,6 @@ public final class AIAgentRuntime {
                 sessionTitle: sessionTitle
             )
         )
-        sessions.sort { $0.updatedAt > $1.updatedAt }
     }
 
     private func extractSessionTitle(from payload: AIBridgePayload, eventType: AIBridgeEventType) -> String? {
@@ -258,7 +332,13 @@ private struct SessionActivity {
                 return "\(toolName) Done"
             case .permissionRequest:
                 return "Waiting Approval"
-            default:
+            case .userPromptSubmit:
+                return "Prompt Sent"
+            case .sessionStart:
+                return "Connected"
+            case .stop:
+                return "Stopped"
+            case .unknown:
                 break
             }
         }
@@ -269,43 +349,42 @@ private struct SessionActivity {
         case .preToolUse:
             return "Running"
         case .postToolUse:
-            return "Complete"
+            return "Done"
         case .sessionStart:
             return "Connected"
         case .stop:
             return "Stopped"
         case .userPromptSubmit:
-            return "Processing"
-        case let .unknown(value):
-            return humanize(value)
+            return "Prompt Sent"
+        case .unknown:
+            return "Active"
         }
-    }
-
-    private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {
-        keys.first { key in
-            guard let value = values[key] else { return false }
-            return value.isEmpty == false
-        }
-        .flatMap { values[$0] }
     }
 
     private static func resolveCount(in values: [String: String], keys: [String]) -> Int? {
         for key in keys {
-            guard let rawValue = values[key] else { continue }
-            let digits = rawValue.filter(\.isNumber)
-            if let value = Int(digits.isEmpty ? rawValue : digits) {
+            if let raw = values[key], let count = Int(raw) {
+                return count
+            }
+        }
+        return nil
+    }
+
+    private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {
+        for key in keys {
+            if let value = values[key]?.trimmingCharacters(in: .whitespacesAndNewlines), value.isEmpty == false {
                 return value
             }
         }
         return nil
     }
 
-    private static func humanize(_ value: String) -> String {
-        value
+    private static func humanize(_ raw: String) -> String {
+        raw
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
             .split(separator: " ")
-            .map { $0.capitalized }
+            .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
             .joined(separator: " ")
     }
 }

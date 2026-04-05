@@ -117,17 +117,14 @@ final class AIAgentPluginTests: XCTestCase {
             plugin.activate(bus: bus)
             plugin.handle(
                 frame: BridgeFrame(
-                    host: .codex,
+                    host: .claude,
                     requestID: "req-3",
                     rawJSON: """
                     {
-                      "event": "PreToolUse",
-                      "sessionId": "session-3",
-                      "tool": {
-                        "name": "shell",
-                        "input": { "command": "ls -la" }
-                      },
-                      "capabilities": { "supportsPersistentRules": false }
+                      "hook_event_name": "PreToolUse",
+                      "session_id": "session-3",
+                      "tool_name": "Bash",
+                      "tool_input": { "command": "ls -la" }
                     }
                     """
                 ),
@@ -144,6 +141,35 @@ final class AIAgentPluginTests: XCTestCase {
         )
         let pendingCount = await MainActor.run { plugin.pendingApprovals.count }
         XCTAssertEqual(pendingCount, 0)
+    }
+
+    func testCodexHookFramesAreIgnored() async {
+        let plugin = await MainActor.run { AIAgentPlugin() }
+        let bus = await MainActor.run { EventBus() }
+        let responseBox = ResponseBox()
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .codex,
+                    requestID: "stale-codex-hook",
+                    rawJSON: """
+                    {
+                      "event": "stale_codex_hook",
+                      "sessionId": "codex-session"
+                    }
+                    """
+                ),
+                respond: { data in
+                    responseBox.data = data
+                }
+            )
+        }
+
+        let pendingCount = await MainActor.run { plugin.pendingApprovals.count }
+        XCTAssertEqual(pendingCount, 0)
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
     }
 
     func testCurrentCompactActivityUsesMostRecentSessionAndFormatsTokens() async {
@@ -201,16 +227,14 @@ final class AIAgentPluginTests: XCTestCase {
             )
             plugin.handle(
                 frame: BridgeFrame(
-                    host: .codex,
+                    host: .claude,
                     requestID: "req-pending",
                     rawJSON: """
                     {
-                      "event": "approval_request",
-                      "sessionId": "session-pending",
-                      "tool": {
-                        "name": "shell",
-                        "input": { "command": "ls -la" }
-                      }
+                      "hook_event_name": "PermissionRequest",
+                      "session_id": "session-pending",
+                      "tool_name": "Bash",
+                      "tool_input": { "command": "ls -la" }
                     }
                     """
                 ),
@@ -219,7 +243,7 @@ final class AIAgentPluginTests: XCTestCase {
         }
 
         let activity = await MainActor.run { plugin.currentCompactActivity }
-        XCTAssertEqual(activity?.host, .codex)
+        XCTAssertEqual(activity?.host, .claude)
         XCTAssertEqual(activity?.label, "Approval")
         XCTAssertEqual(activity?.approvalCount, 1)
     }
@@ -462,7 +486,7 @@ final class AIAgentPluginTests: XCTestCase {
             plugin.activate(bus: bus)
         }
 
-        let scrollViewCount = try await MainActor.run {
+        let scrollViewCount = await MainActor.run {
             let harness = ExpandedViewHarness(
                 rootView: plugin.expandedView(
                     context: NotchContext(

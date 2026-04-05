@@ -4,16 +4,15 @@ struct AIHooksSettingsTab: View {
     @ObservedObject private var store = SettingsStore.shared
 
     @State private var claudeError: String?
-    @State private var codexError: String?
     @State private var isWorking = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("AI Agent Hooks")
+                Text("AI Integrations")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
 
-                Text("Install hooks to let NotchPilot receive events from your AI coding tools.")
+                Text("Claude uses hooks. Codex connects through the desktop app IPC sidecar.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
             }
@@ -38,22 +37,18 @@ struct AIHooksSettingsTab: View {
                 uninstallAction: uninstallClaude
             )
 
-            hookCard(
+            codexDesktopCard(
                 icon: "terminal",
                 iconColor: .blue,
                 title: "OpenAI Codex",
-                subtitle: "PreToolUse (deny only) + PostToolUse + Session + Prompt hooks",
+                subtitle: "Desktop IPC sidecar for live approvals and session monitoring",
                 detected: store.codexDetected,
-                installed: store.codexHookInstalled,
-                needsUpdate: store.codexHooksNeedUpdate,
-                error: codexError,
+                connection: store.codexDesktopConnection,
                 capabilities: [
-                    ("xmark.circle", "Allow (not supported by Codex yet)", false),
-                    ("checkmark.circle.fill", "Deny commands", true),
+                    ("checkmark.circle.fill", "Approve commands", true),
+                    ("checkmark.circle.fill", "Approve file changes", true),
                     ("checkmark.circle.fill", "Session monitoring", true),
-                ],
-                installAction: installCodex,
-                uninstallAction: uninstallCodex
+                ]
             )
 
             Divider()
@@ -165,6 +160,67 @@ struct AIHooksSettingsTab: View {
         )
     }
 
+    private func codexDesktopCard(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String,
+        detected: Bool,
+        connection: CodexDesktopConnectionState,
+        capabilities: [(String, String, Bool)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(iconColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+
+                        codexStatusBadge(detected: detected, connection: connection)
+                    }
+
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(capabilities.indices, id: \.self) { index in
+                    let capability = capabilities[index]
+                    HStack(spacing: 6) {
+                        Image(systemName: capability.0)
+                            .font(.system(size: 11))
+                            .foregroundStyle(capability.2 ? .green : .gray)
+
+                        Text(capability.1)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(capability.2 ? .primary : .secondary)
+                    }
+                }
+            }
+            .padding(.leading, 26)
+
+            if let message = connection.message, message.isEmpty == false {
+                Text(message)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(connection.status == .error ? .red : .secondary)
+                    .padding(.leading, 26)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
     private func statusBadge(detected: Bool, installed: Bool, needsUpdate: Bool) -> some View {
         Group {
             if detected == false {
@@ -175,6 +231,27 @@ struct AIHooksSettingsTab: View {
                 badge("Update available", fill: Color.yellow.opacity(0.25), foreground: .yellow)
             } else if installed {
                 badge("Connected", fill: Color.green.opacity(0.25), foreground: .green)
+            }
+        }
+    }
+
+    private func codexStatusBadge(detected: Bool, connection: CodexDesktopConnectionState) -> some View {
+        Group {
+            if detected == false || connection.status == .notFound {
+                badge("Not found", fill: Color.gray.opacity(0.3), foreground: Color.primary)
+            } else {
+                switch connection.status {
+                case .disconnected:
+                    badge("Disconnected", fill: Color.orange.opacity(0.25), foreground: .orange)
+                case .connecting:
+                    badge("Connecting", fill: Color.yellow.opacity(0.25), foreground: .yellow)
+                case .connected:
+                    badge("Connected", fill: Color.green.opacity(0.25), foreground: .green)
+                case .error:
+                    badge("Error", fill: Color.red.opacity(0.2), foreground: .red)
+                case .notFound:
+                    badge("Not found", fill: Color.gray.opacity(0.3), foreground: Color.primary)
+                }
             }
         }
     }
@@ -190,7 +267,6 @@ struct AIHooksSettingsTab: View {
 
     private func installClaude() {
         claudeError = nil
-        codexError = nil
         isWorking = true
         defer { isWorking = false }
 
@@ -216,37 +292,6 @@ struct AIHooksSettingsTab: View {
             store.synchronizeInstallationState()
         } catch {
             claudeError = error.localizedDescription
-        }
-    }
-
-    private func installCodex() {
-        claudeError = nil
-        codexError = nil
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            let bridgePath = try ensureBridgeScript()
-            let installer = HookInstaller()
-            try installer.installCodexHooks(bridgeScript: bridgePath)
-            store.bridgeScriptPath = bridgePath
-            store.synchronizeInstallationState()
-        } catch {
-            codexError = error.localizedDescription
-        }
-    }
-
-    private func uninstallCodex() {
-        codexError = nil
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            let bridgePath = store.bridgeScriptPath.isEmpty ? nil : store.bridgeScriptPath
-            try HookInstaller().uninstallCodexHooks(bridgeScript: bridgePath)
-            store.synchronizeInstallationState()
-        } catch {
-            codexError = error.localizedDescription
         }
     }
 

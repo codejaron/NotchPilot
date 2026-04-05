@@ -7,7 +7,6 @@ public final class SettingsStore: ObservableObject {
 
     private enum Key {
         static let claudeHookInstalled = "claude.hookInstalled"
-        static let codexHookInstalled = "codex.hookInstalled"
         static let autoStartSocket = "bridge.autoStartSocket"
         static let bridgeScriptPath = "bridge.scriptPath"
     }
@@ -20,13 +19,9 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(claudeHookInstalled, forKey: Key.claudeHookInstalled) }
     }
 
-    @Published public var codexHookInstalled: Bool {
-        didSet { defaults.set(codexHookInstalled, forKey: Key.codexHookInstalled) }
-    }
-
     @Published public var claudeHooksNeedUpdate: Bool
 
-    @Published public var codexHooksNeedUpdate: Bool
+    @Published public var codexDesktopConnection: CodexDesktopConnectionState
 
     @Published public var autoStartSocket: Bool {
         didSet {
@@ -44,7 +39,10 @@ public final class SettingsStore: ObservableObject {
     }
 
     public var codexDetected: Bool {
-        fileManager.fileExists(atPath: homeDirectoryURL.appendingPathComponent(".codex", isDirectory: true).path)
+        CodexDesktopAppDetector(
+            fileManager: fileManager,
+            homeDirectoryURL: homeDirectoryURL
+        ).isInstalled()
     }
 
     public init(
@@ -52,13 +50,17 @@ public final class SettingsStore: ObservableObject {
         fileManager: FileManager = .default,
         homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
+        let codexInstalled = CodexDesktopAppDetector(
+            fileManager: fileManager,
+            homeDirectoryURL: homeDirectoryURL
+        ).isInstalled()
+
         self.defaults = defaults
         self.fileManager = fileManager
         self.homeDirectoryURL = homeDirectoryURL
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
-        self.codexHookInstalled = defaults.object(forKey: Key.codexHookInstalled) as? Bool ?? false
         self.claudeHooksNeedUpdate = false
-        self.codexHooksNeedUpdate = false
+        self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
     }
@@ -67,8 +69,15 @@ public final class SettingsStore: ObservableObject {
         let installer = HookInstaller(fileManager: fileManager, homeDirectoryURL: homeDirectoryURL)
         let bridgeScript = bridgeScriptPath.isEmpty ? nil : bridgeScriptPath
         claudeHookInstalled = installer.claudeHooksInstalled(bridgeScript: bridgeScript)
-        codexHookInstalled = installer.codexHooksInstalled(bridgeScript: bridgeScript)
         claudeHooksNeedUpdate = installer.claudeHooksNeedUpdate(bridgeScript: bridgeScript)
-        codexHooksNeedUpdate = installer.codexHooksNeedUpdate(bridgeScript: bridgeScript)
+        if codexDetected == false {
+            codexDesktopConnection = .notFound
+        } else if codexDesktopConnection.status == .notFound {
+            codexDesktopConnection = .disconnected
+        }
+    }
+
+    public func updateCodexDesktopConnection(_ state: CodexDesktopConnectionState) {
+        codexDesktopConnection = state
     }
 }
