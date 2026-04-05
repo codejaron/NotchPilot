@@ -24,9 +24,10 @@ struct AIHooksSettingsTab: View {
                 icon: "sparkles",
                 iconColor: .orange,
                 title: "Claude Code",
-                subtitle: "PermissionRequest + PreToolUse + PostToolUse + Session hooks",
+                subtitle: "PermissionRequest + PreToolUse + PostToolUse + Session + Prompt hooks",
                 detected: store.claudeCodeDetected,
                 installed: store.claudeHookInstalled,
+                needsUpdate: store.claudeHooksNeedUpdate,
                 error: claudeError,
                 capabilities: [
                     ("checkmark.circle.fill", "Allow / Deny / Always Allow", true),
@@ -41,9 +42,10 @@ struct AIHooksSettingsTab: View {
                 icon: "terminal",
                 iconColor: .blue,
                 title: "OpenAI Codex",
-                subtitle: "PreToolUse (deny only) + PostToolUse + Session hooks",
+                subtitle: "PreToolUse (deny only) + PostToolUse + Session + Prompt hooks",
                 detected: store.codexDetected,
                 installed: store.codexHookInstalled,
+                needsUpdate: store.codexHooksNeedUpdate,
                 error: codexError,
                 capabilities: [
                     ("xmark.circle", "Allow (not supported by Codex yet)", false),
@@ -86,6 +88,7 @@ struct AIHooksSettingsTab: View {
         subtitle: String,
         detected: Bool,
         installed: Bool,
+        needsUpdate: Bool,
         error: String?,
         capabilities: [(String, String, Bool)],
         installAction: @escaping () -> Void,
@@ -102,7 +105,7 @@ struct AIHooksSettingsTab: View {
                         Text(title)
                             .font(.system(size: 15, weight: .bold, design: .rounded))
 
-                        statusBadge(detected: detected, installed: installed)
+                        statusBadge(detected: detected, installed: installed, needsUpdate: needsUpdate)
                     }
 
                     Text(subtitle)
@@ -113,7 +116,12 @@ struct AIHooksSettingsTab: View {
                 Spacer()
 
                 if detected {
-                    if installed {
+                    if installed && needsUpdate {
+                        Button("Update Hooks") { installAction() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(isWorking)
+                    } else if installed {
                         Button("Uninstall") { uninstallAction() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -157,14 +165,16 @@ struct AIHooksSettingsTab: View {
         )
     }
 
-    private func statusBadge(detected: Bool, installed: Bool) -> some View {
+    private func statusBadge(detected: Bool, installed: Bool, needsUpdate: Bool) -> some View {
         Group {
             if detected == false {
                 badge("Not found", fill: Color.gray.opacity(0.3), foreground: Color.primary)
+            } else if installed == false {
+                badge("Not configured", fill: Color.orange.opacity(0.25), foreground: .orange)
+            } else if needsUpdate {
+                badge("Update available", fill: Color.yellow.opacity(0.25), foreground: .yellow)
             } else if installed {
                 badge("Connected", fill: Color.green.opacity(0.25), foreground: .green)
-            } else {
-                badge("Not configured", fill: Color.orange.opacity(0.25), foreground: .orange)
             }
         }
     }

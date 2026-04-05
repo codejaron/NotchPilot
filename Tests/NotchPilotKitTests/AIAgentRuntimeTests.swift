@@ -73,4 +73,54 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(result, .awaitDecision(requestID: "req-4"))
         XCTAssertEqual(runtime.pendingApprovals.first?.eventType, .preToolUse)
     }
+
+    func testUserPromptSubmitSetsSessionTitleAndPreservesTokensOnLaterPromptEvents() throws {
+        let runtime = AIAgentRuntime()
+
+        let usageEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-5",
+            sessionID: "session-5",
+            eventType: .postToolUse,
+            capabilities: .none,
+            needsResponse: false,
+            payload: .generic([
+                "usage.input_tokens": "1200",
+                "usage.output_tokens": "300",
+            ])
+        )
+
+        let firstPromptEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-6",
+            sessionID: "session-5",
+            eventType: .userPromptSubmit,
+            capabilities: .none,
+            needsResponse: false,
+            payload: .generic([
+                "prompt": "Build a backend server with express and sqlite",
+            ])
+        )
+
+        let secondPromptEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-7",
+            sessionID: "session-5",
+            eventType: .userPromptSubmit,
+            capabilities: .none,
+            needsResponse: false,
+            payload: .generic([
+                "prompt": "Overwrite me",
+            ])
+        )
+
+        _ = runtime.handle(envelope: usageEnvelope)
+        _ = runtime.handle(envelope: firstPromptEnvelope)
+        _ = runtime.handle(envelope: secondPromptEnvelope)
+
+        let session = try XCTUnwrap(runtime.sessions.first)
+        XCTAssertEqual(session.sessionTitle, "Build a backend server with ex…")
+        XCTAssertEqual(session.inputTokenCount, 1200)
+        XCTAssertEqual(session.outputTokenCount, 300)
+    }
 }

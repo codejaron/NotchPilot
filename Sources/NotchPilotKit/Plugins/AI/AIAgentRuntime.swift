@@ -8,6 +8,7 @@ public struct AISession: Equatable, Sendable, Identifiable {
     public var inputTokenCount: Int?
     public var outputTokenCount: Int?
     public var updatedAt: Date
+    public var sessionTitle: String?
 
     public init(
         id: String,
@@ -16,7 +17,8 @@ public struct AISession: Equatable, Sendable, Identifiable {
         activityLabel: String,
         inputTokenCount: Int? = nil,
         outputTokenCount: Int? = nil,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        sessionTitle: String? = nil
     ) {
         self.id = id
         self.host = host
@@ -25,6 +27,7 @@ public struct AISession: Equatable, Sendable, Identifiable {
         self.inputTokenCount = inputTokenCount
         self.outputTokenCount = outputTokenCount
         self.updatedAt = updatedAt
+        self.sessionTitle = sessionTitle
     }
 }
 
@@ -119,12 +122,20 @@ public final class AIAgentRuntime {
 
     private func refreshSession(id: String, host: AIHost, eventType: AIBridgeEventType, payload: AIBridgePayload) {
         let activity = SessionActivity(eventType: eventType, payload: payload)
+        let sessionTitle = extractSessionTitle(from: payload, eventType: eventType)
 
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].lastEventType = eventType
             sessions[index].activityLabel = activity.label
-            sessions[index].inputTokenCount = activity.inputTokenCount
-            sessions[index].outputTokenCount = activity.outputTokenCount
+            if let inputTokenCount = activity.inputTokenCount {
+                sessions[index].inputTokenCount = inputTokenCount
+            }
+            if let outputTokenCount = activity.outputTokenCount {
+                sessions[index].outputTokenCount = outputTokenCount
+            }
+            if sessions[index].sessionTitle == nil, let sessionTitle {
+                sessions[index].sessionTitle = sessionTitle
+            }
             sessions[index].updatedAt = Date()
             sessions.sort { $0.updatedAt > $1.updatedAt }
             return
@@ -137,10 +148,31 @@ public final class AIAgentRuntime {
                 lastEventType: eventType,
                 activityLabel: activity.label,
                 inputTokenCount: activity.inputTokenCount,
-                outputTokenCount: activity.outputTokenCount
+                outputTokenCount: activity.outputTokenCount,
+                sessionTitle: sessionTitle
             )
         )
         sessions.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func extractSessionTitle(from payload: AIBridgePayload, eventType: AIBridgeEventType) -> String? {
+        guard eventType == .userPromptSubmit else {
+            return nil
+        }
+
+        guard case let .generic(values) = payload,
+              let prompt = values["prompt"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              prompt.isEmpty == false
+        else {
+            return nil
+        }
+
+        let limit = 30
+        guard prompt.count > limit else {
+            return prompt
+        }
+
+        return String(prompt.prefix(limit)) + "…"
     }
 
     private func mutatePendingApproval(requestID: String, newStatus: ApprovalStatus) -> PendingApproval? {
@@ -242,6 +274,8 @@ private struct SessionActivity {
             return "Connected"
         case .stop:
             return "Stopped"
+        case .userPromptSubmit:
+            return "Processing"
         case let .unknown(value):
             return humanize(value)
         }

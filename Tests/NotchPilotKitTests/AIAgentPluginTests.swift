@@ -266,4 +266,106 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertEqual(resolvedWidth, 236 + metrics.sideFrameWidth * 2 + 20, accuracy: 0.1)
         XCTAssertGreaterThan(resolvedWidth, 300)
     }
+
+    func testExpandedSessionSummariesUseReadableFallbackInsteadOfSessionID() async {
+        let plugin = await MainActor.run { AIAgentPlugin() }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "req-readable",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "SessionStart",
+                      "session_id": "98ff2839-1111-2222-3333-444444444444"
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+        }
+
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+        XCTAssertEqual(summaries.first?.title, "Claude Code")
+        XCTAssertEqual(summaries.first?.subtitle, "Connected")
+    }
+
+    func testExpandedSessionSummariesSortPendingApprovalFirst() async {
+        let plugin = await MainActor.run { AIAgentPlugin() }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "req-processing",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "UserPromptSubmit",
+                      "session_id": "session-processing",
+                      "prompt": "Build a backend server with express"
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "req-processing-2",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "PostToolUse",
+                      "session_id": "session-processing",
+                      "phase": "processing"
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "req-pending-title",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "UserPromptSubmit",
+                      "session_id": "session-pending",
+                      "prompt": "create a react dashboard"
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "req-pending-approval",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "PermissionRequest",
+                      "session_id": "session-pending",
+                      "tool_name": "Bash",
+                      "tool_input": { "command": "npm create vite@latest" }
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+        }
+
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+        XCTAssertEqual(summaries.map(\.title), [
+            "create a react dashboard",
+            "Build a backend server with ex…",
+        ])
+        XCTAssertEqual(summaries.first?.subtitle, "Bash")
+        XCTAssertEqual(summaries.first?.approvalCount, 1)
+        XCTAssertEqual(summaries.first?.approvalRequestID, "req-pending-approval")
+        XCTAssertNil(summaries.last?.approvalRequestID)
+    }
 }

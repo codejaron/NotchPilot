@@ -23,6 +23,7 @@ public enum AIBridgeEventType: Equatable, Sendable {
     case postToolUse
     case sessionStart
     case stop
+    case userPromptSubmit
     case unknown(String)
 }
 
@@ -45,11 +46,24 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let title: String
     public let toolName: String
     public let previewText: String
+    public let filePath: String?
+    public let command: String?
+    public let diffContent: String?
 
-    public init(title: String, toolName: String, previewText: String) {
+    public init(
+        title: String,
+        toolName: String,
+        previewText: String,
+        filePath: String? = nil,
+        command: String? = nil,
+        diffContent: String? = nil
+    ) {
         self.title = title
         self.toolName = toolName
         self.previewText = previewText
+        self.filePath = filePath
+        self.command = command
+        self.diffContent = diffContent
     }
 }
 

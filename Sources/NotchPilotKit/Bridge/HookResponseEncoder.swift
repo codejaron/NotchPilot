@@ -19,6 +19,9 @@ public struct HookResponseEncoder {
             response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
         case (.claude, .preToolUse, .persistAllowRule):
             response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Always allowed via NotchPilot"}}"#
+        // Codex accepts this schema-valid hookSpecificOutput shape for PreToolUse,
+        // but runtime field precedence vs. top-level `decision` remains to be
+        // verified on a live Codex install.
         case (.codex, .preToolUse, .denyOnce):
             response = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
         case (.codex, .preToolUse, _):

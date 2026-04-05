@@ -78,6 +78,61 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertFalse(envelope.needsResponse)
     }
 
+    func testUserPromptSubmitNormalizesPromptIntoGenericPayload() throws {
+        let frame = BridgeFrame(
+            host: .codex,
+            requestID: "req-4",
+            rawJSON: """
+            {
+              "event": "user_prompt_submit",
+              "sessionId": "codex-session",
+              "user_prompt": "Build a backend server with express"
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.eventType, .userPromptSubmit)
+        XCTAssertFalse(envelope.needsResponse)
+
+        guard case let .generic(values) = envelope.payload else {
+            return XCTFail("expected generic payload")
+        }
+
+        XCTAssertEqual(values["prompt"], "Build a backend server with express")
+    }
+
+    func testPermissionPayloadExtractsCommandFileAndDiffPreview() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-5",
+            rawJSON: """
+            {
+              "hook_event_name": "PermissionRequest",
+              "session_id": "claude-session",
+              "tool_name": "Edit",
+              "tool_input": {
+                "file_path": "/tmp/demo.txt",
+                "command": "cat /tmp/demo.txt",
+                "content": "new file contents"
+              }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        guard case let .permissionRequest(payload) = envelope.payload else {
+            return XCTFail("expected permission request payload")
+        }
+
+        XCTAssertEqual(payload.previewText, "cat /tmp/demo.txt")
+        XCTAssertEqual(payload.command, "cat /tmp/demo.txt")
+        XCTAssertEqual(payload.filePath, "/tmp/demo.txt")
+        XCTAssertEqual(payload.diffContent, "new file contents")
+    }
+
     func testInvalidJSONThrows() {
         let frame = BridgeFrame(host: .claude, requestID: "bad", rawJSON: "{not-json")
 

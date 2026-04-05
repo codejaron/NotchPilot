@@ -146,6 +146,61 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: installedPath))
     }
 
+    func testInstallClaudeHooksAddsUserPromptSubmitEntry() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installClaudeHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let json = try loadJSONObject(at: claudeDirectory.appendingPathComponent("settings.json"))
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let promptEntries = try XCTUnwrap(hooks["UserPromptSubmit"] as? [[String: Any]])
+
+        XCTAssertTrue(promptEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
+    }
+
+    func testClaudeHooksNeedUpdateReturnsTrueWhenPromptHookMissing() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        try Data(
+            """
+            {
+              "hooks": {
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+
+        XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: "/tmp/notch-bridge.py"))
+        XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
+    }
+
+    func testCodexHooksNeedUpdateReturnsFalseAfterFreshInstall() throws {
+        let codexDirectory = tempHomeURL.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        try "".write(to: codexDirectory.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installCodexHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        XCTAssertFalse(installer.codexHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
+    }
+
     private func loadJSONObject(at url: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: url)
         let object = try JSONSerialization.jsonObject(with: data)

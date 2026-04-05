@@ -40,4 +40,18 @@ final class HookResponseEncoderTests: XCTestCase {
 
         XCTAssertEqual(json, "{}")
     }
+
+    func testCodexPreToolUseDenyUsesSchemaValidHookSpecificOutput() throws {
+        let data = try HookResponseEncoder().encode(
+            decision: .denyOnce,
+            for: .codex,
+            eventType: .preToolUse
+        )
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(
+            json,
+            #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Denied via NotchPilot"}}"#
+        )
+    }
 }

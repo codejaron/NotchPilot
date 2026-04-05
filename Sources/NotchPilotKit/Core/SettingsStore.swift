@@ -24,6 +24,10 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(codexHookInstalled, forKey: Key.codexHookInstalled) }
     }
 
+    @Published public var claudeHooksNeedUpdate: Bool
+
+    @Published public var codexHooksNeedUpdate: Bool
+
     @Published public var autoStartSocket: Bool {
         didSet {
             defaults.set(autoStartSocket, forKey: Key.autoStartSocket)
@@ -53,6 +57,8 @@ public final class SettingsStore: ObservableObject {
         self.homeDirectoryURL = homeDirectoryURL
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
         self.codexHookInstalled = defaults.object(forKey: Key.codexHookInstalled) as? Bool ?? false
+        self.claudeHooksNeedUpdate = false
+        self.codexHooksNeedUpdate = false
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
     }
@@ -62,5 +68,7 @@ public final class SettingsStore: ObservableObject {
         let bridgeScript = bridgeScriptPath.isEmpty ? nil : bridgeScriptPath
         claudeHookInstalled = installer.claudeHooksInstalled(bridgeScript: bridgeScript)
         codexHookInstalled = installer.codexHooksInstalled(bridgeScript: bridgeScript)
+        claudeHooksNeedUpdate = installer.claudeHooksNeedUpdate(bridgeScript: bridgeScript)
+        codexHooksNeedUpdate = installer.codexHooksNeedUpdate(bridgeScript: bridgeScript)
     }
 }

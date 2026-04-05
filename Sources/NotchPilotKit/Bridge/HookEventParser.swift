@@ -60,6 +60,8 @@ public struct HookEventParser {
             return .sessionStart
         case "stop", "sessionstop", "session_stop":
             return .stop
+        case "userpromptsubmit", "user_prompt_submit":
+            return .userPromptSubmit
         default:
             return .unknown(rawType)
         }
@@ -97,21 +99,51 @@ public struct HookEventParser {
                 ["request", "tool"],
             ]) ?? "Action"
 
-            let previewText = findString(in: dictionary, paths: [
+            let command = findString(in: dictionary, paths: [
                 ["tool_input", "command"],
                 ["tool", "input", "command"],
                 ["command"],
                 ["request", "command"],
-                ["prompt"],
-            ]) ?? "Review the requested action."
+            ])
+
+            let filePath = findString(in: dictionary, paths: [
+                ["tool_input", "file_path"],
+                ["tool", "input", "file_path"],
+                ["file_path"],
+            ])
+
+            let diffContent = findString(in: dictionary, paths: [
+                ["tool_input", "content"],
+                ["tool_input", "new_string"],
+                ["tool", "input", "content"],
+                ["tool", "input", "new_string"],
+            ])
+
+            let previewText = command
+                ?? filePath
+                ?? findString(in: dictionary, paths: [["prompt"]])
+                ?? "Review the requested action."
 
             return .permissionRequest(
                 ApprovalPayload(
                     title: "\(toolName) wants approval",
                     toolName: toolName,
-                    previewText: previewText
+                    previewText: previewText,
+                    filePath: filePath,
+                    command: command,
+                    diffContent: diffContent
                 )
             )
+        case .userPromptSubmit:
+            var values = flattenStrings(from: dictionary)
+            if let prompt = findString(in: dictionary, paths: [
+                ["prompt"],
+                ["user_prompt"],
+                ["message"],
+            ]) {
+                values["prompt"] = prompt
+            }
+            return .generic(values)
         default:
             return .generic(flattenStrings(from: dictionary))
         }

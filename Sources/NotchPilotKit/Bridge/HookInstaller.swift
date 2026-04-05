@@ -201,6 +201,38 @@ public struct HookInstaller {
         }
     }
 
+    public func claudeHooksNeedUpdate(bridgeScript: String? = nil) -> Bool {
+        guard claudeHooksInstalled(bridgeScript: bridgeScript) else {
+            return false
+        }
+
+        let settingsURL = homeDirectoryURL.appendingPathComponent(".claude/settings.json")
+        guard let root = try? loadJSONObject(at: settingsURL),
+              let hooks = root["hooks"] as? [String: Any],
+              let entries = hooks["UserPromptSubmit"] as? [[String: Any]]
+        else {
+            return true
+        }
+
+        return entries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
+    }
+
+    public func codexHooksNeedUpdate(bridgeScript: String? = nil) -> Bool {
+        guard codexHooksInstalled(bridgeScript: bridgeScript) else {
+            return false
+        }
+
+        let hooksURL = homeDirectoryURL.appendingPathComponent(".codex/hooks.json")
+        guard let root = try? loadJSONObject(at: hooksURL),
+              let hooks = root["hooks"] as? [String: Any],
+              let entries = hooks["UserPromptSubmit"] as? [[String: Any]]
+        else {
+            return true
+        }
+
+        return entries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
+    }
+
     private func claudeHookConfiguration(command: String) -> [String: [[String: Any]]] {
         [
             "PermissionRequest": [
@@ -258,6 +290,16 @@ public struct HookInstaller {
                     ],
                 ],
             ],
+            "UserPromptSubmit": [
+                [
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": command,
+                        ],
+                    ],
+                ],
+            ],
         ]
     }
 
@@ -298,6 +340,16 @@ public struct HookInstaller {
                 ],
             ],
             "Stop": [
+                [
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": command,
+                        ],
+                    ],
+                ],
+            ],
+            "UserPromptSubmit": [
                 [
                     "hooks": [
                         [
