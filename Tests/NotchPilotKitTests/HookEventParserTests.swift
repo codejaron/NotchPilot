@@ -133,6 +133,39 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(payload.diffContent, "new file contents")
     }
 
+    func testPermissionPayloadLoadsCurrentFileContentsForPreApprovalDiff() throws {
+        let parser = HookEventParser(loadFileContent: { path in
+            XCTAssertEqual(path, "/tmp/demo.txt")
+            return "old file contents"
+        })
+
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-6",
+            rawJSON: """
+            {
+              "hook_event_name": "PermissionRequest",
+              "session_id": "claude-session",
+              "tool_name": "Edit",
+              "tool_input": {
+                "file_path": "/tmp/demo.txt",
+                "new_string": "updated file contents"
+              }
+            }
+            """
+        )
+
+        let envelope = try parser.parse(frame: frame)
+
+        guard case let .permissionRequest(payload) = envelope.payload else {
+            return XCTFail("expected permission request payload")
+        }
+
+        XCTAssertEqual(payload.filePath, "/tmp/demo.txt")
+        XCTAssertEqual(payload.originalContent, "old file contents")
+        XCTAssertEqual(payload.diffContent, "updated file contents")
+    }
+
     func testInvalidJSONThrows() {
         let frame = BridgeFrame(host: .claude, requestID: "bad", rawJSON: "{not-json")
 

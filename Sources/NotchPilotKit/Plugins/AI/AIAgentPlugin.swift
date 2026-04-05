@@ -345,6 +345,246 @@ struct AIApprovalReviewState: Equatable {
     }
 }
 
+enum ApprovalDiffLineKind: Equatable {
+    case metadata
+    case removal
+    case addition
+    case context
+}
+
+struct ApprovalDiffLinePresentation: Equatable {
+    let lineNumber: String
+    let prefix: String
+    let text: String
+    let kind: ApprovalDiffLineKind
+}
+
+struct ApprovalDiffPreview: Equatable {
+    let lines: [ApprovalDiffLinePresentation]
+    let isSyntaxHighlighted: Bool
+
+    private init(lines: [ApprovalDiffLinePresentation], isSyntaxHighlighted: Bool) {
+        self.lines = lines
+        self.isSyntaxHighlighted = isSyntaxHighlighted
+    }
+
+    init(content: String) {
+        let rawLines = Self.splitLines(content)
+
+        let isSyntaxHighlighted = Self.looksLikeUnifiedDiff(rawLines)
+        self.init(
+            lines: isSyntaxHighlighted
+                ? Self.parseUnifiedDiff(rawLines)
+                : Self.parsePlainContent(rawLines),
+            isSyntaxHighlighted: isSyntaxHighlighted
+        )
+    }
+
+    init(payload: ApprovalPayload) {
+        guard let proposedContent = payload.diffContent, proposedContent.isEmpty == false else {
+            self.init(lines: [], isSyntaxHighlighted: false)
+            return
+        }
+
+        let proposedLines = Self.splitLines(proposedContent)
+        if let originalContent = payload.originalContent,
+           originalContent != proposedContent {
+            let generatedLines = Self.buildLineDiff(
+                from: Self.splitLines(originalContent),
+                to: proposedLines
+            )
+            self.init(
+                lines: generatedLines,
+                isSyntaxHighlighted: generatedLines.contains(where: {
+                    $0.kind == .removal || $0.kind == .addition
+                })
+            )
+            return
+        }
+
+        self.init(content: proposedContent)
+    }
+
+    private static func looksLikeUnifiedDiff(_ lines: [String]) -> Bool {
+        if lines.contains(where: { $0.hasPrefix("@@") || $0.hasPrefix("diff ") || $0.hasPrefix("---") || $0.hasPrefix("+++") }) {
+            return true
+        }
+
+        let additions = lines.filter { $0.hasPrefix("+") && $0.hasPrefix("+++") == false }.count
+        let removals = lines.filter { $0.hasPrefix("-") && $0.hasPrefix("---") == false }.count
+        return additions > 0 && removals > 0
+    }
+
+    private static func parsePlainContent(_ lines: [String]) -> [ApprovalDiffLinePresentation] {
+        lines.enumerated().map { index, line in
+            ApprovalDiffLinePresentation(
+                lineNumber: "\(index + 1)",
+                prefix: " ",
+                text: line,
+                kind: .context
+            )
+        }
+    }
+
+    private static func parseUnifiedDiff(_ lines: [String]) -> [ApprovalDiffLinePresentation] {
+        var oldLine = 1
+        var newLine = 1
+        var result: [ApprovalDiffLinePresentation] = []
+
+        for rawLine in lines {
+            if rawLine.hasPrefix("@@") || rawLine.hasPrefix("diff ") || rawLine.hasPrefix("---") || rawLine.hasPrefix("+++") {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "",
+                        prefix: rawLine.hasPrefix("@@") ? "@" : " ",
+                        text: rawLine,
+                        kind: .metadata
+                    )
+                )
+                continue
+            }
+
+            if rawLine.hasPrefix("-") {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "\(oldLine)",
+                        prefix: "-",
+                        text: String(rawLine.dropFirst()),
+                        kind: .removal
+                    )
+                )
+                oldLine += 1
+                continue
+            }
+
+            if rawLine.hasPrefix("+") {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "\(newLine)",
+                        prefix: "+",
+                        text: String(rawLine.dropFirst()),
+                        kind: .addition
+                    )
+                )
+                newLine += 1
+                continue
+            }
+
+            let text = rawLine.hasPrefix(" ") ? String(rawLine.dropFirst()) : rawLine
+            result.append(
+                ApprovalDiffLinePresentation(
+                    lineNumber: "\(oldLine)",
+                    prefix: " ",
+                    text: text,
+                    kind: .context
+                )
+            )
+            oldLine += 1
+            newLine += 1
+        }
+
+        return result
+    }
+
+    private static func buildLineDiff(from oldLines: [String], to newLines: [String]) -> [ApprovalDiffLinePresentation] {
+        let oldCount = oldLines.count
+        let newCount = newLines.count
+        var longestCommonSubsequence = Array(
+            repeating: Array(repeating: 0, count: newCount + 1),
+            count: oldCount + 1
+        )
+
+        if oldCount > 0 && newCount > 0 {
+            for oldIndex in stride(from: oldCount - 1, through: 0, by: -1) {
+                for newIndex in stride(from: newCount - 1, through: 0, by: -1) {
+                    if oldLines[oldIndex] == newLines[newIndex] {
+                        longestCommonSubsequence[oldIndex][newIndex] =
+                            longestCommonSubsequence[oldIndex + 1][newIndex + 1] + 1
+                    } else {
+                        longestCommonSubsequence[oldIndex][newIndex] = max(
+                            longestCommonSubsequence[oldIndex + 1][newIndex],
+                            longestCommonSubsequence[oldIndex][newIndex + 1]
+                        )
+                    }
+                }
+            }
+        }
+
+        var oldIndex = 0
+        var newIndex = 0
+        var result: [ApprovalDiffLinePresentation] = []
+
+        while oldIndex < oldCount && newIndex < newCount {
+            if oldLines[oldIndex] == newLines[newIndex] {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "\(oldIndex + 1)",
+                        prefix: " ",
+                        text: oldLines[oldIndex],
+                        kind: .context
+                    )
+                )
+                oldIndex += 1
+                newIndex += 1
+            } else if longestCommonSubsequence[oldIndex + 1][newIndex] >= longestCommonSubsequence[oldIndex][newIndex + 1] {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "\(oldIndex + 1)",
+                        prefix: "-",
+                        text: oldLines[oldIndex],
+                        kind: .removal
+                    )
+                )
+                oldIndex += 1
+            } else {
+                result.append(
+                    ApprovalDiffLinePresentation(
+                        lineNumber: "\(newIndex + 1)",
+                        prefix: "+",
+                        text: newLines[newIndex],
+                        kind: .addition
+                    )
+                )
+                newIndex += 1
+            }
+        }
+
+        while oldIndex < oldCount {
+            result.append(
+                ApprovalDiffLinePresentation(
+                    lineNumber: "\(oldIndex + 1)",
+                    prefix: "-",
+                    text: oldLines[oldIndex],
+                    kind: .removal
+                )
+            )
+            oldIndex += 1
+        }
+
+        while newIndex < newCount {
+            result.append(
+                ApprovalDiffLinePresentation(
+                    lineNumber: "\(newIndex + 1)",
+                    prefix: "+",
+                    text: newLines[newIndex],
+                    kind: .addition
+                )
+            )
+            newIndex += 1
+        }
+
+        return result
+    }
+
+    private static func splitLines(_ content: String) -> [String] {
+        var lines = content.components(separatedBy: .newlines)
+        if content.hasSuffix("\n"), lines.last == "" {
+            lines.removeLast()
+        }
+        return lines
+    }
+}
+
 private struct AICompactView: View {
     @ObservedObject var plugin: AIAgentPlugin
     let context: NotchContext
@@ -466,12 +706,15 @@ private struct AIExpandedView: View {
     @State private var approvalReviewState = AIApprovalReviewState()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let selectedApproval {
-                approvalDetailView(selectedApproval)
-            } else {
-                sessionListView
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 14) {
+                if let selectedApproval {
+                    approvalDetailView(selectedApproval)
+                } else {
+                    sessionListView
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: plugin.pendingApprovals.map(\.requestID)) { _, requestIDs in
@@ -531,6 +774,10 @@ private struct AIExpandedView: View {
                 }
                 .buttonStyle(.plain)
 
+                Circle()
+                    .fill(hostColor(for: approval.host))
+                    .frame(width: 8, height: 8)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.map(plugin.expandedSessionTitle(for:)) ?? plugin.hostDisplayName(for: approval.host))
                         .font(.system(size: 17, weight: .bold, design: .rounded))
@@ -538,8 +785,8 @@ private struct AIExpandedView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
-                    Text(approval.payload.toolName)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text("Permission Request")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(.orange)
                 }
 
@@ -626,79 +873,231 @@ private struct AIExpandedView: View {
     }
 
     private func approvalCard(_ approval: PendingApproval) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(hostColor(for: approval.host))
+                    .frame(width: 8, height: 8)
+
+                Text("Permission Request")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+
             HStack(spacing: 6) {
-                Image(systemName: approval.host == .claude ? "sparkles" : "terminal")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(approval.host == .claude ? .orange : .blue)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
 
                 Text(approval.payload.toolName)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+
+                if let filePath = approval.payload.filePath {
+                    Text(filePath)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
 
                 Spacer()
             }
 
             if let command = approval.payload.command {
-                previewBlock(text: command, icon: "terminal")
-            } else if let filePath = approval.payload.filePath {
-                previewBlock(text: filePath, icon: "doc")
-            } else {
-                previewBlock(text: approval.payload.previewText, icon: nil)
+                commandPreview(command, icon: "terminal")
+            } else if approval.payload.previewText.isEmpty == false {
+                commandPreview(
+                    approval.payload.previewText,
+                    icon: approval.payload.filePath == nil ? "text.alignleft" : "doc"
+                )
             }
 
             if let diffContent = approval.payload.diffContent, diffContent.isEmpty == false {
-                Text(diffContent)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .lineLimit(5)
-                    .padding(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.04)))
+                diffView(approval.payload)
             }
 
-            HStack(spacing: 8) {
-                Button("Deny") { plugin.respond(to: approval.requestID, with: .denyOnce) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                // Claude exposes interactive approval hooks here. Codex currently
-                // only uses deny-only PreToolUse handling, so it does not surface
-                // Allow / Always Allow actions in the notch UI.
-                if approval.host == .claude {
-                    Button("Allow") { plugin.respond(to: approval.requestID, with: .allowOnce) }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-
-                    if approval.capabilities.supportsPersistentRules {
-                        Button("Always Allow") { plugin.respond(to: approval.requestID, with: .persistAllowRule) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                }
-            }
+            approvalButtons(approval)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.07)))
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
-    private func previewBlock(text: String, icon: String?) -> some View {
-        HStack(spacing: 6) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
+    private func commandPreview(_ text: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
 
             Text(text)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.78))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.88))
                 .lineLimit(3)
                 .truncationMode(.tail)
         }
-        .padding(8)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+        )
+    }
+
+    private func diffView(_ payload: ApprovalPayload) -> some View {
+        let preview = ApprovalDiffPreview(payload: payload)
+        let visibleLines = Array(preview.lines.prefix(8))
+        let hiddenLineCount = max(preview.lines.count - visibleLines.count, 0)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
+                HStack(spacing: 0) {
+                    Text(line.lineNumber)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .frame(width: 32, alignment: .trailing)
+                        .padding(.trailing, 8)
+
+                    Text(line.prefix)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(diffForegroundColor(for: line.kind))
+                        .frame(width: 14, alignment: .leading)
+
+                    Text(line.text)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(diffForegroundColor(for: line.kind))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 2)
+                .padding(.horizontal, 6)
+                .background(diffBackgroundColor(for: line.kind, isSyntaxHighlighted: preview.isSyntaxHighlighted))
+            }
+
+            if hiddenLineCount > 0 {
+                Text("+\(hiddenLineCount) more lines")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(white: 0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func approvalButtons(_ approval: PendingApproval) -> some View {
+        HStack(spacing: 10) {
+            approvalActionButton(
+                title: "Deny",
+                shortcutHint: "⌘N",
+                titleColor: .white,
+                shortcutColor: .white.opacity(0.4),
+                backgroundFill: Color.white.opacity(0.12)
+            ) {
+                plugin.respond(to: approval.requestID, with: .denyOnce)
+            }
+
+            if approval.host == .claude {
+                approvalActionButton(
+                    title: "Allow",
+                    shortcutHint: "⌘Y",
+                    titleColor: .black,
+                    shortcutColor: .black.opacity(0.4),
+                    backgroundFill: Color.white.opacity(0.92)
+                ) {
+                    plugin.respond(to: approval.requestID, with: .allowOnce)
+                }
+
+                if approval.capabilities.supportsPersistentRules {
+                    Button {
+                        plugin.respond(to: approval.requestID, with: .persistAllowRule)
+                    } label: {
+                        Text("Always Allow")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func approvalActionButton(
+        title: String,
+        shortcutHint: String,
+        titleColor: Color,
+        shortcutColor: Color,
+        backgroundFill: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(shortcutHint)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(shortcutColor)
+            }
+            .foregroundStyle(titleColor)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(backgroundFill)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func diffForegroundColor(for kind: ApprovalDiffLineKind) -> Color {
+        switch kind {
+        case .metadata:
+            return .white.opacity(0.45)
+        case .removal:
+            return Color(red: 1.0, green: 0.45, blue: 0.45)
+        case .addition:
+            return Color(red: 0.45, green: 0.9, blue: 0.45)
+        case .context:
+            return .white.opacity(0.88)
+        }
+    }
+
+    private func diffBackgroundColor(for kind: ApprovalDiffLineKind, isSyntaxHighlighted: Bool) -> Color {
+        guard isSyntaxHighlighted else {
+            return .clear
+        }
+
+        switch kind {
+        case .metadata, .context:
+            return .clear
+        case .removal:
+            return Color(red: 0.6, green: 0.15, blue: 0.15).opacity(0.25)
+        case .addition:
+            return Color(red: 0.15, green: 0.5, blue: 0.15).opacity(0.25)
+        }
     }
 
     private func hostColor(for host: AIHost) -> Color {

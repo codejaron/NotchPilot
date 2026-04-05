@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import NotchPilotKit
 
@@ -398,5 +400,132 @@ final class AIAgentPluginTests: XCTestCase {
 
         XCTAssertFalse(state.isReviewingApprovals)
         XCTAssertNil(state.selectedApprovalRequestID)
+    }
+
+    func testApprovalDiffPreviewKeepsPlainContentNeutral() {
+        let preview = ApprovalDiffPreview(content: """
+        let value = 1
+        print(value)
+        """)
+
+        XCTAssertFalse(preview.isSyntaxHighlighted)
+        XCTAssertEqual(preview.lines.map(\.kind), [.context, .context])
+        XCTAssertEqual(preview.lines.map(\.lineNumber), ["1", "2"])
+        XCTAssertEqual(preview.lines.map(\.prefix), [" ", " "])
+        XCTAssertEqual(preview.lines.map(\.text), ["let value = 1", "print(value)"])
+    }
+
+    func testApprovalDiffPreviewHighlightsUnifiedDiffContent() {
+        let preview = ApprovalDiffPreview(content: """
+        @@ -1,2 +1,2 @@
+        -old line
+         unchanged line
+        +new line
+        """)
+
+        XCTAssertTrue(preview.isSyntaxHighlighted)
+        XCTAssertEqual(preview.lines.map(\.kind), [.metadata, .removal, .context, .addition])
+        XCTAssertEqual(preview.lines.map(\.lineNumber), ["", "1", "2", "2"])
+        XCTAssertEqual(preview.lines.map(\.prefix), ["@", "-", " ", "+"])
+        XCTAssertEqual(preview.lines.map(\.text), [
+            "@@ -1,2 +1,2 @@",
+            "old line",
+            "unchanged line",
+            "new line",
+        ])
+    }
+
+    func testApprovalDiffPreviewBuildsLineDiffFromOriginalAndProposedContent() {
+        let payload = ApprovalPayload(
+            title: "Edit wants approval",
+            toolName: "Edit",
+            previewText: "/tmp/demo.txt",
+            filePath: "/tmp/demo.txt",
+            diffContent: "hello\nthere",
+            originalContent: "hi\nthere"
+        )
+
+        let preview = ApprovalDiffPreview(payload: payload)
+
+        XCTAssertTrue(preview.isSyntaxHighlighted)
+        XCTAssertEqual(preview.lines.map(\.kind), [.removal, .addition, .context])
+        XCTAssertEqual(preview.lines.map(\.lineNumber), ["1", "1", "2"])
+        XCTAssertEqual(preview.lines.map(\.prefix), ["-", "+", " "])
+        XCTAssertEqual(preview.lines.map(\.text), ["hi", "hello", "there"])
+    }
+
+    func testExpandedViewRendersInsideVerticalScrollView() async throws {
+        let plugin = await MainActor.run { AIAgentPlugin() }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+
+        let scrollViewCount = try await MainActor.run {
+            let harness = ExpandedViewHarness(
+                rootView: plugin.expandedView(
+                    context: NotchContext(
+                        screenID: "primary",
+                        notchState: .open,
+                        notchGeometry: NotchGeometry(
+                            compactSize: CGSize(width: 236, height: 38),
+                            expandedSize: CGSize(width: 520, height: 320)
+                        ),
+                        isPrimaryScreen: true
+                    )
+                )
+            )
+            return harness.scrollViewCount()
+        }
+
+        XCTAssertGreaterThan(scrollViewCount, 0)
+    }
+}
+
+@MainActor
+private struct ExpandedViewHarness {
+    let window: NSWindow
+    let hostingController: NSHostingController<AnyView>
+
+    init(rootView: AnyView) {
+        _ = NSApplication.shared
+        hostingController = NSHostingController(rootView: rootView)
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 320),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = hostingController
+        window.orderFrontRegardless()
+        pump()
+    }
+
+    func scrollViewCount() -> Int {
+        collectSubviews(ofType: NSScrollView.self, in: hostingController.view).count
+    }
+
+    private func pump() {
+        hostingController.loadView()
+        hostingController.view.frame = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 520, height: 320)
+        hostingController.view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        hostingController.view.layoutSubtreeIfNeeded()
+    }
+
+    private func collectSubviews<ViewType: NSView>(ofType type: ViewType.Type, in root: NSView) -> [ViewType] {
+        var matches: [ViewType] = []
+        if let root = root as? ViewType {
+            matches.append(root)
+        }
+
+        for subview in root.subviews {
+            matches.append(contentsOf: collectSubviews(ofType: type, in: subview))
+        }
+
+        return matches
     }
 }

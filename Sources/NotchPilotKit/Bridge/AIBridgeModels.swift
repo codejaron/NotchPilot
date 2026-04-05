@@ -49,6 +49,7 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let filePath: String?
     public let command: String?
     public let diffContent: String?
+    public let originalContent: String?
 
     public init(
         title: String,
@@ -56,7 +57,8 @@ public struct ApprovalPayload: Equatable, Sendable {
         previewText: String,
         filePath: String? = nil,
         command: String? = nil,
-        diffContent: String? = nil
+        diffContent: String? = nil,
+        originalContent: String? = nil
     ) {
         self.title = title
         self.toolName = toolName
@@ -64,6 +66,7 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.filePath = filePath
         self.command = command
         self.diffContent = diffContent
+        self.originalContent = originalContent
     }
 }
 

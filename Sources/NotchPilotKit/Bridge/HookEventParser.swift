@@ -6,7 +6,13 @@ public enum HookEventParserError: Error, Equatable {
 }
 
 public struct HookEventParser {
-    public init() {}
+    private let loadFileContent: @Sendable (String) -> String?
+
+    public init(loadFileContent: @escaping @Sendable (String) -> String? = { path in
+        try? String(contentsOfFile: path, encoding: .utf8)
+    }) {
+        self.loadFileContent = loadFileContent
+    }
 
     public func parse(frame: BridgeFrame) throws -> AIBridgeEnvelope {
         guard let data = frame.rawJSON.data(using: .utf8) else {
@@ -115,9 +121,20 @@ public struct HookEventParser {
             let diffContent = findString(in: dictionary, paths: [
                 ["tool_input", "content"],
                 ["tool_input", "new_string"],
+                ["tool_input", "newString"],
                 ["tool", "input", "content"],
                 ["tool", "input", "new_string"],
+                ["tool", "input", "newString"],
             ])
+
+            let originalContent = findString(in: dictionary, paths: [
+                ["tool_input", "old_string"],
+                ["tool_input", "oldString"],
+                ["tool_input", "old_content"],
+                ["tool", "input", "old_string"],
+                ["tool", "input", "oldString"],
+                ["tool", "input", "old_content"],
+            ]) ?? fallbackOriginalContent(filePath: filePath, newContent: diffContent)
 
             let previewText = command
                 ?? filePath
@@ -131,7 +148,8 @@ public struct HookEventParser {
                     previewText: previewText,
                     filePath: filePath,
                     command: command,
-                    diffContent: diffContent
+                    diffContent: diffContent,
+                    originalContent: originalContent
                 )
             )
         case .userPromptSubmit:
@@ -201,5 +219,12 @@ public struct HookEventParser {
         }
 
         return current
+    }
+    private func fallbackOriginalContent(filePath: String?, newContent: String?) -> String? {
+        guard let filePath, let newContent, newContent.isEmpty == false else {
+            return nil
+        }
+
+        return loadFileContent(filePath)
     }
 }
