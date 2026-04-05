@@ -368,4 +368,35 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertEqual(summaries.first?.approvalRequestID, "req-pending-approval")
         XCTAssertNil(summaries.last?.approvalRequestID)
     }
+
+    func testApprovalReviewStateAdvancesToNextPendingApprovalWhileReviewing() {
+        var state = AIApprovalReviewState()
+        state.beginReviewing(requestID: "req-queue-1")
+
+        state.syncPendingRequestIDs(["req-queue-2"])
+
+        XCTAssertTrue(state.isReviewingApprovals)
+        XCTAssertEqual(state.selectedApprovalRequestID, "req-queue-2")
+    }
+
+    func testApprovalReviewStateStaysExitedAfterManualBackUntilUserReenters() {
+        var state = AIApprovalReviewState()
+        state.beginReviewing(requestID: "req-queue-1")
+        state.exitReviewing()
+
+        state.syncPendingRequestIDs(["req-queue-2"])
+
+        XCTAssertFalse(state.isReviewingApprovals)
+        XCTAssertNil(state.selectedApprovalRequestID)
+    }
+
+    func testApprovalReviewStateStopsReviewingWhenQueueIsEmpty() {
+        var state = AIApprovalReviewState()
+        state.beginReviewing(requestID: "req-queue-1")
+
+        state.syncPendingRequestIDs([])
+
+        XCTAssertFalse(state.isReviewingApprovals)
+        XCTAssertNil(state.selectedApprovalRequestID)
+    }
 }

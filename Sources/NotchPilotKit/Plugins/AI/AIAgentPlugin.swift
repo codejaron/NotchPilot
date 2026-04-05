@@ -311,6 +311,40 @@ struct AIExpandedSessionSummary: Equatable, Identifiable {
     }
 }
 
+struct AIApprovalReviewState: Equatable {
+    var isReviewingApprovals = false
+    var selectedApprovalRequestID: String?
+
+    mutating func beginReviewing(requestID: String) {
+        isReviewingApprovals = true
+        selectedApprovalRequestID = requestID
+    }
+
+    mutating func exitReviewing() {
+        isReviewingApprovals = false
+        selectedApprovalRequestID = nil
+    }
+
+    mutating func syncPendingRequestIDs(_ requestIDs: [String]) {
+        guard isReviewingApprovals else {
+            if requestIDs.isEmpty {
+                selectedApprovalRequestID = nil
+            }
+            return
+        }
+
+        if let selectedApprovalRequestID,
+           requestIDs.contains(selectedApprovalRequestID) {
+            return
+        }
+
+        selectedApprovalRequestID = requestIDs.first
+        if selectedApprovalRequestID == nil {
+            isReviewingApprovals = false
+        }
+    }
+}
+
 private struct AICompactView: View {
     @ObservedObject var plugin: AIAgentPlugin
     let context: NotchContext
@@ -429,7 +463,7 @@ private struct AIApprovalBadgeView: View {
 
 private struct AIExpandedView: View {
     @ObservedObject var plugin: AIAgentPlugin
-    @State private var selectedApprovalRequestID: String?
+    @State private var approvalReviewState = AIApprovalReviewState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -441,14 +475,12 @@ private struct AIExpandedView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: plugin.pendingApprovals.map(\.requestID)) { _, requestIDs in
-            if let selectedApprovalRequestID, requestIDs.contains(selectedApprovalRequestID) == false {
-                self.selectedApprovalRequestID = nil
-            }
+            approvalReviewState.syncPendingRequestIDs(requestIDs)
         }
     }
 
     private var selectedApproval: PendingApproval? {
-        guard let selectedApprovalRequestID else {
+        guard let selectedApprovalRequestID = approvalReviewState.selectedApprovalRequestID else {
             return nil
         }
 
@@ -487,7 +519,7 @@ private struct AIExpandedView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Button {
-                    selectedApprovalRequestID = nil
+                    approvalReviewState.exitReviewing()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
@@ -538,7 +570,7 @@ private struct AIExpandedView: View {
             guard let approvalRequestID = summary.approvalRequestID else {
                 return
             }
-            selectedApprovalRequestID = approvalRequestID
+            approvalReviewState.beginReviewing(requestID: approvalRequestID)
         } label: {
             HStack(spacing: 12) {
                 VStack(spacing: 8) {
