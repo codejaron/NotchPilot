@@ -63,4 +63,38 @@ final class CodexDesktopIPCFramingTests: XCTestCase {
         XCTAssertEqual(final, [second])
         XCTAssertTrue(buffer.isEmpty)
     }
+
+    func testDecodeClientDiscoveryRequestPreservesNestedRequest() throws {
+        let payload: [String: Any] = [
+            "type": "client-discovery-request",
+            "requestId": "discovery-1",
+            "request": [
+                "type": "request",
+                "requestId": "req-1",
+                "method": "item/commandExecution/requestApproval",
+                "params": [
+                    "threadId": "thr-1",
+                ],
+                "sourceClientId": "desktop-client",
+                "version": 1,
+            ],
+        ]
+
+        let payloadData = try JSONSerialization.data(withJSONObject: payload, options: [])
+        var buffer = Data(count: 4)
+        buffer.withUnsafeMutableBytes { rawBuffer in
+            rawBuffer.storeBytes(of: UInt32(payloadData.count).littleEndian, as: UInt32.self)
+        }
+        buffer.append(payloadData)
+
+        let frames = try CodexDesktopIPCCodec.decodeFrames(from: &buffer)
+
+        guard case let .clientDiscoveryRequest(requestID, request)? = frames.first else {
+            return XCTFail("expected client discovery request")
+        }
+
+        XCTAssertEqual(requestID, "discovery-1")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+        XCTAssertEqual(request?.params["threadId"]?.stringValue, "thr-1")
+    }
 }

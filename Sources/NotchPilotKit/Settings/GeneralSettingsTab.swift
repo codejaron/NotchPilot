@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct GeneralSettingsTab: View {
@@ -11,6 +12,18 @@ struct GeneralSettingsTab: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Closing this window keeps NotchPilot running.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                Button("Quit NotchPilot", role: .destructive) {
+                    NSApp.terminate(nil)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

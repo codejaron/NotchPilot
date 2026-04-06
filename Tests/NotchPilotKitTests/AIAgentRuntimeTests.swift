@@ -151,4 +151,38 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(session.inputTokenCount, 1200)
         XCTAssertEqual(session.outputTokenCount, 300)
     }
+
+    func testCodexSessionUpsertClearsTokenCountsWhenDesktopStreamOmitsThem() throws {
+        let runtime = AIAgentRuntime()
+
+        _ = runtime.apply(
+            event: .sessionUpsert(
+                AISession(
+                    id: "codex-session",
+                    host: .codex,
+                    lastEventType: .sessionStart,
+                    activityLabel: "Working",
+                    inputTokenCount: 200,
+                    outputTokenCount: 80
+                )
+            )
+        )
+
+        _ = runtime.apply(
+            event: .sessionUpsert(
+                AISession(
+                    id: "codex-session",
+                    host: .codex,
+                    lastEventType: .sessionStart,
+                    activityLabel: "Working",
+                    inputTokenCount: nil,
+                    outputTokenCount: nil
+                )
+            )
+        )
+
+        let session = try XCTUnwrap(runtime.sessions.first)
+        XCTAssertNil(session.inputTokenCount)
+        XCTAssertNil(session.outputTokenCount)
+    }
 }

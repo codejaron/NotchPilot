@@ -24,6 +24,10 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                         "inputTokens": .integer(123),
                                         "outputTokens": .integer(45),
                                     ]),
+                                    "total": .object([
+                                        "inputTokens": .integer(4567),
+                                        "outputTokens": .integer(890),
+                                    ]),
                                 ]),
                                 "turns": .array([
                                     .object([
@@ -50,8 +54,8 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(session.host, .codex)
         XCTAssertEqual(session.sessionTitle, "Implement desktop IPC")
         XCTAssertEqual(session.activityLabel, "Working")
-        XCTAssertEqual(session.inputTokenCount, 123)
-        XCTAssertEqual(session.outputTokenCount, 45)
+        XCTAssertEqual(session.inputTokenCount, 4567)
+        XCTAssertEqual(session.outputTokenCount, 890)
     }
 
     func testThreadStreamPatchesUpdateExistingSession() throws {
@@ -115,6 +119,10 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                             "inputTokens": .integer(999),
                                             "outputTokens": .integer(111),
                                         ]),
+                                        "total": .object([
+                                            "inputTokens": .integer(7000),
+                                            "outputTokens": .integer(1500),
+                                        ]),
                                     ]),
                                 ]),
                             ]),
@@ -134,8 +142,8 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(session.id, "conv-2")
         XCTAssertEqual(session.sessionTitle, "Updated Title")
         XCTAssertEqual(session.activityLabel, "Working")
-        XCTAssertEqual(session.inputTokenCount, 999)
-        XCTAssertEqual(session.outputTokenCount, 111)
+        XCTAssertEqual(session.inputTokenCount, 7000)
+        XCTAssertEqual(session.outputTokenCount, 1500)
     }
 
     func testCommandApprovalUsesConversationStateItem() throws {
@@ -151,6 +159,12 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                             "type": .string("snapshot"),
                             "conversationState": .object([
                                 "id": .string("thr-1"),
+                                "latestTokenUsageInfo": .object([
+                                    "total": .object([
+                                        "inputTokens": .integer(1200),
+                                        "outputTokens": .integer(300),
+                                    ]),
+                                ]),
                                 "turns": .array([
                                     .object([
                                         "turnId": .string("turn-1"),
@@ -202,6 +216,9 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         guard case let .approvalRequested(approval)? = outputs.last else {
             return XCTFail("expected approval output")
         }
+        guard case let .sessionUpsert(session)? = outputs.first else {
+            return XCTFail("expected session output")
+        }
 
         XCTAssertEqual(approval.requestID, "req-1")
         XCTAssertEqual(approval.sessionID, "thr-1")
@@ -209,10 +226,42 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(approval.payload.command, "npm test")
         XCTAssertEqual(approval.cwd, "/tmp/project")
         XCTAssertEqual(approval.reason, "Needs approval")
+        XCTAssertEqual(session.inputTokenCount, 1200)
+        XCTAssertEqual(session.outputTokenCount, 300)
         XCTAssertEqual(
             approval.availableActions.map(\.title),
             ["Allow", "Allow for Session", "Decline", "Cancel"]
         )
+    }
+
+    func testCommandApprovalSessionLeavesTokenCountsEmptyWithoutConversationTotals() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .request(
+                CodexDesktopIPCRequestFrame(
+                    requestID: "req-tokenless",
+                    method: "item/commandExecution/requestApproval",
+                    params: [
+                        "threadId": .string("thr-tokenless"),
+                        "usage": .object([
+                            "inputTokens": .integer(321),
+                            "outputTokens": .integer(123),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .sessionUpsert(session)? = outputs.first else {
+            return XCTFail("expected session upsert output")
+        }
+
+        XCTAssertNil(session.inputTokenCount)
+        XCTAssertNil(session.outputTokenCount)
     }
 
     func testFileChangeApprovalBuildsPreviewFromConversationState() throws {

@@ -191,11 +191,16 @@ public final class AIAgentRuntime {
             var merged = sessions[index]
             merged.lastEventType = session.lastEventType
             merged.activityLabel = session.activityLabel
-            if let inputTokenCount = session.inputTokenCount {
-                merged.inputTokenCount = inputTokenCount
-            }
-            if let outputTokenCount = session.outputTokenCount {
-                merged.outputTokenCount = outputTokenCount
+            if session.host == .codex {
+                merged.inputTokenCount = session.inputTokenCount
+                merged.outputTokenCount = session.outputTokenCount
+            } else {
+                if let inputTokenCount = session.inputTokenCount {
+                    merged.inputTokenCount = inputTokenCount
+                }
+                if let outputTokenCount = session.outputTokenCount {
+                    merged.outputTokenCount = outputTokenCount
+                }
             }
             if let sessionTitle = session.sessionTitle, sessionTitle.isEmpty == false {
                 if merged.sessionTitle?.isEmpty != false {

@@ -104,7 +104,7 @@ public enum CodexDesktopIPCFrame: Equatable, Sendable {
     case request(CodexDesktopIPCRequestFrame)
     case response(CodexDesktopIPCResponseFrame)
     case broadcast(CodexDesktopIPCBroadcastFrame)
-    case clientDiscoveryRequest(requestID: String)
+    case clientDiscoveryRequest(requestID: String, request: CodexDesktopIPCRequestFrame?)
     case clientDiscoveryResponse(requestID: String, canHandle: Bool)
 }
 
@@ -161,25 +161,7 @@ public enum CodexDesktopIPCCodec {
 
         switch type {
         case "request":
-            guard
-                let requestID = dictionary["requestId"] as? String,
-                let method = dictionary["method"] as? String,
-                let sourceClientID = dictionary["sourceClientId"] as? String
-            else {
-                throw CodexDesktopIPCError.invalidFrame
-            }
-
-            let params = try (dictionary["params"] as? [String: Any] ?? [:]).mapValues(JSONValue.init(jsonObject:))
-            return .request(
-                CodexDesktopIPCRequestFrame(
-                    requestID: requestID,
-                    method: method,
-                    params: params,
-                    sourceClientID: sourceClientID,
-                    targetClientID: dictionary["targetClientId"] as? String,
-                    version: dictionary["version"] as? Int
-                )
-            )
+            return .request(try decodeRequestFrame(dictionary))
         case "broadcast":
             guard
                 let method = dictionary["method"] as? String,
@@ -219,7 +201,8 @@ public enum CodexDesktopIPCCodec {
             guard let requestID = dictionary["requestId"] as? String else {
                 throw CodexDesktopIPCError.invalidFrame
             }
-            return .clientDiscoveryRequest(requestID: requestID)
+            let nestedRequest = try (dictionary["request"] as? [String: Any]).map(decodeRequestFrame(_:))
+            return .clientDiscoveryRequest(requestID: requestID, request: nestedRequest)
         case "client-discovery-response":
             guard
                 let requestID = dictionary["requestId"] as? String,
@@ -234,6 +217,26 @@ public enum CodexDesktopIPCCodec {
         default:
             throw CodexDesktopIPCError.unsupportedFrameType(type)
         }
+    }
+
+    private static func decodeRequestFrame(_ dictionary: [String: Any]) throws -> CodexDesktopIPCRequestFrame {
+        guard
+            let requestID = dictionary["requestId"] as? String,
+            let method = dictionary["method"] as? String,
+            let sourceClientID = dictionary["sourceClientId"] as? String
+        else {
+            throw CodexDesktopIPCError.invalidFrame
+        }
+
+        let params = try (dictionary["params"] as? [String: Any] ?? [:]).mapValues(JSONValue.init(jsonObject:))
+        return CodexDesktopIPCRequestFrame(
+            requestID: requestID,
+            method: method,
+            params: params,
+            sourceClientID: sourceClientID,
+            targetClientID: dictionary["targetClientId"] as? String,
+            version: dictionary["version"] as? Int
+        )
     }
 }
 
@@ -287,11 +290,15 @@ private extension CodexDesktopIPCFrame {
                 }
             }
             return object
-        case let .clientDiscoveryRequest(requestID):
-            return [
+        case let .clientDiscoveryRequest(requestID, request):
+            var object: [String: Any] = [
                 "type": "client-discovery-request",
                 "requestId": requestID,
             ]
+            if let request {
+                object["request"] = CodexDesktopIPCFrame.request(request).jsonObject
+            }
+            return object
         case let .clientDiscoveryResponse(requestID, canHandle):
             return [
                 "type": "client-discovery-response",

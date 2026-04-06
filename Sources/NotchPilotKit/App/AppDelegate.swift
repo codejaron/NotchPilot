@@ -86,11 +86,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-#if DEBUG
-        true
-#else
         false
-#endif
     }
 
     private func applySocketPreference() {

@@ -222,14 +222,8 @@ public struct CodexDesktopEventReducer {
 
         session.lastEventType = eventType
         session.activityLabel = label
-        session.inputTokenCount = params.integerValue(at: ["usage", "inputTokens"])
-            ?? params.integerValue(at: ["tokenUsage", "inputTokens"])
-            ?? params.integerValue(at: ["inputTokens"])
-            ?? session.inputTokenCount
-        session.outputTokenCount = params.integerValue(at: ["usage", "outputTokens"])
-            ?? params.integerValue(at: ["tokenUsage", "outputTokens"])
-            ?? params.integerValue(at: ["outputTokens"])
-            ?? session.outputTokenCount
+        // Approval-related requests should not clobber thread-level cumulative token totals
+        // that came from the latest conversation snapshot.
 
         if let threadTitle = params.stringValue(at: ["thread", "name"])
             ?? params.stringValue(at: ["threadName"])
@@ -258,12 +252,8 @@ public struct CodexDesktopEventReducer {
 
         session.lastEventType = eventType
         session.activityLabel = conversationActivityLabel(from: state)
-        session.inputTokenCount = state.integerValue(at: ["latestTokenUsageInfo", "last", "inputTokens"])
-            ?? state.integerValue(at: ["latestTokenUsageInfo", "total", "inputTokens"])
-            ?? session.inputTokenCount
-        session.outputTokenCount = state.integerValue(at: ["latestTokenUsageInfo", "last", "outputTokens"])
-            ?? state.integerValue(at: ["latestTokenUsageInfo", "total", "outputTokens"])
-            ?? session.outputTokenCount
+        session.inputTokenCount = state.integerValue(at: ["latestTokenUsageInfo", "total", "inputTokens"])
+        session.outputTokenCount = state.integerValue(at: ["latestTokenUsageInfo", "total", "outputTokens"])
 
         if let title = conversationTitle(from: state) {
             session.sessionTitle = title

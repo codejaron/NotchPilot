@@ -131,8 +131,11 @@ public final class CodexDesktopMonitor: @unchecked Sendable {
         }
 
         switch frame {
-        case let .clientDiscoveryRequest(requestID):
-            try? client.sendClientDiscoveryResponse(requestID: requestID, canHandle: false)
+        case let .clientDiscoveryRequest(requestID, request):
+            try? client.sendClientDiscoveryResponse(
+                requestID: requestID,
+                canHandle: Self.canHandleDiscoveryRequest(request)
+            )
         case let .request(request):
             if isApprovalRequestMethod(request.method) {
                 emitOutputs(
@@ -207,5 +210,14 @@ public final class CodexDesktopMonitor: @unchecked Sendable {
 
     private func isApprovalRequestMethod(_ method: String) -> Bool {
         method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval"
+    }
+
+    static func canHandleDiscoveryRequest(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
+        guard let request else {
+            return false
+        }
+
+        return request.method == "item/commandExecution/requestApproval"
+            || request.method == "item/fileChange/requestApproval"
     }
 }
