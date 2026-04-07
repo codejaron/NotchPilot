@@ -17,7 +17,7 @@ final class AIAgentRuntimeTests: XCTestCase {
                 command: "npm test"
             ),
             capabilities: .none,
-            availableActions: ApprovalAction.codexDefaultActions(for: .commandExecution),
+            availableActions: [],
             status: .pending
         )
 

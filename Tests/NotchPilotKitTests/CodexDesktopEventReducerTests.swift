@@ -2,7 +2,7 @@ import XCTest
 @testable import NotchPilotKit
 
 final class CodexDesktopEventReducerTests: XCTestCase {
-    func testThreadStreamSnapshotCreatesSessionFromConversationState() throws {
+    func testThreadStreamSnapshotCreatesThreadContextFromConversationState() throws {
         var reducer = CodexDesktopEventReducer()
 
         let outputs = try reducer.consume(
@@ -20,10 +20,6 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                     "type": .string("notLoaded"),
                                 ]),
                                 "latestTokenUsageInfo": .object([
-                                    "last": .object([
-                                        "inputTokens": .integer(123),
-                                        "outputTokens": .integer(45),
-                                    ]),
                                     "total": .object([
                                         "inputTokens": .integer(4567),
                                         "outputTokens": .integer(890),
@@ -46,19 +42,19 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .sessionUpsert(session)? = outputs.last else {
-            return XCTFail("expected session output")
+        guard case let .threadContextUpsert(context)? = outputs.last else {
+            return XCTFail("expected thread context output")
         }
 
-        XCTAssertEqual(session.id, "conv-1")
-        XCTAssertEqual(session.host, .codex)
-        XCTAssertEqual(session.sessionTitle, "Implement desktop IPC")
-        XCTAssertEqual(session.activityLabel, "Working")
-        XCTAssertEqual(session.inputTokenCount, 4567)
-        XCTAssertEqual(session.outputTokenCount, 890)
+        XCTAssertEqual(context.threadID, "conv-1")
+        XCTAssertEqual(context.title, "Implement desktop IPC")
+        XCTAssertEqual(context.activityLabel, "Working")
+        XCTAssertEqual(context.phase, .working)
+        XCTAssertEqual(context.inputTokenCount, 4567)
+        XCTAssertEqual(context.outputTokenCount, 890)
     }
 
-    func testThreadStreamPatchesUpdateExistingSession() throws {
+    func testThreadStreamPatchesUpdateExistingThreadContext() throws {
         var reducer = CodexDesktopEventReducer()
 
         _ = try reducer.consume(
@@ -115,10 +111,6 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                     "op": .string("replace"),
                                     "path": .array([.string("latestTokenUsageInfo")]),
                                     "value": .object([
-                                        "last": .object([
-                                            "inputTokens": .integer(999),
-                                            "outputTokens": .integer(111),
-                                        ]),
                                         "total": .object([
                                             "inputTokens": .integer(7000),
                                             "outputTokens": .integer(1500),
@@ -135,48 +127,41 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .sessionUpsert(session)? = outputs.last else {
-            return XCTFail("expected updated session output")
+        guard case let .threadContextUpsert(context)? = outputs.last else {
+            return XCTFail("expected updated thread context output")
         }
 
-        XCTAssertEqual(session.id, "conv-2")
-        XCTAssertEqual(session.sessionTitle, "Updated Title")
-        XCTAssertEqual(session.activityLabel, "Working")
-        XCTAssertEqual(session.inputTokenCount, 7000)
-        XCTAssertEqual(session.outputTokenCount, 1500)
+        XCTAssertEqual(context.threadID, "conv-2")
+        XCTAssertEqual(context.title, "Updated Title")
+        XCTAssertEqual(context.activityLabel, "Working")
+        XCTAssertEqual(context.phase, .working)
+        XCTAssertEqual(context.inputTokenCount, 7000)
+        XCTAssertEqual(context.outputTokenCount, 1500)
     }
 
-    func testCommandApprovalUsesConversationStateItem() throws {
+    func testThreadStreamUsesExplicitPlanModeBeforeTurnStatus() throws {
         var reducer = CodexDesktopEventReducer()
 
-        _ = try reducer.consume(
+        let outputs = try reducer.consume(
             frame: .broadcast(
                 CodexDesktopIPCBroadcastFrame(
                     method: "thread-stream-state-changed",
                     params: [
-                        "conversationId": .string("thr-1"),
+                        "conversationId": .string("conv-plan"),
                         "change": .object([
                             "type": .string("snapshot"),
                             "conversationState": .object([
-                                "id": .string("thr-1"),
-                                "latestTokenUsageInfo": .object([
-                                    "total": .object([
-                                        "inputTokens": .integer(1200),
-                                        "outputTokens": .integer(300),
-                                    ]),
+                                "id": .string("conv-plan"),
+                                "title": .string("Write a plan"),
+                                "mode": .string("plan"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("running"),
                                 ]),
                                 "turns": .array([
                                     .object([
-                                        "turnId": .string("turn-1"),
+                                        "turnId": .string("turn-plan"),
                                         "status": .string("inProgress"),
-                                        "items": .array([
-                                            .object([
-                                                "id": .string("item-1"),
-                                                "type": .string("commandExecution"),
-                                                "command": .array([.string("npm"), .string("test")]),
-                                                "cwd": .string("/tmp/project"),
-                                            ]),
-                                        ]),
+                                        "items": .array([]),
                                     ]),
                                 ]),
                             ]),
@@ -189,112 +174,29 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        let outputs = try reducer.consume(
-            frame: .request(
-                CodexDesktopIPCRequestFrame(
-                    requestID: "req-1",
-                    method: "item/commandExecution/requestApproval",
-                    params: [
-                        "threadId": .string("thr-1"),
-                        "turnId": .string("turn-1"),
-                        "itemId": .string("item-1"),
-                        "reason": .string("Needs approval"),
-                        "availableDecisions": .array([
-                            .string("accept"),
-                            .string("acceptForSession"),
-                            .string("decline"),
-                            .string("cancel"),
-                        ]),
-                    ],
-                    sourceClientID: "desktop-client",
-                    targetClientID: nil,
-                    version: 1
-                )
-            )
-        )
-
-        guard case let .approvalRequested(approval)? = outputs.last else {
-            return XCTFail("expected approval output")
-        }
-        guard case let .sessionUpsert(session)? = outputs.first else {
-            return XCTFail("expected session output")
+        guard case let .threadContextUpsert(context)? = outputs.last else {
+            return XCTFail("expected thread context output")
         }
 
-        XCTAssertEqual(approval.requestID, "req-1")
-        XCTAssertEqual(approval.sessionID, "thr-1")
-        XCTAssertEqual(approval.approvalKind, .commandExecution)
-        XCTAssertEqual(approval.payload.command, "npm test")
-        XCTAssertEqual(approval.cwd, "/tmp/project")
-        XCTAssertEqual(approval.reason, "Needs approval")
-        XCTAssertEqual(session.inputTokenCount, 1200)
-        XCTAssertEqual(session.outputTokenCount, 300)
-        XCTAssertEqual(
-            approval.availableActions.map(\.title),
-            ["Allow", "Allow for Session", "Decline", "Cancel"]
-        )
+        XCTAssertEqual(context.phase, .plan)
+        XCTAssertEqual(context.activityLabel, "Plan")
     }
 
-    func testCommandApprovalSessionLeavesTokenCountsEmptyWithoutConversationTotals() throws {
+    func testThreadStreamFallsBackToRuntimeStatusWhenNoTurnStatusExists() throws {
         var reducer = CodexDesktopEventReducer()
 
         let outputs = try reducer.consume(
-            frame: .request(
-                CodexDesktopIPCRequestFrame(
-                    requestID: "req-tokenless",
-                    method: "item/commandExecution/requestApproval",
-                    params: [
-                        "threadId": .string("thr-tokenless"),
-                        "usage": .object([
-                            "inputTokens": .integer(321),
-                            "outputTokens": .integer(123),
-                        ]),
-                    ],
-                    sourceClientID: "desktop-client",
-                    targetClientID: nil,
-                    version: 1
-                )
-            )
-        )
-
-        guard case let .sessionUpsert(session)? = outputs.first else {
-            return XCTFail("expected session upsert output")
-        }
-
-        XCTAssertNil(session.inputTokenCount)
-        XCTAssertNil(session.outputTokenCount)
-    }
-
-    func testFileChangeApprovalBuildsPreviewFromConversationState() throws {
-        var reducer = CodexDesktopEventReducer()
-
-        _ = try reducer.consume(
             frame: .broadcast(
                 CodexDesktopIPCBroadcastFrame(
                     method: "thread-stream-state-changed",
                     params: [
-                        "conversationId": .string("thr-2"),
+                        "conversationId": .string("conv-runtime"),
                         "change": .object([
                             "type": .string("snapshot"),
                             "conversationState": .object([
-                                "id": .string("thr-2"),
-                                "turns": .array([
-                                    .object([
-                                        "turnId": .string("turn-2"),
-                                        "status": .string("inProgress"),
-                                        "items": .array([
-                                            .object([
-                                                "id": .string("item-2"),
-                                                "type": .string("fileChange"),
-                                                "changes": .array([
-                                                    .object([
-                                                        "path": .string("/tmp/demo.txt"),
-                                                        "oldText": .string("before"),
-                                                        "newText": .string("after"),
-                                                    ]),
-                                                ]),
-                                            ]),
-                                        ]),
-                                    ]),
+                                "id": .string("conv-runtime"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
                                 ]),
                             ]),
                         ]),
@@ -306,61 +208,11 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        let outputs = try reducer.consume(
-            frame: .request(
-                CodexDesktopIPCRequestFrame(
-                    requestID: "req-2",
-                    method: "item/fileChange/requestApproval",
-                    params: [
-                        "threadId": .string("thr-2"),
-                        "turnId": .string("turn-2"),
-                        "itemId": .string("item-2"),
-                        "reason": .string("Review patch"),
-                    ],
-                    sourceClientID: "desktop-client",
-                    targetClientID: nil,
-                    version: 1
-                )
-            )
-        )
-
-        guard case let .approvalRequested(approval)? = outputs.last else {
-            return XCTFail("expected file approval")
+        guard case let .threadContextUpsert(context)? = outputs.last else {
+            return XCTFail("expected thread context output")
         }
 
-        XCTAssertEqual(approval.approvalKind, .fileChange)
-        XCTAssertEqual(approval.payload.filePath, "/tmp/demo.txt")
-        XCTAssertEqual(approval.payload.originalContent, "before")
-        XCTAssertEqual(approval.payload.diffContent, "after")
-        XCTAssertEqual(
-            approval.availableActions.map(\.title),
-            ["Allow", "Allow for Session", "Decline", "Cancel"]
-        )
+        XCTAssertEqual(context.phase, .connected)
+        XCTAssertEqual(context.activityLabel, "Connected")
     }
-
-    func testResolvedRequestRemovesApprovalByRequestID() throws {
-        var reducer = CodexDesktopEventReducer()
-
-        let outputs = try reducer.consume(
-            frame: .broadcast(
-                CodexDesktopIPCBroadcastFrame(
-                    method: "serverRequest/resolved",
-                    params: [
-                        "threadId": .string("thr-3"),
-                        "requestId": .string("req-3"),
-                    ],
-                    sourceClientID: "desktop-client",
-                    targetClientID: nil,
-                    version: 1
-                )
-            )
-        )
-
-        guard case let .approvalResolved(requestID)? = outputs.last else {
-            return XCTFail("expected resolved request output")
-        }
-
-        XCTAssertEqual(requestID, "req-3")
-    }
-
 }

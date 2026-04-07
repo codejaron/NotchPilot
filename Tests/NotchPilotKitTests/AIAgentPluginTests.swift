@@ -12,6 +12,59 @@ private final class EventRecorder {
     var events: [NotchEvent] = []
 }
 
+private final class FakeCodexContextMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
+    var onThreadContextChanged: (@Sendable (CodexThreadContext) -> Void)?
+    var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
+
+    func start() {}
+    func stop() {}
+
+    func emit(context: CodexThreadContext) {
+        onThreadContextChanged?(context)
+    }
+
+    func emit(connection: CodexDesktopConnectionState) {
+        onConnectionStateChanged?(connection)
+    }
+}
+
+private final class FakeCodexAXMonitor: @unchecked Sendable, CodexDesktopAXMonitoring {
+    var onPermissionStateChanged: (@Sendable (CodexDesktopAXPermissionState) -> Void)?
+    var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
+    private(set) var performedActions: [(CodexSurfaceAction, String)] = []
+    private(set) var selectedOptions: [(String, String)] = []
+    private(set) var updatedTexts: [(String, String)] = []
+
+    func start() {}
+    func stop() {}
+
+    @discardableResult
+    func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
+        performedActions.append((action, surfaceID))
+        return true
+    }
+
+    @discardableResult
+    func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
+        selectedOptions.append((optionID, surfaceID))
+        return true
+    }
+
+    @discardableResult
+    func updateText(_ text: String, on surfaceID: String) -> Bool {
+        updatedTexts.append((text, surfaceID))
+        return true
+    }
+
+    func emit(permission: CodexDesktopAXPermissionState) {
+        onPermissionStateChanged?(permission)
+    }
+
+    func emit(surface: CodexActionableSurface?) {
+        onSurfaceChanged?(surface)
+    }
+}
+
 final class AIAgentPluginTests: XCTestCase {
     func testPermissionRequestEmitsInteractiveSneakPeek() async throws {
         let bus = await MainActor.run { EventBus() }
@@ -246,6 +299,205 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertEqual(activity?.host, .claude)
         XCTAssertEqual(activity?.label, "Approval")
         XCTAssertEqual(activity?.approvalCount, 1)
+    }
+
+    func testCodexActionableSurfaceDrivesCompactActivityAndSessionSummary() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-1",
+                    title: "Write plan",
+                    activityLabel: "Plan",
+                    phase: .plan,
+                    inputTokenCount: 120,
+                    outputTokenCount: 45
+                )
+            )
+            codexAXMonitor.emit(permission: .granted)
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-1",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+
+        XCTAssertEqual(activity?.host, .codex)
+        XCTAssertEqual(activity?.label, "Action Needed")
+        XCTAssertEqual(activity?.approvalCount, 1)
+        XCTAssertEqual(activity?.sessionTitle, "Write plan")
+        XCTAssertEqual(summaries.first?.codexSurfaceID, "surface-1")
+        XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
+    }
+
+    func testPerformingCodexPrimaryActionClearsSurfaceImmediately() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-open",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        await Task.yield()
+
+        await MainActor.run {
+            _ = plugin.performCodexAction(.primary, surfaceID: "surface-open")
+        }
+
+        let performedActions = codexAXMonitor.performedActions
+        let surface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertEqual(performedActions.map(\.0), [.primary])
+        XCTAssertEqual(performedActions.map(\.1), ["surface-open"])
+        XCTAssertNil(surface)
+    }
+
+    func testNilCodexSurfaceImmediatelyClearsCurrentSurface() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-stable",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+            codexAXMonitor.emit(surface: nil)
+        }
+
+        let surface = await MainActor.run { plugin.codexActionableSurface }
+        XCTAssertNil(surface)
+    }
+
+    func testSelectingCodexOptionUpdatesCurrentSurfaceImmediately() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        let surface = CodexActionableSurface(
+            id: "surface-options",
+            summary: "Run command?",
+            primaryButtonTitle: "提交",
+            cancelButtonTitle: "跳过",
+            options: [
+                CodexSurfaceOption(id: "option-1", index: 1, title: "是", isSelected: true),
+                CodexSurfaceOption(id: "option-2", index: 2, title: "总是允许", isSelected: false),
+                CodexSurfaceOption(id: "option-3", index: 3, title: "否，请告知 Codex 如何调整", isSelected: false),
+            ],
+            textInput: CodexSurfaceTextInput(text: "", isEditable: true)
+        )
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexAXMonitor.emit(surface: surface)
+        }
+
+        await Task.yield()
+
+        await MainActor.run {
+            _ = plugin.selectCodexOption("option-3", surfaceID: "surface-options")
+        }
+
+        let selectedOptions = codexAXMonitor.selectedOptions
+        let updatedSurface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertEqual(selectedOptions.map(\.0), ["option-3"])
+        XCTAssertEqual(selectedOptions.map(\.1), ["surface-options"])
+        XCTAssertEqual(
+            updatedSurface?.options.map(\.isSelected),
+            [false, false, true]
+        )
+    }
+
+    func testUpdatingCodexTextUpdatesCurrentSurfaceImmediately() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        let surface = CodexActionableSurface(
+            id: "surface-text",
+            summary: "Run command?",
+            primaryButtonTitle: "提交",
+            cancelButtonTitle: "跳过",
+            options: [
+                CodexSurfaceOption(id: "option-1", index: 1, title: "是", isSelected: false),
+                CodexSurfaceOption(id: "option-2", index: 2, title: "总是允许", isSelected: false),
+                CodexSurfaceOption(id: "option-3", index: 3, title: "否，请告知 Codex 如何调整", isSelected: true),
+            ],
+            textInput: CodexSurfaceTextInput(text: "", isEditable: true)
+        )
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexAXMonitor.emit(surface: surface)
+        }
+
+        await Task.yield()
+
+        await MainActor.run {
+            _ = plugin.updateCodexText("请改用 mv", surfaceID: "surface-text")
+        }
+
+        let updatedTexts = codexAXMonitor.updatedTexts
+        let updatedSurface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertEqual(updatedTexts.map(\.0), ["请改用 mv"])
+        XCTAssertEqual(updatedTexts.map(\.1), ["surface-text"])
+        XCTAssertEqual(updatedSurface?.textInput?.text, "请改用 mv")
     }
 
     func testCompactWidthReservesRealNotchGapForLiveActivity() async throws {

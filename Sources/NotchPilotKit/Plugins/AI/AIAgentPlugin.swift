@@ -12,36 +12,39 @@ public final class AIAgentPlugin: NotchPlugin {
     @Published public var isEnabled = true
     @Published public private(set) var sessions: [AISession] = []
     @Published public private(set) var pendingApprovals: [PendingApproval] = []
+    @Published public private(set) var codexActionableSurface: CodexActionableSurface?
+    @Published public private(set) var codexAXPermission: CodexDesktopAXPermissionState = .notGranted
     @Published public private(set) var lastErrorMessage: String?
 
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
     private let encoder = HookResponseEncoder()
     private let settingsStore: SettingsStore
-    private let codexMonitor: CodexDesktopMonitor
+    private let codexMonitor: any CodexDesktopContextMonitoring
+    private let codexAXMonitor: any CodexDesktopAXMonitoring
 
     private weak var bus: EventBus?
-    private var responders: [String: ApprovalResponder] = [:]
+    private var claudeResponders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
+    private var codexThreadContextsByID: [String: CodexThreadContext] = [:]
+    private var rawCodexSurface: CodexActionableSurface?
 
     public init(
         settingsStore: SettingsStore = .shared,
-        codexMonitor: CodexDesktopMonitor = CodexDesktopMonitor()
+        codexMonitor: any CodexDesktopContextMonitoring = CodexDesktopMonitor(),
+        codexAXMonitor: any CodexDesktopAXMonitoring = CodexDesktopAXMonitor()
     ) {
         self.settingsStore = settingsStore
         self.codexMonitor = codexMonitor
+        self.codexAXMonitor = codexAXMonitor
+        self.codexAXPermission = settingsStore.codexAXPermission
     }
 
     public func activate(bus: EventBus) {
         self.bus = bus
-        codexMonitor.onReducerOutput = { [weak self] output in
+        codexMonitor.onThreadContextChanged = { [weak self] context in
             Task { @MainActor [weak self] in
-                self?.handleCodexReducerOutput(output)
-            }
-        }
-        codexMonitor.onApprovalRequest = { [weak self] approval, responder in
-            Task { @MainActor [weak self] in
-                self?.handleCodexApprovalRequest(approval, responder: responder)
+                self?.handleCodexThreadContextChange(context)
             }
         }
         codexMonitor.onConnectionStateChanged = { [weak self] state in
@@ -49,18 +52,34 @@ public final class AIAgentPlugin: NotchPlugin {
                 self?.handleCodexConnectionStateChange(state)
             }
         }
+        codexAXMonitor.onPermissionStateChanged = { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleCodexAXPermissionChange(state)
+            }
+        }
+        codexAXMonitor.onSurfaceChanged = { [weak self] surface in
+            Task { @MainActor [weak self] in
+                self?.handleCodexSurfaceChange(surface)
+            }
+        }
         codexMonitor.start()
+        codexAXMonitor.start()
     }
 
     public func deactivate() {
         codexMonitor.stop()
-        codexMonitor.onReducerOutput = nil
-        codexMonitor.onApprovalRequest = nil
+        codexMonitor.onThreadContextChanged = nil
         codexMonitor.onConnectionStateChanged = nil
-        responders.removeAll()
+        codexAXMonitor.stop()
+        codexAXMonitor.onPermissionStateChanged = nil
+        codexAXMonitor.onSurfaceChanged = nil
+        claudeResponders.removeAll()
         sneakPeekIDs.removeAll()
+        codexThreadContextsByID.removeAll()
+        rawCodexSurface = nil
         sessions = []
         pendingApprovals = []
+        codexActionableSurface = nil
         bus = nil
     }
 
@@ -77,15 +96,21 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     public func sneakPeekView(context: NotchContext) -> AnyView? {
-        guard pendingApprovals.isEmpty == false else {
+        let attentionCount = pendingApprovals.count + (codexActionableSurface == nil ? 0 : 1)
+        guard attentionCount > 0 else {
             return nil
         }
 
-        return AnyView(AIApprovalBadgeView(count: pendingApprovals.count))
+        return AnyView(
+            AIAttentionBadgeView(
+                count: attentionCount,
+                showsCodexAction: codexActionableSurface != nil
+            )
+        )
     }
 
     public func sneakPeekWidth(context: NotchContext) -> CGFloat? {
-        pendingApprovals.isEmpty ? nil : 280
+        (pendingApprovals.isEmpty && codexActionableSurface == nil) ? nil : 280
     }
 
     public func expandedView(context: NotchContext) -> AnyView {
@@ -107,7 +132,7 @@ public final class AIAgentPlugin: NotchPlugin {
             case let .respondNow(data):
                 respond(data)
             case let .awaitDecision(requestID):
-                responders[requestID] = .claude(respond)
+                claudeResponders[requestID] = respond
                 presentSneakPeek(for: requestID)
             }
         } catch {
@@ -117,7 +142,7 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     public func handleDisconnect(requestID: String) {
-        responders.removeValue(forKey: requestID)
+        claudeResponders.removeValue(forKey: requestID)
 
         guard runtime.expirePendingApproval(requestID: requestID) != nil else {
             return
@@ -145,37 +170,32 @@ public final class AIAgentPlugin: NotchPlugin {
     public func respond(to requestID: String, with action: ApprovalAction) {
         guard
             let approval = pendingApprovals.first(where: { $0.requestID == requestID }),
-            let responder = responders.removeValue(forKey: requestID)
+            let responder = claudeResponders.removeValue(forKey: requestID)
         else {
             return
         }
 
-        switch responder {
-        case let .claude(send):
-            guard case let .claude(decision) = action.payload else {
-                send(Data("{}".utf8))
-                return
-            }
+        guard case let .claude(decision) = action.payload else {
+            responder(Data("{}".utf8))
+            return
+        }
 
-            let effectiveDecision: ApprovalDecision
-            if decision == .persistAllowRule && !approval.capabilities.supportsPersistentRules {
-                effectiveDecision = .allowOnce
-            } else {
-                effectiveDecision = decision
-            }
+        let effectiveDecision: ApprovalDecision
+        if decision == .persistAllowRule && !approval.capabilities.supportsPersistentRules {
+            effectiveDecision = .allowOnce
+        } else {
+            effectiveDecision = decision
+        }
 
-            do {
-                let data = try encoder.encode(
-                    decision: effectiveDecision,
-                    for: approval.host,
-                    eventType: approval.eventType ?? .permissionRequest
-                )
-                send(data)
-            } catch {
-                send(Data("{}".utf8))
-            }
-        case let .codex(send):
-            send(action)
+        do {
+            let data = try encoder.encode(
+                decision: effectiveDecision,
+                for: approval.host,
+                eventType: approval.eventType ?? .permissionRequest
+            )
+            responder(data)
+        } catch {
+            responder(Data("{}".utf8))
         }
 
         _ = runtime.resolvePendingApproval(requestID: requestID)
@@ -183,42 +203,82 @@ public final class AIAgentPlugin: NotchPlugin {
         dismissSneakPeek(for: requestID)
     }
 
-    private func handleCodexReducerOutput(_ output: CodexDesktopReducerOutput) {
-        let effects: [AIAgentRuntime.RuntimeEffect]
-
-        switch output {
-        case let .sessionUpsert(session):
-            effects = runtime.apply(event: .sessionUpsert(session))
-        case let .approvalRequested(approval):
-            effects = runtime.apply(event: .approvalRequested(approval))
-        case let .approvalResolved(requestID):
-            effects = runtime.apply(event: .approvalResolved(requestID: requestID))
+    @discardableResult
+    func performCodexAction(_ action: CodexSurfaceAction, surfaceID: String) -> Bool {
+        let performed = codexAXMonitor.perform(action: action, on: surfaceID)
+        if performed {
+            let previousSurfaceID = rawCodexSurface?.id
+            rawCodexSurface = nil
+            syncState()
+            if let previousSurfaceID {
+                dismissSneakPeek(for: previousSurfaceID)
+            }
         }
-
-        syncState()
-        applyRuntimeEffects(effects)
+        return performed
     }
 
-    private func handleCodexApprovalRequest(
-        _ approval: PendingApproval,
-        responder: @escaping CodexDesktopMonitor.ApprovalResponder
-    ) {
-        responders[approval.requestID] = .codex(responder)
-        let effects = runtime.apply(event: .approvalRequested(approval))
+    @discardableResult
+    func selectCodexOption(_ optionID: String, surfaceID: String) -> Bool {
+        let performed = codexAXMonitor.selectOption(optionID, on: surfaceID)
+        if performed {
+            optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
+                surface.selectingOption(optionID)
+            }
+        }
+        return performed
+    }
+
+    @discardableResult
+    func updateCodexText(_ text: String, surfaceID: String) -> Bool {
+        let performed = codexAXMonitor.updateText(text, on: surfaceID)
+        if performed {
+            optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
+                surface.updatingText(text)
+            }
+        }
+        return performed
+    }
+
+    private func handleCodexThreadContextChange(_ context: CodexThreadContext) {
+        codexThreadContextsByID[context.threadID] = context
         syncState()
-        applyRuntimeEffects(effects)
+    }
+
+    private func handleCodexAXPermissionChange(_ state: CodexDesktopAXPermissionState) {
+        codexAXPermission = state
+        settingsStore.updateCodexAXPermission(state)
+    }
+
+    private func handleCodexSurfaceChange(_ surface: CodexActionableSurface?) {
+        let previousSurfaceID = rawCodexSurface?.id
+        rawCodexSurface = surface
+        syncState()
+        let currentSurfaceID = rawCodexSurface?.id
+
+        if let previousSurfaceID, previousSurfaceID != currentSurfaceID {
+            dismissSneakPeek(for: previousSurfaceID)
+        }
+        if let currentSurfaceID, previousSurfaceID != currentSurfaceID {
+            presentSneakPeek(for: currentSurfaceID)
+        }
     }
 
     private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
         settingsStore.updateCodexDesktopConnection(state)
+    }
 
-        guard state.status != .connected, state.status != .connecting else {
+    private func optimisticallyUpdateCodexSurface(
+        surfaceID: String,
+        transform: (CodexActionableSurface) -> CodexActionableSurface
+    ) {
+        guard let rawCodexSurface,
+              rawCodexSurface.id == surfaceID
+        else {
             return
         }
 
-        let effects = runtime.apply(event: .expireApprovals(host: .codex))
+        self.rawCodexSurface = transform(rawCodexSurface)
         syncState()
-        applyRuntimeEffects(effects)
     }
 
     private func applyRuntimeEffects(_ effects: [AIAgentRuntime.RuntimeEffect]) {
@@ -227,7 +287,7 @@ public final class AIAgentPlugin: NotchPlugin {
             case let .approvalRequested(requestID):
                 presentSneakPeek(for: requestID)
             case let .approvalDismissed(requestID):
-                responders.removeValue(forKey: requestID)
+                claudeResponders.removeValue(forKey: requestID)
                 dismissSneakPeek(for: requestID)
             }
         }
@@ -249,14 +309,61 @@ public final class AIAgentPlugin: NotchPlugin {
         bus?.emit(.sneakPeekRequested(request))
     }
 
-    private enum ApprovalResponder {
-        case claude(@Sendable (Data) -> Void)
-        case codex(CodexDesktopMonitor.ApprovalResponder)
+    private func syncState() {
+        sessions = mergedSessions()
+        pendingApprovals = runtime.pendingApprovals
+        codexActionableSurface = mergedCodexSurface()
     }
 
-    private func syncState() {
-        sessions = runtime.sessions
-        pendingApprovals = runtime.pendingApprovals
+    private func mergedSessions() -> [AISession] {
+        let claudeSessions = runtime.sessions
+        let codexSessions = codexThreadContextsByID.values.map { context in
+            AISession(
+                id: context.threadID,
+                host: .codex,
+                lastEventType: eventType(for: context.phase),
+                activityLabel: context.activityLabel,
+                inputTokenCount: context.inputTokenCount,
+                outputTokenCount: context.outputTokenCount,
+                updatedAt: context.updatedAt,
+                sessionTitle: context.title
+            )
+        }
+
+        return (claudeSessions + codexSessions).sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func mergedCodexSurface() -> CodexActionableSurface? {
+        guard let rawCodexSurface else {
+            return nil
+        }
+
+        let context = preferredCodexContext(for: rawCodexSurface)
+        return rawCodexSurface.merged(with: context)
+    }
+
+    private func preferredCodexContext(for surface: CodexActionableSurface) -> CodexThreadContext? {
+        if let threadID = surface.threadID,
+           let matching = codexThreadContextsByID[threadID] {
+            return matching
+        }
+
+        return codexThreadContextsByID.values.sorted { $0.updatedAt > $1.updatedAt }.first
+    }
+
+    private func eventType(for phase: CodexThreadPhase) -> AIBridgeEventType {
+        switch phase {
+        case .completed:
+            return .postToolUse
+        case .working, .plan:
+            return .unknown("codex/\(phase.rawValue)")
+        case .connected:
+            return .sessionStart
+        case .interrupted:
+            return .stop
+        case .error, .unknown:
+            return .unknown("codex/\(phase.rawValue)")
+        }
     }
 
     private func dismissSneakPeek(for requestID: String) {
@@ -277,6 +384,21 @@ public final class AIAgentPlugin: NotchPlugin {
                 outputTokenCount: matchingSession?.outputTokenCount,
                 approvalCount: pendingApprovals.count,
                 sessionTitle: matchingSession?.sessionTitle
+            )
+        }
+
+        if let codexActionableSurface {
+            let matchingSession = codexActionableSurface.threadID.flatMap { threadID in
+                sessions.first(where: { $0.id == threadID })
+            } ?? sessions.first(where: { $0.host == .codex })
+
+            return AICompactActivity(
+                host: .codex,
+                label: "Action Needed",
+                inputTokenCount: matchingSession?.inputTokenCount,
+                outputTokenCount: matchingSession?.outputTokenCount,
+                approvalCount: 1,
+                sessionTitle: codexActionableSurface.threadTitle ?? matchingSession?.sessionTitle
             )
         }
 
@@ -340,19 +462,21 @@ public final class AIAgentPlugin: NotchPlugin {
             .map { session in
                 let sessionApprovals = pendingApprovalsBySessionID[session.id] ?? []
                 let firstApproval = sessionApprovals.first
+                let codexSurface = codexSurfaceForSession(session)
                 return AIExpandedSessionSummary(
                     id: session.id,
                     host: session.host,
                     title: expandedSessionTitle(for: session),
-                    subtitle: expandedSessionSubtitle(for: session, approval: firstApproval),
-                    approvalCount: sessionApprovals.count,
+                    subtitle: expandedSessionSubtitle(for: session, approval: firstApproval, codexSurface: codexSurface),
+                    approvalCount: sessionApprovals.count + (codexSurface == nil ? 0 : 1),
                     approvalRequestID: firstApproval?.requestID,
+                    codexSurfaceID: codexSurface?.id,
                     updatedAt: session.updatedAt
                 )
             }
             .sorted { lhs, rhs in
-                if lhs.hasPendingApproval != rhs.hasPendingApproval {
-                    return lhs.hasPendingApproval
+                if lhs.hasAttention != rhs.hasAttention {
+                    return lhs.hasAttention
                 }
                 return lhs.updatedAt > rhs.updatedAt
             }
@@ -368,7 +492,11 @@ public final class AIAgentPlugin: NotchPlugin {
         return sessionTitle
     }
 
-    func expandedSessionSubtitle(for session: AISession, approval: PendingApproval?) -> String {
+    func expandedSessionSubtitle(
+        for session: AISession,
+        approval: PendingApproval?,
+        codexSurface: CodexActionableSurface?
+    ) -> String {
         if let approval {
             if approval.approvalKind == .networkAccess {
                 return "Network Access"
@@ -376,6 +504,12 @@ public final class AIAgentPlugin: NotchPlugin {
             if approval.payload.toolName.isEmpty == false {
                 return approval.payload.toolName
             }
+        }
+
+        if let codexSurface {
+            return codexSurface.options.isEmpty && codexSurface.textInput == nil
+                ? "Action Needed"
+                : "Approval Ready"
         }
 
         return session.activityLabel
@@ -412,6 +546,22 @@ public final class AIAgentPlugin: NotchPlugin {
         }
         return "\(value)"
     }
+
+    private func codexSurfaceForSession(_ session: AISession) -> CodexActionableSurface? {
+        guard session.host == .codex,
+              let codexActionableSurface
+        else {
+            return nil
+        }
+
+        if let threadID = codexActionableSurface.threadID {
+            return threadID == session.id ? codexActionableSurface : nil
+        }
+
+        return sessions.first(where: { $0.host == .codex && $0.id == session.id }) != nil
+            ? codexActionableSurface
+            : nil
+    }
 }
 
 struct AICompactActivity: Equatable {
@@ -430,10 +580,15 @@ struct AIExpandedSessionSummary: Equatable, Identifiable {
     let subtitle: String
     let approvalCount: Int
     let approvalRequestID: String?
+    let codexSurfaceID: String?
     let updatedAt: Date
 
     var hasPendingApproval: Bool {
         approvalRequestID != nil
+    }
+
+    var hasAttention: Bool {
+        approvalRequestID != nil || codexSurfaceID != nil
     }
 }
 
@@ -812,8 +967,9 @@ private enum CompactTextMeasurer {
     }
 }
 
-private struct AIApprovalBadgeView: View {
+private struct AIAttentionBadgeView: View {
     let count: Int
+    let showsCodexAction: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -821,7 +977,7 @@ private struct AIApprovalBadgeView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.orange)
 
-            Text("\(count) approval\(count == 1 ? "" : "s") waiting")
+            Text(labelText)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
 
@@ -831,17 +987,30 @@ private struct AIApprovalBadgeView: View {
         }
         .padding(.vertical, 10)
     }
+
+    private var labelText: String {
+        if showsCodexAction && count == 1 {
+            return "Codex action waiting"
+        }
+        if showsCodexAction {
+            return "\(count) items waiting"
+        }
+        return "\(count) approval\(count == 1 ? "" : "s") waiting"
+    }
 }
 
 private struct AIExpandedView: View {
     @ObservedObject var plugin: AIAgentPlugin
     @State private var approvalReviewState = AIApprovalReviewState()
+    @State private var selectedCodexSurfaceID: String?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 14) {
                 if let selectedApproval {
                     approvalDetailView(selectedApproval)
+                } else if let selectedCodexSurface {
+                    codexSurfaceDetailView(selectedCodexSurface)
                 } else {
                     sessionListView
                 }
@@ -852,6 +1021,14 @@ private struct AIExpandedView: View {
         .onChange(of: plugin.pendingApprovals.map(\.requestID)) { _, requestIDs in
             approvalReviewState.syncPendingRequestIDs(requestIDs)
         }
+        .onChange(of: plugin.codexActionableSurface?.id) { _, surfaceID in
+            if selectedCodexSurfaceID == surfaceID {
+                return
+            }
+            if surfaceID == nil {
+                selectedCodexSurfaceID = nil
+            }
+        }
     }
 
     private var selectedApproval: PendingApproval? {
@@ -860,6 +1037,16 @@ private struct AIExpandedView: View {
         }
 
         return plugin.pendingApprovals.first(where: { $0.requestID == selectedApprovalRequestID })
+    }
+
+    private var selectedCodexSurface: CodexActionableSurface? {
+        guard let selectedCodexSurfaceID else {
+            return nil
+        }
+
+        return plugin.codexActionableSurface?.id == selectedCodexSurfaceID
+            ? plugin.codexActionableSurface
+            : nil
     }
 
     private var sessionListView: some View {
@@ -894,7 +1081,7 @@ private struct AIExpandedView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Button {
-                    approvalReviewState.exitReviewing()
+                    exitDetail()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
@@ -931,6 +1118,51 @@ private struct AIExpandedView: View {
         }
     }
 
+    private func codexSurfaceDetailView(_ surface: CodexActionableSurface) -> some View {
+        let session = surface.threadID.flatMap { threadID in
+            plugin.sessions.first(where: { $0.id == threadID })
+        } ?? plugin.sessions.first(where: { $0.host == .codex })
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Button {
+                    exitDetail()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Back")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.white.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+
+                Circle()
+                    .fill(hostColor(for: .codex))
+                    .frame(width: 8, height: 8)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(surface.threadTitle ?? session.map(plugin.expandedSessionTitle(for:)) ?? plugin.hostDisplayName(for: .codex))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(codexSurfaceHeading(for: surface))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                settingsButton
+            }
+
+            codexSurfaceCard(surface)
+        }
+    }
+
     private var settingsButton: some View {
         Button {
             NotificationCenter.default.post(name: .openSettings, object: nil)
@@ -946,10 +1178,13 @@ private struct AIExpandedView: View {
 
     private func sessionRow(_ summary: AIExpandedSessionSummary) -> some View {
         Button {
-            guard let approvalRequestID = summary.approvalRequestID else {
-                return
+            if let approvalRequestID = summary.approvalRequestID {
+                selectedCodexSurfaceID = nil
+                approvalReviewState.beginReviewing(requestID: approvalRequestID)
+            } else if let codexSurfaceID = summary.codexSurfaceID {
+                approvalReviewState.exitReviewing()
+                selectedCodexSurfaceID = codexSurfaceID
             }
-            approvalReviewState.beginReviewing(requestID: approvalRequestID)
         } label: {
             HStack(spacing: 12) {
                 VStack(spacing: 8) {
@@ -957,7 +1192,7 @@ private struct AIExpandedView: View {
                         .fill(hostColor(for: summary.host))
                         .frame(width: 8, height: 8)
 
-                    if summary.hasPendingApproval {
+                    if summary.hasAttention {
                         Circle()
                             .fill(Color.orange.opacity(0.85))
                             .frame(width: 5, height: 5)
@@ -976,14 +1211,14 @@ private struct AIExpandedView: View {
 
                     Text(summary.subtitle)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(summary.hasPendingApproval ? .orange : .white.opacity(0.62))
+                        .foregroundStyle(summary.hasAttention ? .orange : .white.opacity(0.62))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
 
                 Spacer()
 
-                if summary.hasPendingApproval {
+                if summary.hasAttention {
                     Text("\(summary.approvalCount)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .padding(.horizontal, 8)
@@ -1001,7 +1236,254 @@ private struct AIExpandedView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(summary.hasPendingApproval == false)
+        .disabled(summary.hasAttention == false)
+    }
+
+    private func exitDetail() {
+        approvalReviewState.exitReviewing()
+        selectedCodexSurfaceID = nil
+    }
+
+    private func codexSurfaceCard(_ surface: CodexActionableSurface) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(hostColor(for: .codex))
+                    .frame(width: 8, height: 8)
+
+                Text(codexSurfaceHeading(for: surface))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+
+                Text("Codex")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Spacer()
+            }
+
+            codexSurfaceMetadata(surface)
+            commandPreview(surface.summary, icon: "rectangle.and.text.magnifyingglass")
+            codexSurfaceControls(surface)
+            codexSurfaceButtons(surface)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func codexSurfaceMetadata(_ surface: CodexActionableSurface) -> some View {
+        let rows = codexSurfaceMetadataRows(for: surface)
+        if rows.isEmpty == false {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(row.label)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.42))
+                            .frame(width: 62, alignment: .leading)
+
+                        Text(row.value)
+                            .font(.system(size: 11, weight: .medium, design: row.monospaced ? .monospaced : .rounded))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(3)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+        }
+    }
+
+    private func codexSurfaceMetadataRows(for surface: CodexActionableSurface) -> [ApprovalMetadataRow] {
+        if let threadTitle = surface.threadTitle, threadTitle.isEmpty == false {
+            return [ApprovalMetadataRow(label: "Thread", value: threadTitle, monospaced: false)]
+        }
+        if let threadID = surface.threadID, threadID.isEmpty == false {
+            return [ApprovalMetadataRow(label: "Thread", value: threadID, monospaced: true)]
+        }
+        return []
+    }
+
+    private func codexSurfaceButtons(_ surface: CodexActionableSurface) -> some View {
+        let columns = [
+            GridItem(.flexible(minimum: 120), spacing: 10),
+            GridItem(.flexible(minimum: 120), spacing: 10),
+        ]
+
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            codexSurfaceActionButton(
+                title: surface.cancelButtonTitle,
+                style: .destructive
+            ) {
+                _ = plugin.performCodexAction(.cancel, surfaceID: surface.id)
+            }
+
+            codexSurfaceActionButton(
+                title: surface.primaryButtonTitle,
+                style: .primary
+            ) {
+                _ = plugin.performCodexAction(.primary, surfaceID: surface.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func codexSurfaceControls(_ surface: CodexActionableSurface) -> some View {
+        if surface.options.isEmpty == false || surface.textInput != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                if surface.options.isEmpty == false {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(surface.options) { option in
+                            codexSurfaceOptionRow(option, surfaceID: surface.id)
+                        }
+                    }
+                }
+
+                if let textInput = surface.textInput {
+                    codexSurfaceTextInput(
+                        textInput,
+                        surface: surface,
+                        index: surface.options.count + 1
+                    )
+                }
+            }
+        }
+    }
+
+    private func codexSurfaceOptionRow(_ option: CodexSurfaceOption, surfaceID: String) -> some View {
+        Button {
+            _ = plugin.selectCodexOption(option.id, surfaceID: surfaceID)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Text("\(option.index).")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(option.isSelected ? .black.opacity(0.75) : .white.opacity(0.45))
+                    .frame(width: 20, alignment: .leading)
+
+                Text(option.title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(option.isSelected ? .black : .white.opacity(0.88))
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if option.isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.black.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(option.isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.07))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(option.isSelected ? Color.clear : Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func codexSurfaceTextInput(
+        _ textInput: CodexSurfaceTextInput,
+        surface: CodexActionableSurface,
+        index: Int
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let title = textInput.title, title.isEmpty == false {
+                HStack(alignment: .top, spacing: 12) {
+                    Text("\(index).")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 20, alignment: .leading)
+
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("Feedback")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+
+            TextEditor(text: codexTextBinding(for: surface))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .frame(minHeight: 80, maxHeight: 110)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.07))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .disabled(textInput.isEditable == false)
+        }
+    }
+
+    private func codexTextBinding(for surface: CodexActionableSurface) -> Binding<String> {
+        Binding(
+            get: {
+                plugin.codexActionableSurface?.id == surface.id
+                    ? plugin.codexActionableSurface?.textInput?.text ?? surface.textInput?.text ?? ""
+                    : surface.textInput?.text ?? ""
+            },
+            set: { newValue in
+                _ = plugin.updateCodexText(newValue, surfaceID: surface.id)
+            }
+        )
+    }
+
+    private func codexSurfaceActionButton(
+        title: String,
+        style: ApprovalActionStyle,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(foregroundColor(for: style))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(backgroundFill(for: style))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(borderColor(for: style), lineWidth: borderLineWidth(for: style))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func approvalCard(_ approval: PendingApproval) -> some View {
@@ -1201,6 +1683,12 @@ private struct AIExpandedView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func codexSurfaceHeading(for surface: CodexActionableSurface) -> String {
+        surface.options.isEmpty && surface.textInput == nil
+            ? "Codex Approval"
+            : "Codex Approval Mirror"
     }
 
     private func approvalHeading(for approval: PendingApproval) -> String {

@@ -23,11 +23,8 @@ public struct CodexDesktopConnectionState: Equatable, Sendable {
     public static let connected = CodexDesktopConnectionState(status: .connected)
 }
 
-public final class CodexDesktopMonitor: @unchecked Sendable {
-    public typealias ApprovalResponder = @Sendable (ApprovalAction) -> Void
-
-    public var onReducerOutput: (@Sendable (CodexDesktopReducerOutput) -> Void)?
-    public var onApprovalRequest: (@Sendable (PendingApproval, @escaping ApprovalResponder) -> Void)?
+public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
+    public var onThreadContextChanged: (@Sendable (CodexThreadContext) -> Void)?
     public var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
 
     private let queue = DispatchQueue(label: "NotchPilot.CodexDesktopMonitor")
@@ -125,6 +122,7 @@ public final class CodexDesktopMonitor: @unchecked Sendable {
         emitConnectionState(CodexDesktopConnectionState(status: .error, message: lastError))
         scheduleRetry()
     }
+
     private func handle(frame: CodexDesktopIPCFrame) {
         guard let client else {
             return
@@ -137,46 +135,19 @@ public final class CodexDesktopMonitor: @unchecked Sendable {
                 canHandle: Self.canHandleDiscoveryRequest(request)
             )
         case let .request(request):
-            if isApprovalRequestMethod(request.method) {
-                emitOutputs(
-                    (try? reducer.consume(frame: frame)) ?? [],
-                    approvalResponder: { [weak self] action in
-                        guard let self else { return }
-                        self.queue.async { [self] in
-                            guard let client = self.client else { return }
-                            guard case let .codex(payload) = action.payload else { return }
-                            try? client.sendSuccessResponse(
-                                requestID: request.requestID,
-                                method: request.method,
-                                result: .object([
-                                    "decision": payload,
-                                ])
-                            )
-                        }
-                    }
-                )
-            } else {
-                try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
-            }
+            try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
         case .broadcast:
-            emitOutputs((try? reducer.consume(frame: frame)) ?? [], approvalResponder: nil)
+            emitOutputs((try? reducer.consume(frame: frame)) ?? [])
         case .response, .clientDiscoveryResponse:
             break
         }
     }
 
-    private func emitOutputs(
-        _ outputs: [CodexDesktopReducerOutput],
-        approvalResponder: ApprovalResponder?
-    ) {
+    private func emitOutputs(_ outputs: [CodexDesktopReducerOutput]) {
         for output in outputs {
             switch output {
-            case .approvalRequested(let approval):
-                if let approvalResponder {
-                    onApprovalRequest?(approval, approvalResponder)
-                }
-            default:
-                onReducerOutput?(output)
+            case let .threadContextUpsert(context):
+                onThreadContextChanged?(context)
             }
         }
     }
@@ -208,16 +179,7 @@ public final class CodexDesktopMonitor: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func isApprovalRequestMethod(_ method: String) -> Bool {
-        method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval"
-    }
-
-    static func canHandleDiscoveryRequest(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
-        guard let request else {
-            return false
-        }
-
-        return request.method == "item/commandExecution/requestApproval"
-            || request.method == "item/fileChange/requestApproval"
+    static func canHandleDiscoveryRequest(_: CodexDesktopIPCRequestFrame?) -> Bool {
+        return false
     }
 }

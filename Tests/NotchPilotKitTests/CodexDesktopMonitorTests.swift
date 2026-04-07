@@ -2,7 +2,7 @@ import XCTest
 @testable import NotchPilotKit
 
 final class CodexDesktopMonitorTests: XCTestCase {
-    func testCanHandleDiscoveryRequestOnlyForApprovalMethods() {
+    func testCanHandleDiscoveryRequestAlwaysReturnsFalse() {
         let approvalRequest = CodexDesktopIPCRequestFrame(
             requestID: "req-1",
             method: "item/commandExecution/requestApproval",
@@ -20,7 +20,7 @@ final class CodexDesktopMonitorTests: XCTestCase {
             version: 1
         )
 
-        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(approvalRequest))
+        XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(approvalRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nonApprovalRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nil))
     }

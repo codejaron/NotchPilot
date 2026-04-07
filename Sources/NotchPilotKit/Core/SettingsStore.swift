@@ -1,4 +1,5 @@
 import Combine
+import ApplicationServices
 import Foundation
 
 @MainActor
@@ -22,6 +23,7 @@ public final class SettingsStore: ObservableObject {
     @Published public var claudeHooksNeedUpdate: Bool
 
     @Published public var codexDesktopConnection: CodexDesktopConnectionState
+    @Published public var codexAXPermission: CodexDesktopAXPermissionState
 
     @Published public var autoStartSocket: Bool {
         didSet {
@@ -61,6 +63,7 @@ public final class SettingsStore: ObservableObject {
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
         self.claudeHooksNeedUpdate = false
         self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
+        self.codexAXPermission = AXIsProcessTrusted() ? .granted : .notGranted
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
     }
@@ -79,5 +82,9 @@ public final class SettingsStore: ObservableObject {
 
     public func updateCodexDesktopConnection(_ state: CodexDesktopConnectionState) {
         codexDesktopConnection = state
+    }
+
+    public func updateCodexAXPermission(_ state: CodexDesktopAXPermissionState) {
+        codexAXPermission = state
     }
 }
