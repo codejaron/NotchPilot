@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class ScreenSessionModelTests: XCTestCase {
-    func testInteractiveSneakPeekHidesWhileExpandedAndReturnsWhenClosed() {
+    func testInteractiveSneakPeekAutoOpensAndReturnsToSneakPeekWhenClosed() {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(
                 id: "primary",
@@ -23,10 +23,6 @@ final class ScreenSessionModelTests: XCTestCase {
         )
 
         session.enqueue(request)
-        XCTAssertEqual(session.notchState, .sneakPeek)
-        XCTAssertTrue(session.showsSneakPeekOverlay)
-
-        session.open(pluginID: "ai")
         XCTAssertEqual(session.notchState, .open)
         XCTAssertFalse(session.showsSneakPeekOverlay)
 
@@ -134,7 +130,7 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertTrue(session.showsSneakPeekOverlay)
     }
 
-    func testHoveringSneakPeekOpensNotchWithoutClick() async {
+    func testHoveringNonInteractiveSneakPeekOpensNotchWithoutClick() async {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(
                 id: "primary",
@@ -148,7 +144,7 @@ final class ScreenSessionModelTests: XCTestCase {
                 pluginID: "ai",
                 priority: 1000,
                 target: .activeScreen,
-                isInteractive: true,
+                isInteractive: false,
                 autoDismissAfter: nil
             )
         )

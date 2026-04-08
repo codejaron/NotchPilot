@@ -190,11 +190,23 @@ public final class ScreenSessionModel: ObservableObject {
             autoDismissTask = nil
         }
 
-        if notchState != .open {
+        let didAutoOpen = autoOpenCurrentSneakPeekIfNeeded()
+        if didAutoOpen == false, notchState != .open {
             updatePresentationState()
         }
 
-        layoutDidChange?()
+        if didAutoOpen == false {
+            layoutDidChange?()
+        }
+    }
+
+    private func autoOpenCurrentSneakPeekIfNeeded() -> Bool {
+        guard let request = currentSneakPeek, request.isInteractive, notchState != .open else {
+            return false
+        }
+
+        open(pluginID: request.pluginID, reason: .programmatic)
+        return true
     }
 
     private func scheduleHoverClose() {

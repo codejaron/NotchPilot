@@ -201,6 +201,377 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertFalse(marksActivity)
     }
 
+    func testThreadStreamSnapshotEmitsActionableApprovalRequestFromConversationRequests() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-approval"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-approval"),
+                                "title": .string("Needs approval"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(2),
+                                        "params": .object([
+                                            "threadId": .string("conv-approval"),
+                                            "reason": .string("Do you want to run this?"),
+                                            "command": .string("/bin/zsh -lc date"),
+                                            "cwd": .string("/Users/jaron/data/project/NotchPilot"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                                .string("cancel"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .approvalRequestChanged(request)? = outputs.last else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "2")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+        XCTAssertEqual(request?.params["threadId"]?.stringValue, "conv-approval")
+        XCTAssertEqual(request?.params["command"]?.stringValue, "/bin/zsh -lc date")
+    }
+
+    func testThreadStreamPatchesClearActionableApprovalRequestWhenRequestsBecomeEmpty() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-clear-approval"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-clear-approval"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(5),
+                                        "params": .object([
+                                            "threadId": .string("conv-clear-approval"),
+                                            "reason": .string("Approve?"),
+                                            "command": .string("date"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-clear-approval"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("requests")]),
+                                    "value": .array([]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .approvalRequestChanged(request)? = outputs.last else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertNil(request)
+    }
+
+    func testThreadStreamPatchesEmitApprovalRequestWhenArrayIndexPathUsesStringIndex() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-string-index-approval"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-string-index-approval"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "requests": .array([]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-string-index-approval"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("add"),
+                                    "path": .array([.string("requests"), .string("0")]),
+                                    "value": .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .string("req-string-index"),
+                                        "params": .object([
+                                            "threadId": .string("conv-string-index-approval"),
+                                            "reason": .string("Approve string index patch?"),
+                                            "command": .string("date"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard let approvalOutput = outputs.first(where: {
+            if case .approvalRequestChanged = $0 {
+                return true
+            }
+            return false
+        }) else {
+            return XCTFail("expected approval request output")
+        }
+
+        guard case let .approvalRequestChanged(request) = approvalOutput else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "req-string-index")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+    }
+
+    func testThreadStreamPatchesCanCreateApprovalRequestWithoutPriorSnapshot() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-patch-first-approval"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("requests")]),
+                                    "value": .array([
+                                        .object([
+                                            "method": .string("item/commandExecution/requestApproval"),
+                                            "id": .string("req-patch-first"),
+                                            "params": .object([
+                                                "threadId": .string("conv-patch-first-approval"),
+                                                "reason": .string("Approve without snapshot?"),
+                                                "command": .string("date"),
+                                                "availableDecisions": .array([
+                                                    .string("accept"),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard let approvalOutput = outputs.first(where: {
+            if case .approvalRequestChanged = $0 {
+                return true
+            }
+            return false
+        }) else {
+            return XCTFail("expected approval request output")
+        }
+
+        guard case let .approvalRequestChanged(request) = approvalOutput else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "req-patch-first")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+    }
+
+    func testThreadStreamPatchesEmitApprovalRequestAfterEmptyRequestsPatchForLiveSequence() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let clearOutputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-sequence"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("requests")]),
+                                    "value": .array([]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertFalse(clearOutputs.contains(where: {
+            if case .approvalRequestChanged = $0 {
+                return true
+            }
+            return false
+        }))
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-sequence"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("add"),
+                                    "path": .array([.string("requests"), .integer(0)]),
+                                    "value": .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(66),
+                                        "params": .object([
+                                            "threadId": .string("conv-live-sequence"),
+                                            "turnId": .string("turn-live"),
+                                            "itemId": .string("item-live"),
+                                            "reason": .string("Do you want to approve deleting the temporary directory I just created for this test?"),
+                                            "command": .string("/bin/zsh -lc \"rm -rf '/tmp/live-sequence'\""),
+                                            "cwd": .string("/tmp"),
+                                            "commandActions": .array([
+                                                .object([
+                                                    "type": .string("unknown"),
+                                                    "command": .string("rm -rf '/tmp/live-sequence'"),
+                                                ]),
+                                            ]),
+                                            "proposedExecpolicyAmendment": .array([
+                                                .string("rm"),
+                                                .string("-rf"),
+                                                .string("/tmp/live-sequence"),
+                                            ]),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                                .object([
+                                                    "acceptWithExecpolicyAmendment": .object([
+                                                        "execpolicy_amendment": .array([
+                                                            .string("rm"),
+                                                            .string("-rf"),
+                                                            .string("/tmp/live-sequence"),
+                                                        ]),
+                                                    ]),
+                                                ]),
+                                                .string("cancel"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard let approvalOutput = outputs.first(where: {
+            if case .approvalRequestChanged = $0 {
+                return true
+            }
+            return false
+        }) else {
+            return XCTFail("expected approval request output")
+        }
+
+        guard case let .approvalRequestChanged(request) = approvalOutput else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "66")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+        XCTAssertEqual(request?.params["threadId"]?.stringValue, "conv-live-sequence")
+    }
+
     func testThreadStreamUsesExplicitPlanModeBeforeTurnStatus() throws {
         var reducer = CodexDesktopEventReducer()
 

@@ -97,4 +97,136 @@ final class CodexDesktopIPCFramingTests: XCTestCase {
         XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
         XCTAssertEqual(request?.params["threadId"]?.stringValue, "thr-1")
     }
+
+    func testDecodeLiveApprovalPatchPreservesArrayIndexAndReducerEmitsApproval() throws {
+        let clearPayload: [String: Any] = [
+            "type": "broadcast",
+            "method": "thread-stream-state-changed",
+            "params": [
+                "conversationId": "conv-live-raw",
+                "change": [
+                    "type": "patches",
+                    "patches": [
+                        [
+                            "op": "replace",
+                            "path": ["requests"],
+                            "value": [],
+                        ],
+                    ],
+                ],
+            ],
+            "sourceClientId": "desktop-client",
+            "version": 1,
+        ]
+
+        let addPayload: [String: Any] = [
+            "type": "broadcast",
+            "method": "thread-stream-state-changed",
+            "params": [
+                "conversationId": "conv-live-raw",
+                "change": [
+                    "type": "patches",
+                    "patches": [
+                        [
+                            "op": "add",
+                            "path": ["requests", 0],
+                            "value": [
+                                "method": "item/commandExecution/requestApproval",
+                                "id": 96,
+                                "params": [
+                                    "threadId": "conv-live-raw",
+                                    "turnId": "turn-live-raw",
+                                    "itemId": "item-live-raw",
+                                    "reason": "Do you want to approve deleting the temporary directory I just created for this test?",
+                                    "command": "/bin/zsh -lc \"rm -rf '/tmp/live-raw'\"",
+                                    "cwd": "/tmp",
+                                    "commandActions": [
+                                        [
+                                            "type": "unknown",
+                                            "command": "rm -rf '/tmp/live-raw'",
+                                        ],
+                                    ],
+                                    "proposedExecpolicyAmendment": [
+                                        "rm",
+                                        "-rf",
+                                        "/tmp/live-raw",
+                                    ],
+                                    "availableDecisions": [
+                                        "accept",
+                                        [
+                                            "acceptWithExecpolicyAmendment": [
+                                                "execpolicy_amendment": [
+                                                    "rm",
+                                                    "-rf",
+                                                    "/tmp/live-raw",
+                                                ],
+                                            ],
+                                        ],
+                                        "cancel",
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            "op": "replace",
+                            "path": ["hasUnreadTurn"],
+                            "value": true,
+                        ],
+                    ],
+                ],
+            ],
+            "sourceClientId": "desktop-client",
+            "version": 1,
+        ]
+
+        var clearBuffer = Data(count: 4)
+        let clearPayloadData = try JSONSerialization.data(withJSONObject: clearPayload, options: [])
+        clearBuffer.withUnsafeMutableBytes { rawBuffer in
+            rawBuffer.storeBytes(of: UInt32(clearPayloadData.count).littleEndian, as: UInt32.self)
+        }
+        clearBuffer.append(clearPayloadData)
+
+        var addBuffer = Data(count: 4)
+        let addPayloadData = try JSONSerialization.data(withJSONObject: addPayload, options: [])
+        addBuffer.withUnsafeMutableBytes { rawBuffer in
+            rawBuffer.storeBytes(of: UInt32(addPayloadData.count).littleEndian, as: UInt32.self)
+        }
+        addBuffer.append(addPayloadData)
+
+        let clearFrames = try CodexDesktopIPCCodec.decodeFrames(from: &clearBuffer)
+        let addFrames = try CodexDesktopIPCCodec.decodeFrames(from: &addBuffer)
+
+        guard case let .broadcast(addBroadcast)? = addFrames.first else {
+            return XCTFail("expected add broadcast frame")
+        }
+
+        let addPatches = addBroadcast.params.objectValue(at: ["change"])?.arrayValue(at: ["patches"])
+        let addPath = addPatches?.first?.objectValue?.arrayValue(at: ["path"])
+        XCTAssertEqual(addPath?.count, 2)
+        XCTAssertEqual(addPath?.first?.stringValue, "requests")
+        XCTAssertEqual(addPath?.dropFirst().first?.integerValue, 0)
+
+        var reducer = CodexDesktopEventReducer()
+        for frame in clearFrames {
+            _ = try reducer.consume(frame: frame)
+        }
+
+        let outputs = try addFrames.flatMap { try reducer.consume(frame: $0) }
+
+        guard let approvalOutput = outputs.first(where: {
+            if case .approvalRequestChanged = $0 {
+                return true
+            }
+            return false
+        }) else {
+            return XCTFail("expected approval request output")
+        }
+
+        guard case let .approvalRequestChanged(request) = approvalOutput else {
+            return XCTFail("expected approval request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "96")
+        XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
+    }
 }

@@ -22,7 +22,7 @@ public final class AIAgentPlugin: NotchPlugin {
     private let parser = HookEventParser()
     private let encoder = HookResponseEncoder()
     private let settingsStore: SettingsStore
-    private let codexMonitor: any CodexDesktopContextMonitoring
+    private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
     private let codexAXMonitor: any CodexDesktopAXMonitoring
     private let nowProvider: @Sendable () -> Date
 
@@ -30,11 +30,11 @@ public final class AIAgentPlugin: NotchPlugin {
     private var claudeResponders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
     private var codexThreads: CodexThreadRegistry
-    private var rawCodexSurface: CodexActionableSurface?
+    private var codexSurfaceState = AICodexSurfaceSourceState()
 
     public init(
         settingsStore: SettingsStore = .shared,
-        codexMonitor: any CodexDesktopContextMonitoring = CodexDesktopMonitor(),
+        codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
         codexAXMonitor: any CodexDesktopAXMonitoring = CodexDesktopAXMonitor(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
@@ -58,6 +58,11 @@ public final class AIAgentPlugin: NotchPlugin {
                 $0.handleCodexConnectionStateChange(state)
             }
         }
+        codexMonitor.onSurfaceChanged = { [weak self] surface in
+            self?.performOnMainActor {
+                $0.handleCodexIPCSurfaceChange(surface)
+            }
+        }
         codexAXMonitor.onPermissionStateChanged = { [weak self] state in
             self?.performOnMainActor {
                 $0.handleCodexAXPermissionChange(state)
@@ -65,7 +70,7 @@ public final class AIAgentPlugin: NotchPlugin {
         }
         codexAXMonitor.onSurfaceChanged = { [weak self] surface in
             self?.performOnMainActor {
-                $0.handleCodexSurfaceChange(surface)
+                $0.handleCodexAXSurfaceChange(surface)
             }
         }
         codexMonitor.start()
@@ -76,13 +81,14 @@ public final class AIAgentPlugin: NotchPlugin {
         codexMonitor.stop()
         codexMonitor.onThreadContextChanged = nil
         codexMonitor.onConnectionStateChanged = nil
+        codexMonitor.onSurfaceChanged = nil
         codexAXMonitor.stop()
         codexAXMonitor.onPermissionStateChanged = nil
         codexAXMonitor.onSurfaceChanged = nil
         claudeResponders.removeAll()
         sneakPeekIDs.removeAll()
         codexThreads.reset()
-        rawCodexSurface = nil
+        codexSurfaceState = AICodexSurfaceSourceState()
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
@@ -229,10 +235,11 @@ public final class AIAgentPlugin: NotchPlugin {
 
     @discardableResult
     func performCodexAction(_ action: CodexSurfaceAction, surfaceID: String) -> Bool {
-        let performed = codexAXMonitor.perform(action: action, on: surfaceID)
+        let performed = codexMonitor.perform(action: action, on: surfaceID)
+            || codexAXMonitor.perform(action: action, on: surfaceID)
         if performed {
-            let previousSurfaceID = rawCodexSurface?.id
-            rawCodexSurface = nil
+            let previousSurfaceID = codexSurfaceState.effectiveSurface?.id
+            codexSurfaceState = AICodexSurfaceSourceState()
             syncState()
             if let previousSurfaceID {
                 dismissSneakPeek(for: previousSurfaceID)
@@ -243,7 +250,8 @@ public final class AIAgentPlugin: NotchPlugin {
 
     @discardableResult
     func selectCodexOption(_ optionID: String, surfaceID: String) -> Bool {
-        let performed = codexAXMonitor.selectOption(optionID, on: surfaceID)
+        let performed = codexMonitor.selectOption(optionID, on: surfaceID)
+            || codexAXMonitor.selectOption(optionID, on: surfaceID)
         if performed {
             optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
                 surface.selectingOption(optionID)
@@ -254,7 +262,8 @@ public final class AIAgentPlugin: NotchPlugin {
 
     @discardableResult
     func updateCodexText(_ text: String, surfaceID: String) -> Bool {
-        let performed = codexAXMonitor.updateText(text, on: surfaceID)
+        let performed = codexMonitor.updateText(text, on: surfaceID)
+            || codexAXMonitor.updateText(text, on: surfaceID)
         if performed {
             optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
                 surface.updatingText(text)
@@ -273,18 +282,12 @@ public final class AIAgentPlugin: NotchPlugin {
         settingsStore.updateCodexAXPermission(state)
     }
 
-    private func handleCodexSurfaceChange(_ surface: CodexActionableSurface?) {
-        let previousSurfaceID = rawCodexSurface?.id
-        rawCodexSurface = surface
-        syncState()
-        let currentSurfaceID = rawCodexSurface?.id
+    private func handleCodexIPCSurfaceChange(_ surface: CodexActionableSurface?) {
+        applyCodexSurfaceChange(surface, from: .ipc)
+    }
 
-        if let previousSurfaceID, previousSurfaceID != currentSurfaceID {
-            dismissSneakPeek(for: previousSurfaceID)
-        }
-        if let currentSurfaceID, previousSurfaceID != currentSurfaceID {
-            presentSneakPeek(for: currentSurfaceID)
-        }
+    private func handleCodexAXSurfaceChange(_ surface: CodexActionableSurface?) {
+        applyCodexSurfaceChange(surface, from: .ax)
     }
 
     private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
@@ -295,14 +298,31 @@ public final class AIAgentPlugin: NotchPlugin {
         surfaceID: String,
         transform: (CodexActionableSurface) -> CodexActionableSurface
     ) {
-        guard let rawCodexSurface,
-              rawCodexSurface.id == surfaceID
-        else {
+        guard codexSurfaceState.transform(surfaceID: surfaceID, transform) else {
             return
         }
 
-        self.rawCodexSurface = transform(rawCodexSurface)
         syncState()
+    }
+
+    private func applyCodexSurfaceChange(
+        _ surface: CodexActionableSurface?,
+        from source: AICodexSurfaceSource
+    ) {
+        let transition = codexSurfaceState.set(surface, for: source)
+        syncState()
+        reconcileSneakPeekTransition(transition)
+    }
+
+    private func reconcileSneakPeekTransition(_ transition: AICodexSurfaceTransition) {
+        if let previousSurfaceID = transition.previousSurfaceID,
+           previousSurfaceID != transition.currentSurfaceID {
+            dismissSneakPeek(for: previousSurfaceID)
+        }
+        if let currentSurfaceID = transition.currentSurfaceID,
+           transition.previousSurfaceID != currentSurfaceID {
+            presentSneakPeek(for: currentSurfaceID)
+        }
     }
 
     private func applyRuntimeEffects(_ effects: [AIAgentRuntime.RuntimeEffect]) {
@@ -348,7 +368,7 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     private func mergedCodexSurface() -> CodexActionableSurface? {
-        guard let rawCodexSurface else {
+        guard let rawCodexSurface = codexSurfaceState.effectiveSurface else {
             return nil
         }
 
@@ -633,6 +653,86 @@ struct AIApprovalReviewState: Equatable {
         if selectedApprovalRequestID == nil {
             isReviewingApprovals = false
         }
+    }
+}
+
+struct AICodexSurfaceReviewState: Equatable {
+    var selectedSurfaceID: String?
+
+    mutating func sync(
+        currentSurfaceID: String?,
+        isReviewingApprovals: Bool,
+        currentSelectionMatchesSurface: Bool
+    ) {
+        guard isReviewingApprovals == false else {
+            return
+        }
+
+        guard let currentSurfaceID else {
+            selectedSurfaceID = nil
+            return
+        }
+
+        guard selectedSurfaceID == nil || currentSelectionMatchesSurface == false else {
+            return
+        }
+
+        selectedSurfaceID = currentSurfaceID
+    }
+}
+
+enum AICodexSurfaceSource: Equatable {
+    case ipc
+    case ax
+}
+
+struct AICodexSurfaceTransition: Equatable {
+    let previousSurfaceID: String?
+    let currentSurfaceID: String?
+}
+
+struct AICodexSurfaceSourceState: Equatable {
+    var ipcSurface: CodexActionableSurface?
+    var axSurface: CodexActionableSurface?
+
+    var effectiveSurface: CodexActionableSurface? {
+        ipcSurface ?? axSurface
+    }
+
+    mutating func set(
+        _ surface: CodexActionableSurface?,
+        for source: AICodexSurfaceSource
+    ) -> AICodexSurfaceTransition {
+        let previousSurfaceID = effectiveSurface?.id
+
+        switch source {
+        case .ipc:
+            ipcSurface = surface
+        case .ax:
+            axSurface = surface
+        }
+
+        return AICodexSurfaceTransition(
+            previousSurfaceID: previousSurfaceID,
+            currentSurfaceID: effectiveSurface?.id
+        )
+    }
+
+    mutating func transform(
+        surfaceID: String,
+        _ transform: (CodexActionableSurface) -> CodexActionableSurface
+    ) -> Bool {
+        if let ipcSurface, ipcSurface.id == surfaceID {
+            self.ipcSurface = transform(ipcSurface)
+            return true
+        }
+
+        if let axSurface, axSurface.id == surfaceID {
+            self.axSurface = transform(axSurface)
+            return true
+        }
+
+        return false
     }
 }
 
@@ -1012,7 +1112,7 @@ private struct AIAttentionBadgeView: View {
 private struct AIExpandedView: View {
     @ObservedObject var plugin: AIAgentPlugin
     @State private var approvalReviewState = AIApprovalReviewState()
-    @State private var selectedCodexSurfaceID: String?
+    @State private var codexSurfaceReviewState = AICodexSurfaceReviewState()
     @State private var codexApprovalInteractionState: CodexApprovalInteractionState?
     @State private var codexTextDraftSurfaceID: String?
     @State private var codexTextDraft: String = ""
@@ -1034,20 +1134,23 @@ private struct AIExpandedView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            syncCurrentCodexSurfaceSelection()
+        }
         .onChange(of: plugin.pendingApprovals.map(\.requestID)) { _, requestIDs in
             approvalReviewState.syncPendingRequestIDs(requestIDs)
         }
         .onChange(of: plugin.codexActionableSurface?.id) { _, surfaceID in
-            if selectedCodexSurfaceID == surfaceID {
-                return
-            }
             if surfaceID == nil {
-                selectedCodexSurfaceID = nil
+                codexSurfaceReviewState.selectedSurfaceID = nil
                 codexApprovalInteractionState = nil
                 codexTextDraftSurfaceID = nil
                 codexTextDraft = ""
                 codexTextInputContentHeight = 0
+                return
             }
+
+            syncCurrentCodexSurfaceSelection()
         }
     }
 
@@ -1060,13 +1163,25 @@ private struct AIExpandedView: View {
     }
 
     private var selectedCodexSurface: CodexActionableSurface? {
-        guard let selectedCodexSurfaceID else {
+        guard let selectedCodexSurfaceID = codexSurfaceReviewState.selectedSurfaceID else {
             return nil
         }
 
         return plugin.codexActionableSurface?.id == selectedCodexSurfaceID
             ? plugin.codexActionableSurface
             : nil
+    }
+
+    private func syncCurrentCodexSurfaceSelection() {
+        codexSurfaceReviewState.sync(
+            currentSurfaceID: plugin.codexActionableSurface?.id,
+            isReviewingApprovals: approvalReviewState.isReviewingApprovals,
+            currentSelectionMatchesSurface: selectedCodexSurface != nil
+        )
+        codexApprovalInteractionState = nil
+        codexTextDraftSurfaceID = nil
+        codexTextDraft = ""
+        codexTextInputContentHeight = 0
     }
 
     private var sessionListView: some View {
@@ -1219,11 +1334,11 @@ private struct AIExpandedView: View {
     private func sessionRow(_ summary: AIExpandedSessionSummary) -> some View {
         Button {
             if let approvalRequestID = summary.approvalRequestID {
-                selectedCodexSurfaceID = nil
+                codexSurfaceReviewState.selectedSurfaceID = nil
                 approvalReviewState.beginReviewing(requestID: approvalRequestID)
             } else if let codexSurfaceID = summary.codexSurfaceID {
                 approvalReviewState.exitReviewing()
-                selectedCodexSurfaceID = codexSurfaceID
+                codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
                 codexApprovalInteractionState = nil
                 codexTextInputContentHeight = 0
             }
@@ -1283,7 +1398,7 @@ private struct AIExpandedView: View {
 
     private func exitDetail() {
         approvalReviewState.exitReviewing()
-        selectedCodexSurfaceID = nil
+        codexSurfaceReviewState.selectedSurfaceID = nil
         codexApprovalInteractionState = nil
         codexTextDraftSurfaceID = nil
         codexTextDraft = ""

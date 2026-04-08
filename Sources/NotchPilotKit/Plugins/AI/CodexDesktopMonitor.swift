@@ -23,9 +23,10 @@ public struct CodexDesktopConnectionState: Equatable, Sendable {
     public static let connected = CodexDesktopConnectionState(status: .connected)
 }
 
-public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
+public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContextMonitoring, CodexDesktopActionableSurfaceMonitoring {
     public var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     public var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
+    public var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
 
     private let queue = DispatchQueue(label: "NotchPilot.CodexDesktopMonitor")
     private let detector: CodexDesktopAppDetector
@@ -34,8 +35,10 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
 
     private var client: CodexDesktopIPCClient?
     private var reducer = CodexDesktopEventReducer()
+    private var approvalController = CodexDesktopApprovalController()
     private var isRunning = false
     private var retryWorkItem: DispatchWorkItem?
+    private var lastSurface: CodexActionableSurface?
 
     public init(
         detector: CodexDesktopAppDetector = CodexDesktopAppDetector(),
@@ -65,6 +68,8 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
             self.retryWorkItem = nil
             try? self.client?.disconnect()
             self.client = nil
+            _ = self.approvalController.reset()
+            self.emitSurface(nil)
         }
     }
 
@@ -135,16 +140,7 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
                 canHandle: Self.canHandleDiscoveryRequest(request)
             )
         case let .request(request):
-            emitOutputs((try? reducer.consume(frame: frame)) ?? [])
-            if Self.shouldAcknowledgeRequest(method: request.method) {
-                try? client.sendSuccessResponse(
-                    requestID: request.requestID,
-                    method: request.method,
-                    result: .object([:])
-                )
-            } else {
-                try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
-            }
+            handle(request: request, using: client, frame: frame)
         case .broadcast:
             emitOutputs((try? reducer.consume(frame: frame)) ?? [])
         case .response, .clientDiscoveryResponse:
@@ -152,17 +148,50 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
         }
     }
 
+    private func handle(
+        request: CodexDesktopIPCRequestFrame,
+        using client: CodexDesktopIPCClient,
+        frame: CodexDesktopIPCFrame
+    ) {
+        emitOutputs((try? reducer.consume(frame: frame)) ?? [])
+
+        if let surface = approvalController.handle(request: request) {
+            emitSurface(surface)
+            return
+        }
+
+        if Self.shouldAcknowledgeRequest(method: request.method) {
+            try? client.sendSuccessResponse(
+                requestID: request.requestID,
+                method: request.method,
+                result: .object([:])
+            )
+            return
+        }
+
+        try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
+    }
+
     private func emitOutputs(_ outputs: [CodexDesktopReducerOutput]) {
         for output in outputs {
             switch output {
             case let .threadContextUpsert(context, marksActivity):
                 onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
+            case let .approvalRequestChanged(request):
+                if let request {
+                    emitSurface(approvalController.handle(request: request))
+                } else {
+                    _ = approvalController.reset()
+                    emitSurface(nil)
+                }
             }
         }
     }
 
     private func handleDisconnect(reason: String?) {
         client = nil
+        _ = approvalController.reset()
+        emitSurface(nil)
         emitConnectionState(
             reason == nil
                 ? .disconnected
@@ -173,6 +202,15 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
 
     private func emitConnectionState(_ state: CodexDesktopConnectionState) {
         onConnectionStateChanged?(state)
+    }
+
+    private func emitSurface(_ surface: CodexActionableSurface?) {
+        guard lastSurface != surface else {
+            return
+        }
+
+        lastSurface = surface
+        onSurfaceChanged?(surface)
     }
 
     private func scheduleRetry(after delay: TimeInterval = 3) {
@@ -188,8 +226,55 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
         queue.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    static func canHandleDiscoveryRequest(_: CodexDesktopIPCRequestFrame?) -> Bool {
-        return false
+    @discardableResult
+    public func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
+        queue.sync {
+            guard let client,
+                  let response = approvalController.perform(action: action, on: surfaceID)
+            else {
+                return false
+            }
+
+            do {
+                try client.sendSuccessResponse(
+                    requestID: response.requestID,
+                    method: response.method,
+                    result: response.result
+                )
+                emitSurface(approvalController.currentSurface)
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
+    @discardableResult
+    public func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
+        queue.sync {
+            guard let surface = approvalController.selectOption(optionID, on: surfaceID) else {
+                return false
+            }
+
+            emitSurface(surface)
+            return true
+        }
+    }
+
+    @discardableResult
+    public func updateText(_ text: String, on surfaceID: String) -> Bool {
+        queue.sync {
+            guard let surface = approvalController.updateText(text, on: surfaceID) else {
+                return false
+            }
+
+            emitSurface(surface)
+            return true
+        }
+    }
+
+    static func canHandleDiscoveryRequest(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
+        CodexDesktopApprovalController.canHandle(request)
     }
 
     static func shouldAcknowledgeRequest(method: String) -> Bool {

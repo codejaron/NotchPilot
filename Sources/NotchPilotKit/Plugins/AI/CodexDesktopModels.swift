@@ -229,12 +229,8 @@ public protocol CodexDesktopContextMonitoring: AnyObject {
     func stop()
 }
 
-public protocol CodexDesktopAXMonitoring: AnyObject {
-    var onPermissionStateChanged: (@Sendable (CodexDesktopAXPermissionState) -> Void)? { get set }
+public protocol CodexDesktopActionableSurfaceMonitoring: AnyObject {
     var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)? { get set }
-
-    func start()
-    func stop()
 
     @discardableResult
     func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool
@@ -244,4 +240,11 @@ public protocol CodexDesktopAXMonitoring: AnyObject {
 
     @discardableResult
     func updateText(_ text: String, on surfaceID: String) -> Bool
+}
+
+public protocol CodexDesktopAXMonitoring: CodexDesktopActionableSurfaceMonitoring {
+    var onPermissionStateChanged: (@Sendable (CodexDesktopAXPermissionState) -> Void)? { get set }
+
+    func start()
+    func stop()
 }

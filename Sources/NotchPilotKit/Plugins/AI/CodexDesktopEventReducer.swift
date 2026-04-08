@@ -2,6 +2,7 @@ import Foundation
 
 public enum CodexDesktopReducerOutput: Equatable, Sendable {
     case threadContextUpsert(CodexThreadContext, marksActivity: Bool)
+    case approvalRequestChanged(CodexDesktopIPCRequestFrame?)
 }
 
 public struct CodexDesktopEventReducer {
@@ -27,6 +28,7 @@ public struct CodexDesktopEventReducer {
     ]
 
     private var conversationStates: [String: JSONValue] = [:]
+    private var conversationApprovalRequests: [String: CodexDesktopIPCRequestFrame] = [:]
 
     public init() {}
 
@@ -74,11 +76,13 @@ public struct CodexDesktopEventReducer {
             conversationStates[conversationID] = conversationState
             return outputForConversationState(conversationID: conversationID, marksActivity: false)
         case "patches":
-            guard var conversationState = conversationStates[conversationID],
-                  let patches = change.arrayValue(at: ["patches"])
-            else {
+            guard let patches = change.arrayValue(at: ["patches"]) else {
                 return []
             }
+
+            var conversationState = conversationStates[conversationID] ?? .object([
+                "id": .string(conversationID),
+            ])
 
             for patchValue in patches {
                 guard let patch = patchValue.objectValue else {
@@ -94,7 +98,7 @@ public struct CodexDesktopEventReducer {
         }
     }
 
-    private func outputForConversationState(
+    private mutating func outputForConversationState(
         conversationID: String,
         marksActivity: Bool
     ) -> [CodexDesktopReducerOutput] {
@@ -102,12 +106,27 @@ public struct CodexDesktopEventReducer {
             return []
         }
 
-        return [
+        let currentApproval = approvalRequest(for: conversationID, state: state)
+        let previousApproval = conversationApprovalRequests[conversationID]
+
+        if let currentApproval {
+            conversationApprovalRequests[conversationID] = currentApproval
+        } else {
+            conversationApprovalRequests.removeValue(forKey: conversationID)
+        }
+
+        var outputs: [CodexDesktopReducerOutput] = [
             .threadContextUpsert(
                 threadContext(conversationID: conversationID, state: state),
                 marksActivity: marksActivity
             ),
         ]
+
+        if currentApproval != previousApproval {
+            outputs.append(.approvalRequestChanged(currentApproval))
+        }
+
+        return outputs
     }
 
     private func threadContext(
@@ -126,6 +145,58 @@ public struct CodexDesktopEventReducer {
 
     private func conversationTitle(from state: [String: JSONValue]) -> String? {
         firstString(in: state, paths: Self.titlePaths, normalize: normalizedThreadTitle)
+    }
+
+    private func approvalRequest(
+        for conversationID: String,
+        state: [String: JSONValue]
+    ) -> CodexDesktopIPCRequestFrame? {
+        guard let requests = state.arrayValue(at: ["requests"]) else {
+            return nil
+        }
+
+        for requestValue in requests {
+            guard let request = actionableApprovalRequest(from: requestValue, conversationID: conversationID) else {
+                continue
+            }
+            return request
+        }
+
+        return nil
+    }
+
+    private func actionableApprovalRequest(
+        from requestValue: JSONValue,
+        conversationID: String
+    ) -> CodexDesktopIPCRequestFrame? {
+        guard let request = requestValue.objectValue,
+              let method = request.stringValue(at: ["method"]),
+              let requestID = requestID(from: request["id"])
+        else {
+            return nil
+        }
+
+        let frame = CodexDesktopIPCRequestFrame(
+            requestID: requestID,
+            method: method,
+            params: request.objectValue(at: ["params"]) ?? [:],
+            sourceClientID: conversationID,
+            targetClientID: nil,
+            version: nil
+        )
+
+        return CodexDesktopApprovalController.canHandle(frame) ? frame : nil
+    }
+
+    private func requestID(from value: JSONValue?) -> String? {
+        switch value {
+        case let .string(id):
+            return id
+        case let .integer(id):
+            return String(id)
+        default:
+            return nil
+        }
     }
 
     private mutating func handleThreadMetadataUpdate(
@@ -313,6 +384,12 @@ public struct CodexDesktopEventReducer {
             case let .integer(index):
                 return .index(index)
             case let .string(key):
+                if key == "-" {
+                    return .append
+                }
+                if let index = Int(key) {
+                    return .index(index)
+                }
                 return .key(key)
             default:
                 return nil
@@ -418,12 +495,30 @@ public struct CodexDesktopEventReducer {
                 node = .array(array)
             }
             return applied
+
+        case .append:
+            guard case var .array(array) = node else {
+                return false
+            }
+
+            guard remainingPath.isEmpty else {
+                return false
+            }
+
+            switch operation {
+            case "add":
+                array.append(value ?? .null)
+                node = .array(array)
+                return true
+            default:
+                return false
+            }
         }
     }
 
     private func emptyContainer(for next: ConversationPatchPathComponent?) -> JSONValue {
         switch next {
-        case .index:
+        case .index, .append:
             return .array([])
         case .key, .none:
             return .object([:])
@@ -434,4 +529,5 @@ public struct CodexDesktopEventReducer {
 private enum ConversationPatchPathComponent {
     case key(String)
     case index(Int)
+    case append
 }

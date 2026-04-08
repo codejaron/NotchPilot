@@ -12,12 +12,45 @@ private final class EventRecorder {
     var events: [NotchEvent] = []
 }
 
-private final class FakeCodexContextMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
+private final class FakeCodexContextMonitor: @unchecked Sendable, CodexDesktopContextMonitoring, CodexDesktopActionableSurfaceMonitoring {
     var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
+    var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
+    private(set) var performedActions: [(CodexSurfaceAction, String)] = []
+    private(set) var selectedOptions: [(String, String)] = []
+    private(set) var updatedTexts: [(String, String)] = []
+    private var currentSurface: CodexActionableSurface?
 
     func start() {}
     func stop() {}
+
+    @discardableResult
+    func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
+        performedActions.append((action, surfaceID))
+        currentSurface = nil
+        return true
+    }
+
+    @discardableResult
+    func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
+        selectedOptions.append((optionID, surfaceID))
+        return true
+    }
+
+    @discardableResult
+    func updateText(_ text: String, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
+        updatedTexts.append((text, surfaceID))
+        return true
+    }
 
     func emit(update: CodexThreadUpdate) {
         onThreadContextChanged?(update)
@@ -33,6 +66,11 @@ private final class FakeCodexContextMonitor: @unchecked Sendable, CodexDesktopCo
     func emit(connection: CodexDesktopConnectionState) {
         onConnectionStateChanged?(connection)
     }
+
+    func emit(surface: CodexActionableSurface?) {
+        currentSurface = surface
+        onSurfaceChanged?(surface)
+    }
 }
 
 private final class FakeCodexAXMonitor: @unchecked Sendable, CodexDesktopAXMonitoring {
@@ -41,24 +79,35 @@ private final class FakeCodexAXMonitor: @unchecked Sendable, CodexDesktopAXMonit
     private(set) var performedActions: [(CodexSurfaceAction, String)] = []
     private(set) var selectedOptions: [(String, String)] = []
     private(set) var updatedTexts: [(String, String)] = []
+    private var currentSurface: CodexActionableSurface?
 
     func start() {}
     func stop() {}
 
     @discardableResult
     func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
         performedActions.append((action, surfaceID))
+        currentSurface = nil
         return true
     }
 
     @discardableResult
     func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
         selectedOptions.append((optionID, surfaceID))
         return true
     }
 
     @discardableResult
     func updateText(_ text: String, on surfaceID: String) -> Bool {
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
         updatedTexts.append((text, surfaceID))
         return true
     }
@@ -68,6 +117,7 @@ private final class FakeCodexAXMonitor: @unchecked Sendable, CodexDesktopAXMonit
     }
 
     func emit(surface: CodexActionableSurface?) {
+        currentSurface = surface
         onSurfaceChanged?(surface)
     }
 }
@@ -546,6 +596,130 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertEqual(attentionRows.map(\.title), ["Current Thread"])
     }
 
+    func testIPCCodexSurfaceOverridesAXMirrorWhenBothArePresent() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-ipc",
+                    summary: "IPC approval",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-ax",
+                    summary: "AX mirror",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let surface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertEqual(surface?.id, "surface-ipc")
+        XCTAssertEqual(surface?.summary, "IPC approval")
+    }
+
+    func testIPCCodexSurfaceEmitsInteractiveSneakPeek() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+        let recorder = await MainActor.run { EventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-ipc-peek",
+                    summary: "IPC approval",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            return XCTFail("expected a sneak peek request")
+        }
+
+        XCTAssertEqual(request.pluginID, "ai")
+        XCTAssertEqual(request.priority, 1000)
+        XCTAssertEqual(request.target, .activeScreen)
+        XCTAssertTrue(request.isInteractive)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testPerformingCodexPrimaryActionUsesIPCMonitorBeforeAXFallback() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-ipc-open",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-ax-open",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+            _ = plugin.performCodexAction(.primary, surfaceID: "surface-ipc-open")
+        }
+
+        let ipcPerformedActions = codexMonitor.performedActions
+        let axPerformedActions = codexAXMonitor.performedActions
+        let surface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertEqual(ipcPerformedActions.map(\.0), [.primary])
+        XCTAssertEqual(ipcPerformedActions.map(\.1), ["surface-ipc-open"])
+        XCTAssertTrue(axPerformedActions.isEmpty)
+        XCTAssertNil(surface)
+    }
+
     func testPerformingCodexPrimaryActionClearsSurfaceImmediately() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = FakeCodexContextMonitor()
@@ -878,6 +1052,111 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertNil(state.selectedApprovalRequestID)
     }
 
+    func testCodexSurfaceReviewStateSelectsInitialSurfaceOnFirstSync() {
+        var state = AICodexSurfaceReviewState()
+
+        state.sync(
+            currentSurfaceID: "surface-initial",
+            isReviewingApprovals: false,
+            currentSelectionMatchesSurface: false
+        )
+
+        XCTAssertEqual(state.selectedSurfaceID, "surface-initial")
+    }
+
+    func testCodexSurfaceReviewStateDoesNotStealFocusWhileReviewingApprovals() {
+        var state = AICodexSurfaceReviewState()
+
+        state.sync(
+            currentSurfaceID: "surface-ignored",
+            isReviewingApprovals: true,
+            currentSelectionMatchesSurface: false
+        )
+
+        XCTAssertNil(state.selectedSurfaceID)
+    }
+
+    func testCodexSurfaceReviewStateRetargetsWhenPreviousSurfaceBecomesStale() {
+        var state = AICodexSurfaceReviewState(selectedSurfaceID: "surface-old")
+
+        state.sync(
+            currentSurfaceID: "surface-new",
+            isReviewingApprovals: false,
+            currentSelectionMatchesSurface: false
+        )
+
+        XCTAssertEqual(state.selectedSurfaceID, "surface-new")
+    }
+
+    func testCodexSurfaceSourceStatePrefersIPCAndFallsBackToAX() {
+        var state = AICodexSurfaceSourceState()
+
+        let initialTransition = state.set(
+            CodexActionableSurface(
+                id: "surface-ax",
+                summary: "AX approval",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip"
+            ),
+            for: .ax
+        )
+        XCTAssertNil(initialTransition.previousSurfaceID)
+        XCTAssertEqual(initialTransition.currentSurfaceID, "surface-ax")
+        XCTAssertEqual(state.effectiveSurface?.id, "surface-ax")
+
+        let ipcTransition = state.set(
+            CodexActionableSurface(
+                id: "surface-ipc",
+                summary: "IPC approval",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip"
+            ),
+            for: .ipc
+        )
+        XCTAssertEqual(ipcTransition.previousSurfaceID, "surface-ax")
+        XCTAssertEqual(ipcTransition.currentSurfaceID, "surface-ipc")
+        XCTAssertEqual(state.effectiveSurface?.id, "surface-ipc")
+
+        let fallbackTransition = state.set((nil as CodexActionableSurface?), for: .ipc)
+        XCTAssertEqual(fallbackTransition.previousSurfaceID, "surface-ipc")
+        XCTAssertEqual(fallbackTransition.currentSurfaceID, "surface-ax")
+        XCTAssertEqual(state.effectiveSurface?.id, "surface-ax")
+    }
+
+    func testCodexSurfaceSourceStateUpdatesMatchingSourceSurfaceInPlace() {
+        var state = AICodexSurfaceSourceState(
+            ipcSurface: CodexActionableSurface(
+                id: "surface-ipc",
+                summary: "IPC approval",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip",
+                options: [
+                    CodexSurfaceOption(id: "option-1", index: 1, title: "Yes", isSelected: true),
+                    CodexSurfaceOption(id: "option-2", index: 2, title: "No", isSelected: false),
+                ]
+            ),
+            axSurface: CodexActionableSurface(
+                id: "surface-ax",
+                summary: "AX approval",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip",
+                textInput: CodexSurfaceTextInput(title: "Adjust it", text: "", isEditable: true)
+            )
+        )
+
+        let didTransformIPC = state.transform(surfaceID: "surface-ipc") { surface in
+            surface.selectingOption("option-2")
+        }
+        let didTransformAX = state.transform(surfaceID: "surface-ax") { surface in
+            surface.updatingText("use mv instead")
+        }
+
+        XCTAssertTrue(didTransformIPC)
+        XCTAssertTrue(didTransformAX)
+        XCTAssertEqual(state.ipcSurface?.options.first(where: { $0.isSelected })?.id, "option-2")
+        XCTAssertEqual(state.axSurface?.textInput?.text, "use mv instead")
+    }
+
     func testApprovalDiffPreviewKeepsPlainContentNeutral() {
         let preview = ApprovalDiffPreview(content: """
         let value = 1
@@ -1078,7 +1357,16 @@ private struct ExpandedViewHarness {
     }
 
     func scrollViewCount() -> Int {
-        collectSubviews(ofType: NSScrollView.self, in: hostingController.view).count
+        pump()
+        return collectSubviews(ofType: NSScrollView.self, in: hostingController.view).count
+    }
+
+    func textContents() -> [String] {
+        pump()
+        return collectSubviews(ofType: NSTextField.self, in: hostingController.view)
+            .map(\.stringValue)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
     }
 
     private func pump() {

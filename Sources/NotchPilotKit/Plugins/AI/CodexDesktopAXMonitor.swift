@@ -23,6 +23,7 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
     private var isRunning = false
     private var lastPermissionState: CodexDesktopAXPermissionState?
     private var lastSurface: CodexActionableSurface?
+    private var lastRefreshLogKey: String?
 
     private struct SnapshotBuildContext {
         var elementsByNodeID: [String: AXUIElement] = [:]
@@ -69,6 +70,7 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
             self.timer?.cancel()
             self.timer = nil
             self.actionResolver.reset()
+            self.lastRefreshLogKey = nil
             self.updateSurface(nil)
         }
     }
@@ -103,14 +105,20 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
         emitPermissionState(permissionState)
 
         guard permissionState.status == .granted else {
-            logger.debug("Accessibility permission not granted for Codex AX monitoring.")
+            logRefreshState(
+                key: "permission-not-granted",
+                message: "Accessibility permission not granted for Codex AX monitoring."
+            )
             actionResolver.reset()
             updateSurface(nil)
             return
         }
 
         guard let app = runningApplicationProvider(bundleIdentifier) else {
-            logger.debug("Codex application not running; AX surface cleared.")
+            logRefreshState(
+                key: "app-not-running",
+                message: "Codex application not running; AX surface cleared."
+            )
             actionResolver.reset()
             updateSurface(nil)
             return
@@ -118,7 +126,10 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
 
         actionResolver.reset()
         guard let snapshot = buildSnapshot(for: app) else {
-            logger.debug("Failed to build Codex AX snapshot.")
+            logRefreshState(
+                key: "snapshot-failed",
+                message: "Failed to build Codex AX snapshot."
+            )
             updateSurface(nil)
             return
         }
@@ -129,8 +140,9 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
 
         guard let inspection = inspector.inspect(snapshot: snapshot.snapshot) else {
             let metrics = snapshotMetrics(snapshot.snapshot)
-            logger.debug(
-                "No Codex AX surface detected. windows=\(snapshot.snapshot.windows.count) webAreas=\(metrics.webAreas) buttons=\(metrics.buttons) texts=\(metrics.textContent)"
+            logRefreshState(
+                key: "no-surface",
+                message: "No Codex AX surface detected. windows=\(snapshot.snapshot.windows.count) webAreas=\(metrics.webAreas) buttons=\(metrics.buttons) texts=\(metrics.textContent)"
             )
             updateSurface(nil)
             return
@@ -143,8 +155,9 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
             optionNodeIDs: inspection.surface.options.map(\.id),
             textInputNodeID: inspection.textInputNodeID
         )
-        logger.debug(
-            "Detected Codex AX surface id=\(inspection.surface.id, privacy: .public) primary=\(inspection.surface.primaryButtonTitle, privacy: .public) cancel=\(inspection.surface.cancelButtonTitle, privacy: .public)"
+        logRefreshState(
+            key: "surface-\(inspection.surface.id)",
+            message: "Detected Codex AX surface id=\(inspection.surface.id) primary=\(inspection.surface.primaryButtonTitle) cancel=\(inspection.surface.cancelButtonTitle)"
         )
         updateSurface(inspection.surface)
     }
@@ -165,6 +178,15 @@ public final class CodexDesktopAXMonitor: @unchecked Sendable, CodexDesktopAXMon
 
         lastSurface = surface
         onSurfaceChanged?(surface)
+    }
+
+    private func logRefreshState(key: String, message: String) {
+        guard lastRefreshLogKey != key else {
+            return
+        }
+
+        lastRefreshLogKey = key
+        logger.debug("\(message, privacy: .public)")
     }
 
     private func buildSnapshot(
