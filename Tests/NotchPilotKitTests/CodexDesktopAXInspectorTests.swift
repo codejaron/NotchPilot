@@ -117,6 +117,7 @@ final class CodexDesktopAXInspectorTests: XCTestCase {
         let inspection = inspector.inspect(snapshot: snapshot)
 
         XCTAssertEqual(inspection?.surface.summary, "Do you want to run this command?")
+        XCTAssertNil(inspection?.surface.commandPreview)
         XCTAssertEqual(inspection?.surface.primaryButtonTitle, "Yes")
         XCTAssertEqual(inspection?.surface.cancelButtonTitle, "No")
         XCTAssertEqual(inspection?.primaryActionNodeID, "button-yes")
@@ -156,10 +157,8 @@ final class CodexDesktopAXInspectorTests: XCTestCase {
 
         let inspection = inspector.inspect(snapshot: snapshot)
 
-        XCTAssertEqual(
-            inspection?.surface.summary,
-            "Do you want to approve deleting the temporary test file with rm -rf?\n否，请告知 Codex 如何调整"
-        )
+        XCTAssertEqual(inspection?.surface.summary, "Do you want to approve deleting the temporary test file with rm -rf?")
+        XCTAssertEqual(inspection?.surface.commandPreview, "否，请告知 Codex 如何调整")
         XCTAssertEqual(inspection?.surface.primaryButtonTitle, "提交")
         XCTAssertEqual(inspection?.surface.cancelButtonTitle, "跳过")
     }
@@ -273,10 +272,8 @@ final class CodexDesktopAXInspectorTests: XCTestCase {
 
         let inspection = inspector.inspect(snapshot: snapshot)
 
-        XCTAssertEqual(
-            inspection?.surface.summary,
-            "Do you want to approve deleting the temporary test file with rm -rf?\n否，请告知 Codex 如何调整"
-        )
+        XCTAssertEqual(inspection?.surface.summary, "Do you want to approve deleting the temporary test file with rm -rf?")
+        XCTAssertEqual(inspection?.surface.commandPreview, "否，请告知 Codex 如何调整")
         XCTAssertEqual(inspection?.surface.primaryButtonTitle, "提交")
         XCTAssertEqual(inspection?.surface.cancelButtonTitle, "跳过")
         XCTAssertEqual(inspection?.primaryActionNodeID, "button-submit")
@@ -328,7 +325,8 @@ final class CodexDesktopAXInspectorTests: XCTestCase {
 
         let inspection = inspector.inspect(snapshot: snapshot)
 
-        XCTAssertEqual(inspection?.surface.summary, "Do you want to approve deleting the temporary test file with rm -rf? rm -rf '/Users/jaron/Documents/New project/codex-temp-delete-me.txt' 3。 否，请告知 Codex 如何调整 否，请告知 Codex 如何调整 跳过 提交 ⏎")
+        XCTAssertEqual(inspection?.surface.summary, "Do you want to approve deleting the temporary test file with rm -rf?")
+        XCTAssertEqual(inspection?.surface.commandPreview, "rm -rf '/Users/jaron/Documents/New project/codex-temp-delete-me.txt'")
         XCTAssertEqual(inspection?.surface.primaryButtonTitle, "提交 ⏎")
         XCTAssertEqual(inspection?.surface.cancelButtonTitle, "跳过")
         XCTAssertEqual(

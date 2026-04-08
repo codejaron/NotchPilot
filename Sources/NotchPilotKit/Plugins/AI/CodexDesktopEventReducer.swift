@@ -1,10 +1,31 @@
 import Foundation
 
 public enum CodexDesktopReducerOutput: Equatable, Sendable {
-    case threadContextUpsert(CodexThreadContext)
+    case threadContextUpsert(CodexThreadContext, marksActivity: Bool)
 }
 
 public struct CodexDesktopEventReducer {
+    private static let titlePaths: [[String]] = [
+        ["title"],
+        ["metadata", "title"],
+        ["metadata", "name"],
+        ["threadMetadata", "title"],
+        ["threadMetadata", "name"],
+        ["thread", "title"],
+        ["thread", "name"],
+        ["threadTitle"],
+        ["threadName"],
+        ["name"],
+    ]
+    private static let conversationIDPaths: [[String]] = [
+        ["conversationId"],
+        ["threadId"],
+        ["threadID"],
+        ["id"],
+        ["thread", "id"],
+        ["conversation", "id"],
+    ]
+
     private var conversationStates: [String: JSONValue] = [:]
 
     public init() {}
@@ -24,11 +45,14 @@ public struct CodexDesktopEventReducer {
         method: String,
         params: [String: JSONValue]
     ) -> [CodexDesktopReducerOutput] {
-        guard method == "thread-stream-state-changed" else {
+        switch method {
+        case "thread-stream-state-changed":
+            return handleThreadStreamStateChanged(params: params)
+        case "thread/metadata/update":
+            return handleThreadMetadataUpdate(params: params)
+        default:
             return []
         }
-
-        return handleThreadStreamStateChanged(params: params)
     }
 
     private mutating func handleThreadStreamStateChanged(
@@ -48,6 +72,7 @@ public struct CodexDesktopEventReducer {
                 return []
             }
             conversationStates[conversationID] = conversationState
+            return outputForConversationState(conversationID: conversationID, marksActivity: false)
         case "patches":
             guard var conversationState = conversationStates[conversationID],
                   let patches = change.arrayValue(at: ["patches"])
@@ -63,15 +88,26 @@ public struct CodexDesktopEventReducer {
             }
 
             conversationStates[conversationID] = conversationState
+            return outputForConversationState(conversationID: conversationID, marksActivity: true)
         default:
             return []
         }
+    }
 
+    private func outputForConversationState(
+        conversationID: String,
+        marksActivity: Bool
+    ) -> [CodexDesktopReducerOutput] {
         guard let state = conversationStates[conversationID]?.objectValue else {
             return []
         }
 
-        return [.threadContextUpsert(threadContext(conversationID: conversationID, state: state))]
+        return [
+            .threadContextUpsert(
+                threadContext(conversationID: conversationID, state: state),
+                marksActivity: marksActivity
+            ),
+        ]
     }
 
     private func threadContext(
@@ -89,43 +125,71 @@ public struct CodexDesktopEventReducer {
     }
 
     private func conversationTitle(from state: [String: JSONValue]) -> String? {
-        if let title = state.stringValue(at: ["title"])?.trimmingCharacters(in: .whitespacesAndNewlines),
-           title.isEmpty == false {
-            return title
+        firstString(in: state, paths: Self.titlePaths, normalize: normalizedThreadTitle)
+    }
+
+    private mutating func handleThreadMetadataUpdate(
+        params: [String: JSONValue]
+    ) -> [CodexDesktopReducerOutput] {
+        guard let conversationID = conversationID(from: params),
+              let title = metadataTitle(from: params)
+        else {
+            return []
         }
 
-        guard let turns = state.arrayValue(at: ["turns"]) else {
-            return nil
-        }
+        var state = conversationStates[conversationID]?.objectValue ?? [:]
+        state["id"] = state["id"] ?? .string(conversationID)
+        state["title"] = .string(title)
+        conversationStates[conversationID] = .object(state)
+        return outputForConversationState(conversationID: conversationID, marksActivity: false)
+    }
 
-        for turnValue in turns.reversed() {
-            guard let turn = turnValue.objectValue,
-                  let items = turn.arrayValue(at: ["items"])
-            else {
-                continue
-            }
+    private func conversationID(from params: [String: JSONValue]) -> String? {
+        firstString(in: params, paths: Self.conversationIDPaths, normalize: normalizedIdentifier)
+    }
 
-            for itemValue in items.reversed() {
-                guard let item = itemValue.objectValue,
-                      item.stringValue(at: ["type"]) == "userMessage",
-                      let content = item.arrayValue(at: ["content"])
-                else {
-                    continue
-                }
+    private func metadataTitle(from params: [String: JSONValue]) -> String? {
+        conversationTitle(from: params)
+    }
 
-                for contentValue in content {
-                    guard let contentObject = contentValue.objectValue,
-                          let text = contentObject.stringValue(at: ["text"])?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          text.isEmpty == false
-                    else {
-                        continue
-                    }
-                    return sessionTitle(from: text)
-                }
+    private func firstString(
+        in object: [String: JSONValue],
+        paths: [[String]],
+        normalize: (String?) -> String?
+    ) -> String? {
+        for path in paths {
+            if let value = normalize(object.stringValue(at: path)) {
+                return value
             }
         }
 
         return nil
+    }
+
+    private func normalizedIdentifier(_ rawIdentifier: String?) -> String? {
+        guard let identifier = rawIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+              identifier.isEmpty == false
+        else {
+            return nil
+        }
+
+        return identifier
+    }
+
+    private func normalizedThreadTitle(_ rawTitle: String?) -> String? {
+        guard let title = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              title.isEmpty == false,
+              looksLikeUUID(title) == false
+        else {
+            return nil
+        }
+
+        return title
+    }
+
+    private func looksLikeUUID(_ value: String) -> Bool {
+        let pattern = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
+        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private func conversationActivityLabel(from state: [String: JSONValue]) -> String {
@@ -224,14 +288,6 @@ public struct CodexDesktopEventReducer {
         default:
             return .unknown
         }
-    }
-
-    private func sessionTitle(from prompt: String) -> String {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > 30 else {
-            return trimmed
-        }
-        return String(trimmed.prefix(30)) + "…"
     }
 
     private func apply(patch: [String: JSONValue], to state: inout JSONValue) {

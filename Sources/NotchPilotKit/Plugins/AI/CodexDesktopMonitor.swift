@@ -24,7 +24,7 @@ public struct CodexDesktopConnectionState: Equatable, Sendable {
 }
 
 public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
-    public var onThreadContextChanged: (@Sendable (CodexThreadContext) -> Void)?
+    public var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     public var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
 
     private let queue = DispatchQueue(label: "NotchPilot.CodexDesktopMonitor")
@@ -135,7 +135,16 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
                 canHandle: Self.canHandleDiscoveryRequest(request)
             )
         case let .request(request):
-            try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
+            emitOutputs((try? reducer.consume(frame: frame)) ?? [])
+            if Self.shouldAcknowledgeRequest(method: request.method) {
+                try? client.sendSuccessResponse(
+                    requestID: request.requestID,
+                    method: request.method,
+                    result: .object([:])
+                )
+            } else {
+                try? client.sendErrorResponse(requestID: request.requestID, message: "no-handler-for-request")
+            }
         case .broadcast:
             emitOutputs((try? reducer.consume(frame: frame)) ?? [])
         case .response, .clientDiscoveryResponse:
@@ -146,8 +155,8 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
     private func emitOutputs(_ outputs: [CodexDesktopReducerOutput]) {
         for output in outputs {
             switch output {
-            case let .threadContextUpsert(context):
-                onThreadContextChanged?(context)
+            case let .threadContextUpsert(context, marksActivity):
+                onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
             }
         }
     }
@@ -181,5 +190,9 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
 
     static func canHandleDiscoveryRequest(_: CodexDesktopIPCRequestFrame?) -> Bool {
         return false
+    }
+
+    static func shouldAcknowledgeRequest(method: String) -> Bool {
+        method == "thread/metadata/update"
     }
 }

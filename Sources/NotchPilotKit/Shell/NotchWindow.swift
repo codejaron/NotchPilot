@@ -20,6 +20,7 @@ public final class NotchWindow: NSPanel {
         )
 
         isFloatingPanel = true
+        becomesKeyOnlyIfNeeded = true
         level = .statusBar
         animationBehavior = .utilityWindow
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
@@ -41,6 +42,14 @@ public final class NotchWindow: NSPanel {
         session.layoutDidChange = { [weak self] in
             self?.refreshFrame(animated: true)
         }
+    }
+
+    override public var canBecomeKey: Bool {
+        true
+    }
+
+    override public var canBecomeMain: Bool {
+        true
     }
 
     public func refreshFrame(animated: Bool) {

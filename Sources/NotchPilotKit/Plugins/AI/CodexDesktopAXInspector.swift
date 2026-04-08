@@ -83,10 +83,16 @@ struct CodexDesktopAXInspector {
         let buttons = directEnabledButtons(in: requestCardNode)
         let options = extractOptions(in: requestCardNode)
         let textInput = extractTextInput(in: requestCardNode)
+        let content = resolvePromptAndCommand(
+            for: requestCardNode,
+            buttons: buttons,
+            options: options,
+            textInput: textInput?.surfaceTextInput
+        )
         guard buttons.count == 2,
               let cancelButton = buttons.first,
               let primaryButton = buttons.last,
-              let summary = resolveRequestCardSummary(for: requestCardNode, buttons: buttons),
+              let content,
               textInput == nil || options.isEmpty == false
         else {
             return nil
@@ -97,7 +103,8 @@ struct CodexDesktopAXInspector {
         return CodexDesktopAXInspection(
             surface: CodexActionableSurface(
                 id: surfaceID,
-                summary: summary,
+                summary: content.prompt,
+                commandPreview: content.commandPreview,
                 primaryButtonTitle: primaryButton.title ?? "Continue",
                 cancelButtonTitle: cancelButton.title ?? "Cancel",
                 options: options,
@@ -109,16 +116,50 @@ struct CodexDesktopAXInspector {
         )
     }
 
-    private func resolveRequestCardSummary(
+    private func resolvePromptAndCommand(
         for requestCardNode: CodexDesktopAXNode,
-        buttons: [CodexDesktopAXNode]
-    ) -> String? {
-        let summaryLines = requestCardSummaryLines(for: requestCardNode, buttons: buttons)
-        guard summaryLines.isEmpty == false else {
+        buttons: [CodexDesktopAXNode],
+        options: [CodexSurfaceOption],
+        textInput: CodexSurfaceTextInput?
+    ) -> (prompt: String, commandPreview: String?)? {
+        let buttonTitles = Set(
+            buttons.compactMap(\.title)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { $0.isEmpty == false }
+        )
+        let optionTitles = Set(options.map(\.title))
+        let inputTitle = textInput?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let containerPrompt = fallbackPrompt(
+            from: requestCardNode,
+            buttonTitles: buttonTitles,
+            optionTitles: optionTitles,
+            inputTitle: inputTitle
+        )
+        let containerCommandPreview = containerPrompt.flatMap { prompt in
+            fallbackCommandPreview(
+                from: requestCardNode,
+                prompt: prompt,
+                buttonTitles: buttonTitles,
+                optionTitles: optionTitles,
+                inputTitle: inputTitle
+            )
+        }
+
+        let staticTextLines = staticTextLines(
+            in: requestCardNode,
+            buttonTitles: buttonTitles,
+            optionTitles: optionTitles,
+            inputTitle: inputTitle
+        )
+
+        let prompt = containerPrompt ?? staticTextLines.first
+        guard let prompt, prompt.isEmpty == false else {
             return nil
         }
 
-        return summaryLines.prefix(2).joined(separator: "\n")
+        let commandPreview = containerCommandPreview ?? staticTextLines.first(where: { $0 != prompt })
+
+        return (prompt, commandPreview)
     }
 
     private func requestCardSummaryLines(
@@ -144,6 +185,139 @@ struct CodexDesktopAXInspector {
         }
 
         return summaryLines
+    }
+
+    private func staticTextLines(
+        in requestCardNode: CodexDesktopAXNode,
+        buttonTitles: Set<String>,
+        optionTitles: Set<String>,
+        inputTitle: String?
+    ) -> [String] {
+        let rawLines = collectNodes(in: requestCardNode) { $0.role == kAXStaticTextRole as String }
+            .compactMap(resolvedControlTitle(for:))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+
+        var seen = Set<String>()
+        return rawLines.filter { line in
+            if buttonTitles.contains(line) || optionTitles.contains(line) || line == inputTitle {
+                return false
+            }
+            if seen.contains(line) {
+                return false
+            }
+            seen.insert(line)
+            return true
+        }
+    }
+
+    private func fallbackPrompt(
+        from requestCardNode: CodexDesktopAXNode,
+        buttonTitles: Set<String>,
+        optionTitles: Set<String>,
+        inputTitle: String?
+    ) -> String? {
+        guard let containerText = sanitizedContainerText(
+            for: requestCardNode,
+            buttonTitles: buttonTitles,
+            optionTitles: optionTitles,
+            inputTitle: inputTitle
+        ) else {
+            return nil
+        }
+
+        if let splitIndex = firstPromptBoundary(in: containerText) {
+            return String(containerText[...splitIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return containerText
+    }
+
+    private func fallbackCommandPreview(
+        from requestCardNode: CodexDesktopAXNode,
+        prompt: String,
+        buttonTitles: Set<String>,
+        optionTitles: Set<String>,
+        inputTitle: String?
+    ) -> String? {
+        guard let containerText = sanitizedContainerText(
+            for: requestCardNode,
+            buttonTitles: buttonTitles,
+            optionTitles: optionTitles,
+            inputTitle: inputTitle
+        ) else {
+            return nil
+        }
+
+        guard containerText.count > prompt.count else {
+            return nil
+        }
+
+        var remainder = containerText
+        if remainder.hasPrefix(prompt) {
+            remainder.removeFirst(prompt.count)
+        } else if let promptRange = remainder.range(of: prompt) {
+            remainder.removeSubrange(remainder.startIndex..<promptRange.upperBound)
+        }
+
+        remainder = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard remainder.isEmpty == false else {
+            return nil
+        }
+
+        return remainder
+    }
+
+    private func sanitizedContainerText(
+        for requestCardNode: CodexDesktopAXNode,
+        buttonTitles: Set<String>,
+        optionTitles: Set<String>,
+        inputTitle: String?
+    ) -> String? {
+        let source = [requestCardNode.value, requestCardNode.description, requestCardNode.title]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { $0.isEmpty == false }
+        guard let source else {
+            return nil
+        }
+
+        let removablePhrases = Array(buttonTitles) + Array(optionTitles) + (inputTitle.map { [$0] } ?? [])
+        var sanitized = source
+        for phrase in removablePhrases.sorted(by: { $0.count > $1.count }) where phrase.isEmpty == false {
+            sanitized = sanitized.replacingOccurrences(of: phrase, with: " ")
+        }
+
+        sanitized = replacingMatches(
+            in: sanitized,
+            pattern: #"\b\d+[。.]"#,
+            replacement: " "
+        )
+        sanitized = replacingMatches(
+            in: sanitized,
+            pattern: #"\s+"#,
+            replacement: " "
+        )
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return sanitized.isEmpty ? nil : sanitized
+    }
+
+    private func firstPromptBoundary(in text: String) -> String.Index? {
+        for marker in ["?", "？"] {
+            if let index = text.firstIndex(of: Character(marker)) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func replacingMatches(in text: String, pattern: String, replacement: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return text
+        }
+
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
     }
 
     private func sanitizeSummaryLine(_ value: String?, buttonTitles: Set<String>) -> String? {

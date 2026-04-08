@@ -16,50 +16,56 @@ public final class AIAgentPlugin: NotchPlugin {
     @Published public private(set) var codexAXPermission: CodexDesktopAXPermissionState = .notGranted
     @Published public private(set) var lastErrorMessage: String?
 
+    private static let codexThreadActivityExpiry: TimeInterval = 24 * 60 * 60
+
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
     private let encoder = HookResponseEncoder()
     private let settingsStore: SettingsStore
     private let codexMonitor: any CodexDesktopContextMonitoring
     private let codexAXMonitor: any CodexDesktopAXMonitoring
+    private let nowProvider: @Sendable () -> Date
 
     private weak var bus: EventBus?
     private var claudeResponders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
-    private var codexThreadContextsByID: [String: CodexThreadContext] = [:]
+    private var codexThreads: CodexThreadRegistry
     private var rawCodexSurface: CodexActionableSurface?
 
     public init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring = CodexDesktopMonitor(),
-        codexAXMonitor: any CodexDesktopAXMonitoring = CodexDesktopAXMonitor()
+        codexAXMonitor: any CodexDesktopAXMonitoring = CodexDesktopAXMonitor(),
+        nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
         self.codexMonitor = codexMonitor
         self.codexAXMonitor = codexAXMonitor
+        self.nowProvider = nowProvider
+        self.codexThreads = CodexThreadRegistry(activityExpiry: Self.codexThreadActivityExpiry)
         self.codexAXPermission = settingsStore.codexAXPermission
     }
 
     public func activate(bus: EventBus) {
         self.bus = bus
-        codexMonitor.onThreadContextChanged = { [weak self] context in
-            Task { @MainActor [weak self] in
-                self?.handleCodexThreadContextChange(context)
+        codexMonitor.onThreadContextChanged = { [weak self] update in
+            self?.performOnMainActor {
+                $0.handleCodexThreadContextChange(update)
             }
         }
         codexMonitor.onConnectionStateChanged = { [weak self] state in
-            Task { @MainActor [weak self] in
-                self?.handleCodexConnectionStateChange(state)
+            self?.performOnMainActor {
+                $0.handleCodexConnectionStateChange(state)
             }
         }
         codexAXMonitor.onPermissionStateChanged = { [weak self] state in
-            Task { @MainActor [weak self] in
-                self?.handleCodexAXPermissionChange(state)
+            self?.performOnMainActor {
+                $0.handleCodexAXPermissionChange(state)
             }
         }
         codexAXMonitor.onSurfaceChanged = { [weak self] surface in
-            Task { @MainActor [weak self] in
-                self?.handleCodexSurfaceChange(surface)
+            self?.performOnMainActor {
+                $0.handleCodexSurfaceChange(surface)
             }
         }
         codexMonitor.start()
@@ -75,7 +81,7 @@ public final class AIAgentPlugin: NotchPlugin {
         codexAXMonitor.onSurfaceChanged = nil
         claudeResponders.removeAll()
         sneakPeekIDs.removeAll()
-        codexThreadContextsByID.removeAll()
+        codexThreads.reset()
         rawCodexSurface = nil
         sessions = []
         pendingApprovals = []
@@ -85,6 +91,24 @@ public final class AIAgentPlugin: NotchPlugin {
 
     public func compactView(context: NotchContext) -> AnyView? {
         AnyView(AICompactView(plugin: self, context: context))
+    }
+
+    nonisolated private func performOnMainActor(
+        _ action: @escaping @MainActor (AIAgentPlugin) -> Void
+    ) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                action(self)
+            }
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            action(self)
+        }
     }
 
     public func compactWidth(context: NotchContext) -> CGFloat? {
@@ -239,8 +263,8 @@ public final class AIAgentPlugin: NotchPlugin {
         return performed
     }
 
-    private func handleCodexThreadContextChange(_ context: CodexThreadContext) {
-        codexThreadContextsByID[context.threadID] = context
+    private func handleCodexThreadContextChange(_ update: CodexThreadUpdate) {
+        codexThreads.apply(update)
         syncState()
     }
 
@@ -310,6 +334,7 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     private func syncState() {
+        codexThreads.prune(now: nowProvider())
         sessions = mergedSessions()
         pendingApprovals = runtime.pendingApprovals
         codexActionableSurface = mergedCodexSurface()
@@ -317,18 +342,7 @@ public final class AIAgentPlugin: NotchPlugin {
 
     private func mergedSessions() -> [AISession] {
         let claudeSessions = runtime.sessions
-        let codexSessions = codexThreadContextsByID.values.map { context in
-            AISession(
-                id: context.threadID,
-                host: .codex,
-                lastEventType: eventType(for: context.phase),
-                activityLabel: context.activityLabel,
-                inputTokenCount: context.inputTokenCount,
-                outputTokenCount: context.outputTokenCount,
-                updatedAt: context.updatedAt,
-                sessionTitle: context.title
-            )
-        }
+        let codexSessions = codexThreads.sessions()
 
         return (claudeSessions + codexSessions).sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -338,32 +352,25 @@ public final class AIAgentPlugin: NotchPlugin {
             return nil
         }
 
-        let context = preferredCodexContext(for: rawCodexSurface)
+        let context = codexThreads.preferredContext(for: rawCodexSurface.threadID)
         return rawCodexSurface.merged(with: context)
     }
 
-    private func preferredCodexContext(for surface: CodexActionableSurface) -> CodexThreadContext? {
-        if let threadID = surface.threadID,
-           let matching = codexThreadContextsByID[threadID] {
-            return matching
-        }
-
-        return codexThreadContextsByID.values.sorted { $0.updatedAt > $1.updatedAt }.first
+    func preferredCodexSession(for surface: CodexActionableSurface? = nil) -> AISession? {
+        codexThreads.preferredSession(for: surface?.threadID)
     }
 
-    private func eventType(for phase: CodexThreadPhase) -> AIBridgeEventType {
-        switch phase {
-        case .completed:
-            return .postToolUse
-        case .working, .plan:
-            return .unknown("codex/\(phase.rawValue)")
-        case .connected:
-            return .sessionStart
-        case .interrupted:
-            return .stop
-        case .error, .unknown:
-            return .unknown("codex/\(phase.rawValue)")
+    func preferredCodexTitle(for surface: CodexActionableSurface? = nil) -> String? {
+        codexThreads.preferredDisplayTitle(for: surface?.threadID)
+    }
+
+    fileprivate func displayTitle(for session: AISession) -> String? {
+        if session.host == .codex,
+           let contextTitle = codexThreads.displayTitle(for: session) {
+            return contextTitle
         }
+
+        return normalizedSessionTitle(session.sessionTitle)
     }
 
     private func dismissSneakPeek(for requestID: String) {
@@ -383,22 +390,20 @@ public final class AIAgentPlugin: NotchPlugin {
                 inputTokenCount: matchingSession?.inputTokenCount,
                 outputTokenCount: matchingSession?.outputTokenCount,
                 approvalCount: pendingApprovals.count,
-                sessionTitle: matchingSession?.sessionTitle
+                sessionTitle: matchingSession.flatMap(displayTitle(for:))
             )
         }
 
         if let codexActionableSurface {
-            let matchingSession = codexActionableSurface.threadID.flatMap { threadID in
-                sessions.first(where: { $0.id == threadID })
-            } ?? sessions.first(where: { $0.host == .codex })
-
             return AICompactActivity(
                 host: .codex,
-                label: "Action Needed",
-                inputTokenCount: matchingSession?.inputTokenCount,
-                outputTokenCount: matchingSession?.outputTokenCount,
+                label: codexActionableSurface.options.isEmpty && codexActionableSurface.textInput == nil
+                    ? "Action Needed"
+                    : "Codex Approval Mirror",
+                inputTokenCount: preferredCodexSession(for: codexActionableSurface)?.inputTokenCount,
+                outputTokenCount: preferredCodexSession(for: codexActionableSurface)?.outputTokenCount,
                 approvalCount: 1,
-                sessionTitle: codexActionableSurface.threadTitle ?? matchingSession?.sessionTitle
+                sessionTitle: preferredCodexTitle(for: codexActionableSurface)
             )
         }
 
@@ -412,7 +417,7 @@ public final class AIAgentPlugin: NotchPlugin {
             inputTokenCount: session.inputTokenCount,
             outputTokenCount: session.outputTokenCount,
             approvalCount: 0,
-            sessionTitle: session.sessionTitle
+            sessionTitle: displayTitle(for: session)
         )
     }
 
@@ -483,8 +488,7 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     func expandedSessionTitle(for session: AISession) -> String {
-        guard let sessionTitle = session.sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
-              sessionTitle.isEmpty == false
+        guard let sessionTitle = displayTitle(for: session)
         else {
             return hostDisplayName(for: session.host)
         }
@@ -509,7 +513,7 @@ public final class AIAgentPlugin: NotchPlugin {
         if let codexSurface {
             return codexSurface.options.isEmpty && codexSurface.textInput == nil
                 ? "Action Needed"
-                : "Approval Ready"
+                : "Codex Approval Mirror"
         }
 
         return session.activityLabel
@@ -554,13 +558,19 @@ public final class AIAgentPlugin: NotchPlugin {
             return nil
         }
 
-        if let threadID = codexActionableSurface.threadID {
-            return threadID == session.id ? codexActionableSurface : nil
-        }
-
-        return sessions.first(where: { $0.host == .codex && $0.id == session.id }) != nil
+        return codexThreads.preferredSession(for: codexActionableSurface.threadID)?.id == session.id
             ? codexActionableSurface
             : nil
+    }
+
+    private func normalizedSessionTitle(_ rawTitle: String?) -> String? {
+        guard let title = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              title.isEmpty == false
+        else {
+            return nil
+        }
+
+        return title
     }
 }
 
@@ -1003,6 +1013,12 @@ private struct AIExpandedView: View {
     @ObservedObject var plugin: AIAgentPlugin
     @State private var approvalReviewState = AIApprovalReviewState()
     @State private var selectedCodexSurfaceID: String?
+    @State private var codexApprovalInteractionState: CodexApprovalInteractionState?
+    @State private var codexTextDraftSurfaceID: String?
+    @State private var codexTextDraft: String = ""
+    @State private var codexTextInputContentHeight: CGFloat = 0
+
+    private let codexTextInputFont = NSFont.systemFont(ofSize: 13, weight: .medium)
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -1027,6 +1043,10 @@ private struct AIExpandedView: View {
             }
             if surfaceID == nil {
                 selectedCodexSurfaceID = nil
+                codexApprovalInteractionState = nil
+                codexTextDraftSurfaceID = nil
+                codexTextDraft = ""
+                codexTextInputContentHeight = 0
             }
         }
     }
@@ -1119,9 +1139,7 @@ private struct AIExpandedView: View {
     }
 
     private func codexSurfaceDetailView(_ surface: CodexActionableSurface) -> some View {
-        let session = surface.threadID.flatMap { threadID in
-            plugin.sessions.first(where: { $0.id == threadID })
-        } ?? plugin.sessions.first(where: { $0.host == .codex })
+        let displayTitle = plugin.preferredCodexTitle(for: surface) ?? plugin.hostDisplayName(for: .codex)
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -1143,7 +1161,7 @@ private struct AIExpandedView: View {
                     .frame(width: 8, height: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(surface.threadTitle ?? session.map(plugin.expandedSessionTitle(for:)) ?? plugin.hostDisplayName(for: .codex))
+                    Text(displayTitle)
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -1160,6 +1178,28 @@ private struct AIExpandedView: View {
             }
 
             codexSurfaceCard(surface)
+        }
+        .background(
+            CodexApprovalKeyMonitor(
+                isEnabled: true,
+                focusedTarget: codexApprovalInteractionState?.focusedTarget,
+                onMoveUp: {
+                    moveCodexApprovalFocusUp(surface: surface)
+                },
+                onMoveDown: {
+                    moveCodexApprovalFocusDown(surface: surface)
+                },
+                onSubmit: {
+                    submitCodexSurface(surface)
+                }
+            )
+            .allowsHitTesting(false)
+        )
+        .onAppear {
+            syncCodexApprovalInteraction(with: surface)
+        }
+        .onChange(of: surface) { _, updatedSurface in
+            syncCodexApprovalInteraction(with: updatedSurface)
         }
     }
 
@@ -1184,6 +1224,8 @@ private struct AIExpandedView: View {
             } else if let codexSurfaceID = summary.codexSurfaceID {
                 approvalReviewState.exitReviewing()
                 selectedCodexSurfaceID = codexSurfaceID
+                codexApprovalInteractionState = nil
+                codexTextInputContentHeight = 0
             }
         } label: {
             HStack(spacing: 12) {
@@ -1242,34 +1284,25 @@ private struct AIExpandedView: View {
     private func exitDetail() {
         approvalReviewState.exitReviewing()
         selectedCodexSurfaceID = nil
+        codexApprovalInteractionState = nil
+        codexTextDraftSurfaceID = nil
+        codexTextDraft = ""
+        codexTextInputContentHeight = 0
     }
 
     private func codexSurfaceCard(_ surface: CodexActionableSurface) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(hostColor(for: .codex))
-                    .frame(width: 8, height: 8)
+            Text(surface.summary)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(codexSurfaceHeading(for: surface))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.9))
+            if let commandPreview = surface.commandPreview,
+               commandPreview.isEmpty == false {
+                self.commandPreview(commandPreview, icon: "terminal")
             }
 
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.orange)
-
-                Text("Codex")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-
-                Spacer()
-            }
-
-            codexSurfaceMetadata(surface)
-            commandPreview(surface.summary, icon: "rectangle.and.text.magnifyingglass")
             codexSurfaceControls(surface)
             codexSurfaceButtons(surface)
         }
@@ -1314,35 +1347,57 @@ private struct AIExpandedView: View {
     }
 
     private func codexSurfaceMetadataRows(for surface: CodexActionableSurface) -> [ApprovalMetadataRow] {
-        if let threadTitle = surface.threadTitle, threadTitle.isEmpty == false {
+        if let threadTitle = plugin.preferredCodexTitle(for: surface), threadTitle.isEmpty == false {
             return [ApprovalMetadataRow(label: "Thread", value: threadTitle, monospaced: false)]
-        }
-        if let threadID = surface.threadID, threadID.isEmpty == false {
-            return [ApprovalMetadataRow(label: "Thread", value: threadID, monospaced: true)]
         }
         return []
     }
 
     private func codexSurfaceButtons(_ surface: CodexActionableSurface) -> some View {
-        let columns = [
-            GridItem(.flexible(minimum: 120), spacing: 10),
-            GridItem(.flexible(minimum: 120), spacing: 10),
-        ]
+        let cancelFocused = codexApprovalInteractionState?.focusedTarget == .cancel
+        let submitFocused = codexApprovalInteractionState?.focusedTarget == .submit
 
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-            codexSurfaceActionButton(
-                title: surface.cancelButtonTitle,
-                style: .destructive
-            ) {
+        return HStack(spacing: 14) {
+            Spacer()
+
+            Button {
+                focusCodexApproval(.cancel, surface: surface)
                 _ = plugin.performCodexAction(.cancel, surfaceID: surface.id)
+            } label: {
+                Text(surface.cancelButtonTitle)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(cancelFocused ? .white : .white.opacity(0.62))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(cancelFocused ? Color.white.opacity(0.08) : Color.clear)
+                    )
             }
+            .buttonStyle(.plain)
 
-            codexSurfaceActionButton(
-                title: surface.primaryButtonTitle,
-                style: .primary
-            ) {
-                _ = plugin.performCodexAction(.primary, surfaceID: surface.id)
+            Button {
+                focusCodexApproval(.submit, surface: surface)
+                submitCodexSurface(surface)
+            } label: {
+                Text(surface.primaryButtonTitle)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.9))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.95))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                submitFocused ? Color.black.opacity(0.45) : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1350,92 +1405,122 @@ private struct AIExpandedView: View {
     private func codexSurfaceControls(_ surface: CodexActionableSurface) -> some View {
         if surface.options.isEmpty == false || surface.textInput != nil {
             VStack(alignment: .leading, spacing: 10) {
-                if surface.options.isEmpty == false {
+                let feedbackOptionID = CodexApprovalInteractionState.feedbackOptionID(for: surface)
+                let standardOptions = surface.options.filter { $0.id != feedbackOptionID }
+                let feedbackOption = feedbackOptionID.flatMap { optionID in
+                    surface.options.first(where: { $0.id == optionID })
+                }
+
+                if standardOptions.isEmpty == false {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(surface.options) { option in
-                            codexSurfaceOptionRow(option, surfaceID: surface.id)
+                        ForEach(standardOptions) { option in
+                            codexSurfaceOptionRow(option, surface: surface)
                         }
                     }
                 }
 
                 if let textInput = surface.textInput {
-                    codexSurfaceTextInput(
-                        textInput,
-                        surface: surface,
-                        index: surface.options.count + 1
-                    )
+                    if let feedbackOption {
+                        codexSurfaceFeedbackInput(
+                            textInput,
+                            option: feedbackOption,
+                            surface: surface
+                        )
+                    } else {
+                        codexSurfaceStandaloneTextInput(
+                            textInput,
+                            surface: surface,
+                            index: surface.options.count + 1
+                        )
+                    }
                 }
             }
         }
     }
 
-    private func codexSurfaceOptionRow(_ option: CodexSurfaceOption, surfaceID: String) -> some View {
-        Button {
-            _ = plugin.selectCodexOption(option.id, surfaceID: surfaceID)
+    private func codexSurfaceOptionRow(_ option: CodexSurfaceOption, surface: CodexActionableSurface) -> some View {
+        let isSelected = codexApprovalInteractionState?.isOptionSelected(option.id, in: surface) ?? option.isSelected
+
+        return Button {
+            activateCodexApprovalOption(option.id, surface: surface)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Text("\(option.index).")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(option.isSelected ? .black.opacity(0.75) : .white.opacity(0.45))
+                    .foregroundStyle(isSelected ? .black.opacity(0.75) : .white.opacity(0.45))
                     .frame(width: 20, alignment: .leading)
 
                 Text(option.title)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(option.isSelected ? .black : .white.opacity(0.88))
+                    .foregroundStyle(isSelected ? .black : .white.opacity(0.88))
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if option.isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black.opacity(0.7))
+                if isSelected {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up")
+                        Image(systemName: "arrow.down")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.black.opacity(0.35))
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(option.isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.07))
+                    .fill(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.07))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(option.isSelected ? Color.clear : Color.white.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: isSelected ? 0 : 1)
             )
         }
         .buttonStyle(.plain)
     }
 
-    private func codexSurfaceTextInput(
+    private func codexSurfaceFeedbackInput(
         _ textInput: CodexSurfaceTextInput,
+        option: CodexSurfaceOption,
         surface: CodexActionableSurface,
-        index: Int
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let title = textInput.title, title.isEmpty == false {
-                HStack(alignment: .top, spacing: 12) {
-                    Text("\(index).")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .frame(width: 20, alignment: .leading)
+        let focusTarget = CodexApprovalFocusTarget.textInput(optionID: option.id)
+        let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
+        let placeholder = textInput.title?.isEmpty == false ? (textInput.title ?? option.title) : option.title
+        let sizing = CodexApprovalTextInputSizing(
+            lineHeight: codexTextInputFont.lineHeight,
+            verticalPadding: 16
+        )
 
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.88))
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                Text("Feedback")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
-            }
+        return HStack(alignment: .top, spacing: 12) {
+            Text("\(option.index).")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(width: 20, alignment: .leading)
 
-            TextEditor(text: codexTextBinding(for: surface))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 80, maxHeight: 110)
+            ZStack(alignment: .topLeading) {
+                CodexApprovalTextEditor(
+                    text: codexTextBinding(for: surface),
+                    isEditable: textInput.isEditable,
+                    isFocused: isFocused,
+                    font: codexTextInputFont,
+                    onFocus: {
+                        focusCodexApproval(focusTarget, surface: surface)
+                    },
+                    onSubmit: {
+                        submitCodexSurface(surface)
+                    },
+                    onMoveUpBoundary: {
+                        moveCodexApprovalFocusFromTextInput(towardStart: true, surface: surface)
+                    },
+                    onMoveDownBoundary: {
+                        moveCodexApprovalFocusFromTextInput(towardStart: false, surface: surface)
+                    },
+                    onContentHeightChange: { contentHeight in
+                        codexTextInputContentHeight = contentHeight
+                    }
+                )
+                .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.white.opacity(0.07))
@@ -1445,18 +1530,104 @@ private struct AIExpandedView: View {
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 .disabled(textInput.isEditable == false)
+
+                if isFocused == false,
+                   codexTextDraft(for: surface).isEmpty,
+                   placeholder.isEmpty == false {
+                    Text(placeholder)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusCodexApproval(focusTarget, surface: surface)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func codexSurfaceStandaloneTextInput(
+        _ textInput: CodexSurfaceTextInput,
+        surface: CodexActionableSurface,
+        index: Int
+    ) -> some View {
+        let focusTarget = CodexApprovalFocusTarget.textInput(optionID: nil)
+        let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
+        let placeholder = textInput.title?.isEmpty == false ? (textInput.title ?? "") : "否，请告知 Codex 如何调整"
+        let sizing = CodexApprovalTextInputSizing(
+            lineHeight: codexTextInputFont.lineHeight,
+            verticalPadding: 16
+        )
+
+        return HStack(alignment: .top, spacing: 12) {
+            Text("\(index).")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(width: 20, alignment: .leading)
+
+            ZStack(alignment: .topLeading) {
+                CodexApprovalTextEditor(
+                    text: codexTextBinding(for: surface),
+                    isEditable: textInput.isEditable,
+                    isFocused: isFocused,
+                    font: codexTextInputFont,
+                    onFocus: {
+                        focusCodexApproval(focusTarget, surface: surface)
+                    },
+                    onSubmit: {
+                        submitCodexSurface(surface)
+                    },
+                    onMoveUpBoundary: {
+                        moveCodexApprovalFocusFromTextInput(towardStart: true, surface: surface)
+                    },
+                    onMoveDownBoundary: {
+                        moveCodexApprovalFocusFromTextInput(towardStart: false, surface: surface)
+                    },
+                    onContentHeightChange: { contentHeight in
+                        codexTextInputContentHeight = contentHeight
+                    }
+                )
+                .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.07))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+
+                if isFocused == false,
+                   codexTextDraft(for: surface).isEmpty,
+                   placeholder.isEmpty == false {
+                    Text(placeholder)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusCodexApproval(focusTarget, surface: surface)
+            }
         }
     }
 
     private func codexTextBinding(for surface: CodexActionableSurface) -> Binding<String> {
         Binding(
             get: {
-                plugin.codexActionableSurface?.id == surface.id
-                    ? plugin.codexActionableSurface?.textInput?.text ?? surface.textInput?.text ?? ""
-                    : surface.textInput?.text ?? ""
+                codexTextDraft(for: surface)
             },
             set: { newValue in
-                _ = plugin.updateCodexText(newValue, surfaceID: surface.id)
+                codexTextDraftSurfaceID = surface.id
+                codexTextDraft = newValue
             }
         )
     }
@@ -1466,7 +1637,7 @@ private struct AIExpandedView: View {
         style: ApprovalActionStyle,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        return Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(foregroundColor(for: style))
@@ -1487,7 +1658,9 @@ private struct AIExpandedView: View {
     }
 
     private func approvalCard(_ approval: PendingApproval) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let session = plugin.sessions.first(where: { $0.id == approval.sessionID })
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Circle()
                     .fill(hostColor(for: approval.host))
@@ -1518,7 +1691,7 @@ private struct AIExpandedView: View {
                 Spacer()
             }
 
-            approvalMetadata(approval)
+            approvalMetadata(approval, session: session)
 
             if let command = approval.payload.command {
                 commandPreview(command, icon: "terminal")
@@ -1549,8 +1722,8 @@ private struct AIExpandedView: View {
     }
 
     @ViewBuilder
-    private func approvalMetadata(_ approval: PendingApproval) -> some View {
-        let rows = approvalMetadataRows(for: approval)
+    private func approvalMetadata(_ approval: PendingApproval, session: AISession?) -> some View {
+        let rows = approvalMetadataRows(for: approval, session: session)
         if rows.isEmpty == false {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
@@ -1704,7 +1877,7 @@ private struct AIExpandedView: View {
         }
     }
 
-    private func approvalMetadataRows(for approval: PendingApproval) -> [ApprovalMetadataRow] {
+    private func approvalMetadataRows(for approval: PendingApproval, session: AISession?) -> [ApprovalMetadataRow] {
         var rows: [ApprovalMetadataRow] = []
 
         if let reason = approval.reason, reason.isEmpty == false {
@@ -1716,8 +1889,8 @@ private struct AIExpandedView: View {
         if let grantRoot = approval.grantRoot, grantRoot.isEmpty == false {
             rows.append(ApprovalMetadataRow(label: "Root", value: grantRoot, monospaced: true))
         }
-        if let threadID = approval.threadID, threadID.isEmpty == false {
-            rows.append(ApprovalMetadataRow(label: "Thread", value: threadID, monospaced: true))
+        if let threadTitle = session.flatMap({ plugin.displayTitle(for: $0) }) {
+            rows.append(ApprovalMetadataRow(label: "Thread", value: threadTitle, monospaced: false))
         }
 
         return rows
@@ -1726,6 +1899,114 @@ private struct AIExpandedView: View {
     private func networkApprovalSummary(_ context: NetworkApprovalContext) -> String {
         let portSuffix = context.port.map { ":\($0)" } ?? ""
         return "\(context.protocolName.uppercased()) \(context.host)\(portSuffix)"
+    }
+
+    private func syncCodexApprovalInteraction(with surface: CodexActionableSurface) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        state.sync(surface: surface)
+        codexApprovalInteractionState = state
+        syncCodexTextDraft(with: surface)
+    }
+
+    private func focusCodexApproval(_ target: CodexApprovalFocusTarget, surface: CodexActionableSurface) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        _ = state.focus(target, surface: surface)
+        codexApprovalInteractionState = state
+    }
+
+    private func activateCodexApprovalOption(_ optionID: String, surface: CodexActionableSurface) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        let selectedOptionID = state.activateOption(optionID, surface: surface)
+        codexApprovalInteractionState = state
+
+        guard let selectedOptionID else {
+            return
+        }
+
+        _ = plugin.selectCodexOption(selectedOptionID, surfaceID: surface.id)
+    }
+
+    private func moveCodexApprovalFocusUp(surface: CodexActionableSurface) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        _ = state.moveUp(surface: surface)
+        codexApprovalInteractionState = state
+    }
+
+    private func moveCodexApprovalFocusDown(surface: CodexActionableSurface) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        _ = state.moveDown(surface: surface)
+        codexApprovalInteractionState = state
+    }
+
+    private func moveCodexApprovalFocusFromTextInput(
+        towardStart: Bool,
+        surface: CodexActionableSurface
+    ) {
+        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+        guard let focusedTarget = state.focusedTarget,
+              case .textInput = focusedTarget
+        else {
+            if towardStart {
+                _ = state.moveUp(surface: surface)
+            } else {
+                _ = state.moveDown(surface: surface)
+            }
+            codexApprovalInteractionState = state
+            return
+        }
+
+        let nextTarget = state.adjacentTarget(
+            from: focusedTarget,
+            delta: towardStart ? -1 : 1,
+            surface: surface
+        )
+        _ = state.focus(nextTarget, surface: surface)
+        codexApprovalInteractionState = state
+    }
+
+    private func syncCodexApprovalStateToSurface(
+        surface: CodexActionableSurface
+    ) {
+        if let optionID = codexApprovalInteractionState?.selectedOptionIDToSync(in: surface),
+           surface.options.first(where: { $0.id == optionID })?.isSelected != true {
+            _ = plugin.selectCodexOption(optionID, surfaceID: surface.id)
+        }
+
+        if surface.textInput != nil {
+            let draftText = codexTextDraft(for: surface)
+            if draftText != (surface.textInput?.text ?? "") {
+                _ = plugin.updateCodexText(draftText, surfaceID: surface.id)
+            }
+        }
+    }
+
+    private func submitCodexSurface(_ surface: CodexActionableSurface) {
+        let state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
+
+        if state.submitIntent(in: surface) == .cancel {
+            _ = plugin.performCodexAction(.cancel, surfaceID: surface.id)
+            return
+        }
+
+        syncCodexApprovalStateToSurface(surface: surface)
+        _ = plugin.performCodexAction(.primary, surfaceID: surface.id)
+    }
+
+    private func syncCodexTextDraft(with surface: CodexActionableSurface) {
+        guard codexTextDraftSurfaceID != surface.id else {
+            return
+        }
+
+        codexTextDraftSurfaceID = surface.id
+        codexTextDraft = surface.textInput?.text ?? ""
+    }
+
+    private func codexTextDraft(for surface: CodexActionableSurface) -> String {
+        if codexTextDraftSurfaceID == surface.id {
+            return codexTextDraft
+        }
+
+        return surface.textInput?.text ?? ""
     }
 
     private func foregroundColor(for style: ApprovalActionStyle) -> Color {

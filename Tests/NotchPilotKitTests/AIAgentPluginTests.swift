@@ -13,14 +13,21 @@ private final class EventRecorder {
 }
 
 private final class FakeCodexContextMonitor: @unchecked Sendable, CodexDesktopContextMonitoring {
-    var onThreadContextChanged: (@Sendable (CodexThreadContext) -> Void)?
+    var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
 
     func start() {}
     func stop() {}
 
-    func emit(context: CodexThreadContext) {
-        onThreadContextChanged?(context)
+    func emit(update: CodexThreadUpdate) {
+        onThreadContextChanged?(update)
+    }
+
+    func emit(
+        context: CodexThreadContext,
+        marksActivity: Bool = true
+    ) {
+        onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
     }
 
     func emit(connection: CodexDesktopConnectionState) {
@@ -344,6 +351,199 @@ final class AIAgentPluginTests: XCTestCase {
         XCTAssertEqual(activity?.sessionTitle, "Write plan")
         XCTAssertEqual(summaries.first?.codexSurfaceID, "surface-1")
         XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
+    }
+
+    func testCodexSurfaceWithoutThreadIDUsesCurrentActiveIPCThreadContext() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let now = Date(timeIntervalSince1970: 3)
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor,
+                nowProvider: { now }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-active",
+                    title: "Current Active Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 1)
+                ),
+                marksActivity: true
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-metadata-only",
+                    title: "Metadata Only Thread",
+                    activityLabel: "Connected",
+                    phase: .connected,
+                    updatedAt: Date(timeIntervalSince1970: 2)
+                ),
+                marksActivity: false
+            )
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-nil-thread",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        await Task.yield()
+
+        let title = await MainActor.run {
+            plugin.preferredCodexTitle(for: plugin.codexActionableSurface)
+        }
+
+        XCTAssertEqual(title, "Current Active Thread")
+    }
+
+    func testCodexSurfaceWithoutActiveSessionUsesLatestIPCContextTitleForDisplay() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let now = Date(timeIntervalSince1970: 3)
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor,
+                nowProvider: { now }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-metadata-current",
+                    title: "IPC Current Thread",
+                    activityLabel: "Connected",
+                    phase: .connected,
+                    updatedAt: Date(timeIntervalSince1970: 2)
+                ),
+                marksActivity: false
+            )
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-metadata-current",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let title = await MainActor.run {
+            plugin.preferredCodexTitle(for: plugin.codexActionableSurface)
+        }
+
+        XCTAssertEqual(title, "IPC Current Thread")
+    }
+
+    func testCodexSessionTitleRefreshesWhenIPCMetadataArrivesAfterActivity() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let now = Date(timeIntervalSince1970: 3)
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor,
+                nowProvider: { now }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-title",
+                    title: nil,
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 1)
+                ),
+                marksActivity: true
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-title",
+                    title: "Real IPC Thread Title",
+                    activityLabel: "Completed",
+                    phase: .completed,
+                    updatedAt: Date(timeIntervalSince1970: 2)
+                ),
+                marksActivity: false
+            )
+        }
+
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+
+        XCTAssertEqual(summaries.first?.id, "codex-thread-title")
+        XCTAssertEqual(summaries.first?.title, "Real IPC Thread Title")
+    }
+
+    func testCodexSurfaceWithoutThreadIDBindsOnlyToCurrentActiveCodexSession() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let now = Date(timeIntervalSince1970: 3)
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor,
+                nowProvider: { now }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-older",
+                    title: "Older Thread",
+                    activityLabel: "Completed",
+                    phase: .completed,
+                    updatedAt: Date(timeIntervalSince1970: 1)
+                ),
+                marksActivity: true
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-current",
+                    title: "Current Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 2)
+                ),
+                marksActivity: true
+            )
+            codexAXMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-current",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        await Task.yield()
+
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+        let attentionRows = summaries.filter(\.hasAttention)
+
+        XCTAssertEqual(attentionRows.map(\.id), ["codex-current"])
+        XCTAssertEqual(attentionRows.map(\.title), ["Current Thread"])
     }
 
     func testPerformingCodexPrimaryActionClearsSurfaceImmediately() async {
@@ -756,6 +956,105 @@ final class AIAgentPluginTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(scrollViewCount, 0)
+    }
+
+    func testSnapshotOnlyCodexThreadDoesNotAppearInActivityOrSummaries() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-snapshot-only",
+                    title: "Old Snapshot",
+                    activityLabel: "Completed",
+                    phase: .completed
+                ),
+                marksActivity: false
+            )
+        }
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+
+        XCTAssertNil(activity)
+        XCTAssertTrue(summaries.isEmpty)
+    }
+
+    func testStaleCodexActivityOlderThan24HoursIsFilteredOut() async {
+        let now = Date(timeIntervalSince1970: 1_710_000_000)
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor,
+                nowProvider: { now }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-stale",
+                    title: "Stale Thread",
+                    activityLabel: "Completed",
+                    phase: .completed,
+                    updatedAt: now.addingTimeInterval(-(25 * 60 * 60))
+                )
+            )
+        }
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        let summaries = await MainActor.run { plugin.expandedSessionSummaries }
+
+        XCTAssertNil(activity)
+        XCTAssertTrue(summaries.isEmpty)
+    }
+
+    func testDeactivateClearsCodexActivityStateUntilNewLiveUpdateArrives() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = FakeCodexContextMonitor()
+        let codexAXMonitor = FakeCodexAXMonitor()
+        let plugin = await MainActor.run {
+            AIAgentPlugin(
+                codexMonitor: codexMonitor,
+                codexAXMonitor: codexAXMonitor
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-live",
+                    title: "Live Thread",
+                    activityLabel: "Working",
+                    phase: .working
+                )
+            )
+        }
+
+        let beforeDeactivate = await MainActor.run { plugin.expandedSessionSummaries }
+        XCTAssertEqual(beforeDeactivate.map(\.title), ["Live Thread"])
+
+        await MainActor.run {
+            plugin.deactivate()
+            plugin.activate(bus: bus)
+        }
+
+        let afterReactivate = await MainActor.run { plugin.expandedSessionSummaries }
+        XCTAssertTrue(afterReactivate.isEmpty)
     }
 }
 

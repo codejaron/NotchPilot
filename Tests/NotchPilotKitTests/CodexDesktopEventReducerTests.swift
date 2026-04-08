@@ -42,7 +42,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .threadContextUpsert(context)? = outputs.last else {
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
             return XCTFail("expected thread context output")
         }
 
@@ -52,6 +52,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(context.phase, .working)
         XCTAssertEqual(context.inputTokenCount, 4567)
         XCTAssertEqual(context.outputTokenCount, 890)
+        XCTAssertFalse(marksActivity)
     }
 
     func testThreadStreamPatchesUpdateExistingThreadContext() throws {
@@ -127,7 +128,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .threadContextUpsert(context)? = outputs.last else {
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
             return XCTFail("expected updated thread context output")
         }
 
@@ -137,6 +138,67 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(context.phase, .working)
         XCTAssertEqual(context.inputTokenCount, 7000)
         XCTAssertEqual(context.outputTokenCount, 1500)
+        XCTAssertTrue(marksActivity)
+    }
+
+    func testThreadMetadataUpdateRequestSetsThreadTitleWithoutMarkingActivity() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .request(
+                CodexDesktopIPCRequestFrame(
+                    requestID: "req-thread-title",
+                    method: "thread/metadata/update",
+                    params: [
+                        "conversationId": .string("conv-meta"),
+                        "metadata": .object([
+                            "title": .string("Real Thread Title"),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-meta")
+        XCTAssertEqual(context.title, "Real Thread Title")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadMetadataUpdateRequestUsesMetadataNameWhenItIsReadable() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .request(
+                CodexDesktopIPCRequestFrame(
+                    requestID: "req-thread-name",
+                    method: "thread/metadata/update",
+                    params: [
+                        "conversationId": .string("conv-readable-name"),
+                        "metadata": .object([
+                            "name": .string("Fix Approval Mirror UI"),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-readable-name")
+        XCTAssertEqual(context.title, "Fix Approval Mirror UI")
+        XCTAssertFalse(marksActivity)
     }
 
     func testThreadStreamUsesExplicitPlanModeBeforeTurnStatus() throws {
@@ -174,12 +236,13 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .threadContextUpsert(context)? = outputs.last else {
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
             return XCTFail("expected thread context output")
         }
 
         XCTAssertEqual(context.phase, .plan)
         XCTAssertEqual(context.activityLabel, "Plan")
+        XCTAssertFalse(marksActivity)
     }
 
     func testThreadStreamFallsBackToRuntimeStatusWhenNoTurnStatusExists() throws {
@@ -208,11 +271,174 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .threadContextUpsert(context)? = outputs.last else {
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
             return XCTFail("expected thread context output")
         }
 
         XCTAssertEqual(context.phase, .connected)
         XCTAssertEqual(context.activityLabel, "Connected")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamUsesThreadMetadataTitleWhenTopLevelTitleIsMissing() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-thread-name"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-thread-name"),
+                                "thread": .object([
+                                    "title": .string("Named From Metadata"),
+                                ]),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-thread-name")
+        XCTAssertEqual(context.title, "Named From Metadata")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamIgnoresGenericNameFieldWhenTitleIsMissing() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-generic-name"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-generic-name"),
+                                "name": .string("019d6aff-09ea-70c0-8cb4-efbd0565ce68"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-generic-name")
+        XCTAssertNil(context.title)
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamUsesReadableNameFieldWhenTitleIsMissing() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-readable-name"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-readable-name"),
+                                "metadata": .object([
+                                    "name": .string("Readable IPC Thread Name"),
+                                ]),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-readable-name")
+        XCTAssertEqual(context.title, "Readable IPC Thread Name")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamDoesNotUseLatestUserPromptAsFallbackTitle() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-no-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-no-title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-1"),
+                                        "status": .string("completed"),
+                                        "items": .array([
+                                            .object([
+                                                "type": .string("userMessage"),
+                                                "content": .array([
+                                                    .object([
+                                                        "text": .string("请实现 Codex 审批旁路接入"),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertNil(context.title)
+        XCTAssertFalse(marksActivity)
     }
 }

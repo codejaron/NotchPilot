@@ -40,6 +40,16 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
     }
 }
 
+public struct CodexThreadUpdate: Equatable, Sendable {
+    public let context: CodexThreadContext
+    public let marksActivity: Bool
+
+    public init(context: CodexThreadContext, marksActivity: Bool) {
+        self.context = context
+        self.marksActivity = marksActivity
+    }
+}
+
 public enum CodexSurfaceAction: String, Equatable, Sendable {
     case primary
     case cancel
@@ -74,6 +84,7 @@ public struct CodexSurfaceTextInput: Equatable, Sendable {
 public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let id: String
     public let summary: String
+    public let commandPreview: String?
     public let primaryButtonTitle: String
     public let cancelButtonTitle: String
     public let options: [CodexSurfaceOption]
@@ -84,6 +95,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public init(
         id: String,
         summary: String,
+        commandPreview: String? = nil,
         primaryButtonTitle: String,
         cancelButtonTitle: String,
         options: [CodexSurfaceOption] = [],
@@ -93,6 +105,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     ) {
         self.id = id
         self.summary = summary
+        self.commandPreview = commandPreview
         self.primaryButtonTitle = primaryButtonTitle
         self.cancelButtonTitle = cancelButtonTitle
         self.options = options
@@ -106,15 +119,20 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             return self
         }
 
+        let resolvedThreadTitle = Self.preferredThreadTitle(
+            contextTitle: context.title
+        )
+
         return CodexActionableSurface(
             id: id,
             summary: summary,
+            commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
             options: options,
             textInput: textInput,
             threadID: threadID ?? context.threadID,
-            threadTitle: threadTitle ?? context.title
+            threadTitle: resolvedThreadTitle
         )
     }
 
@@ -126,6 +144,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         return CodexActionableSurface(
             id: id,
             summary: summary,
+            commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
             options: options.map { option in
@@ -150,6 +169,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         return CodexActionableSurface(
             id: id,
             summary: summary,
+            commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
             options: options,
@@ -161,6 +181,22 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             threadID: threadID,
             threadTitle: threadTitle
         )
+    }
+
+    private static func preferredThreadTitle(
+        contextTitle: String?
+    ) -> String? {
+        normalizedThreadTitle(contextTitle)
+    }
+
+    private static func normalizedThreadTitle(_ title: String?) -> String? {
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              title.isEmpty == false
+        else {
+            return nil
+        }
+
+        return title
     }
 }
 
@@ -186,7 +222,7 @@ public struct CodexDesktopAXPermissionState: Equatable, Sendable {
 }
 
 public protocol CodexDesktopContextMonitoring: AnyObject {
-    var onThreadContextChanged: (@Sendable (CodexThreadContext) -> Void)? { get set }
+    var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)? { get set }
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)? { get set }
 
     func start()
