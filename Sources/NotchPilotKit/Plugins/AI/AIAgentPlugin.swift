@@ -2017,9 +2017,12 @@ private struct AIExpandedView: View {
     }
 
     private func syncCodexApprovalInteraction(with surface: CodexActionableSurface) {
-        var state = codexApprovalInteractionState ?? CodexApprovalInteractionState(surface: surface)
-        state.sync(surface: surface)
-        codexApprovalInteractionState = state
+        if var existing = codexApprovalInteractionState {
+            existing.sync(surface: surface)
+            codexApprovalInteractionState = existing
+        } else {
+            codexApprovalInteractionState = CodexApprovalInteractionState(surface: surface)
+        }
         syncCodexTextDraft(with: surface)
     }
 
@@ -2039,6 +2042,11 @@ private struct AIExpandedView: View {
         }
 
         _ = plugin.selectCodexOption(selectedOptionID, surfaceID: surface.id)
+
+        let feedbackOptionID = CodexApprovalInteractionState.feedbackOptionID(for: surface)
+        if optionID != feedbackOptionID {
+            submitCodexSurface(surface)
+        }
     }
 
     private func moveCodexApprovalFocusUp(surface: CodexActionableSurface) {
