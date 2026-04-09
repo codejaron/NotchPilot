@@ -5,7 +5,8 @@ import Foundation
 public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let bus = EventBus()
     private let pluginManager = PluginManager()
-    private let aiPlugin = AIAgentPlugin()
+    private let claudePlugin = ClaudePlugin()
+    private let codexPlugin = CodexPlugin()
     private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
@@ -33,7 +34,13 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(
             openHandler: { [weak self] in
                 guard let self else { return }
-                self.bus.emit(.openRequested(pluginID: self.aiPlugin.id, target: .activeScreen))
+                guard let pluginID = self.pluginManager.defaultOpenPluginID(
+                    previewPluginID: nil,
+                    lastSelectedPluginID: nil
+                ) else {
+                    return
+                }
+                self.bus.emit(.openRequested(pluginID: pluginID, target: .activeScreen))
             },
             closeHandler: { [weak self] in
                 self?.bus.emit(.closeRequested(target: .allScreens))
@@ -109,12 +116,12 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             try server.start(
                 onFrame: { [weak self] frame, respond in
                     Task { @MainActor [weak self] in
-                        self?.aiPlugin.handle(frame: frame, respond: respond)
+                        self?.claudePlugin.handle(frame: frame, respond: respond)
                     }
                 },
                 onDisconnect: { [weak self] requestID in
                     Task { @MainActor [weak self] in
-                        self?.aiPlugin.handleDisconnect(requestID: requestID)
+                        self?.claudePlugin.handleDisconnect(requestID: requestID)
                     }
                 }
             )
@@ -130,7 +137,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func initialPlugins() -> [any NotchPlugin] {
-        [aiPlugin]
+        [claudePlugin, codexPlugin]
     }
 
     var registeredPluginIDsForTesting: [String] {

@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 struct AIHooksSettingsTab: View {
@@ -13,7 +12,7 @@ struct AIHooksSettingsTab: View {
                 Text("AI Integrations")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
 
-                Text("Claude uses hooks. Codex uses desktop IPC for context and Accessibility for click-through actions.")
+                Text("Claude uses hooks. Codex uses desktop IPC for context, approvals, and session activity.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
             }
@@ -42,13 +41,12 @@ struct AIHooksSettingsTab: View {
                 icon: "terminal",
                 iconColor: .blue,
                 title: "OpenAI Codex",
-                subtitle: "Desktop IPC context + Accessibility-based actions",
+                subtitle: "Desktop IPC context + approval actions",
                 detected: store.codexDetected,
                 connection: store.codexDesktopConnection,
-                axPermission: store.codexAXPermission,
                 capabilities: [
-                    ("checkmark.circle.fill", "AX default / cancel actions", store.codexAXPermission.status == .granted),
                     ("checkmark.circle.fill", "Context monitoring via IPC", store.codexDesktopConnection.status == .connected),
+                    ("checkmark.circle.fill", "Approval actions via IPC", store.codexDesktopConnection.status == .connected),
                     ("checkmark.circle.fill", "Session monitoring", true),
                 ]
             )
@@ -169,7 +167,6 @@ struct AIHooksSettingsTab: View {
         subtitle: String,
         detected: Bool,
         connection: CodexDesktopConnectionState,
-        axPermission: CodexDesktopAXPermissionState,
         capabilities: [(String, String, Bool)]
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -184,7 +181,6 @@ struct AIHooksSettingsTab: View {
                             .font(.system(size: 15, weight: .bold, design: .rounded))
 
                         codexStatusBadge(detected: detected, connection: connection)
-                        codexAXBadge(axPermission: axPermission)
                     }
 
                     Text(subtitle)
@@ -211,40 +207,10 @@ struct AIHooksSettingsTab: View {
             }
             .padding(.leading, 26)
 
-            HStack(spacing: 10) {
-                Text("Accessibility")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-
-                Text(axPermission.status == .granted ? "Granted" : "Not granted")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(axPermission.status == .granted ? .green : .orange)
-
-                Spacer()
-
-                if axPermission.status != .granted {
-                    Button("Open Settings") {
-                        openAccessibilitySettings()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-            .padding(.leading, 26)
-
             if let message = connection.message, message.isEmpty == false {
                 Text(message)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(connection.status == .error ? .red : .secondary)
-                    .padding(.leading, 26)
-            }
-
-            if let message = axPermission.message,
-               axPermission.status != .granted,
-               message.isEmpty == false {
-                Text(message)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
                     .padding(.leading, 26)
             }
         }
@@ -286,17 +252,6 @@ struct AIHooksSettingsTab: View {
                 case .notFound:
                     badge("Not found", fill: Color.gray.opacity(0.3), foreground: Color.primary)
                 }
-            }
-        }
-    }
-
-    private func codexAXBadge(axPermission: CodexDesktopAXPermissionState) -> some View {
-        Group {
-            switch axPermission.status {
-            case .granted:
-                badge("AX Ready", fill: Color.green.opacity(0.25), foreground: .green)
-            case .notGranted:
-                badge("AX Needed", fill: Color.orange.opacity(0.25), foreground: .orange)
             }
         }
     }
@@ -361,14 +316,6 @@ struct AIHooksSettingsTab: View {
 
         store.bridgeScriptPath = fallbackPath
         return fallbackPath
-    }
-
-    private func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
-        }
-
-        NSWorkspace.shared.open(url)
     }
 
     private func refreshInstallationState() {

@@ -11,9 +11,9 @@ final class AppDelegateTests: XCTestCase {
     }
 
     @MainActor
-    func testInitialPluginRegistrationUsesSingleAIPlugin() {
+    func testInitialPluginRegistrationUsesSeparateClaudeAndCodexPlugins() {
         let delegate = NotchPilotAppDelegate()
 
-        XCTAssertEqual(delegate.registeredPluginIDsForTesting, ["ai"])
+        XCTAssertEqual(delegate.registeredPluginIDsForTesting, ["claude", "codex"])
     }
 }

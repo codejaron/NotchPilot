@@ -200,27 +200,6 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     }
 }
 
-public enum CodexDesktopAXPermissionStatus: String, Equatable, Sendable {
-    case granted
-    case notGranted
-}
-
-public struct CodexDesktopAXPermissionState: Equatable, Sendable {
-    public let status: CodexDesktopAXPermissionStatus
-    public let message: String?
-
-    public init(status: CodexDesktopAXPermissionStatus, message: String? = nil) {
-        self.status = status
-        self.message = message
-    }
-
-    public static let granted = CodexDesktopAXPermissionState(status: .granted)
-    public static let notGranted = CodexDesktopAXPermissionState(
-        status: .notGranted,
-        message: "Accessibility permission is required for Codex actions."
-    )
-}
-
 public protocol CodexDesktopContextMonitoring: AnyObject {
     var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)? { get set }
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)? { get set }
@@ -240,11 +219,4 @@ public protocol CodexDesktopActionableSurfaceMonitoring: AnyObject {
 
     @discardableResult
     func updateText(_ text: String, on surfaceID: String) -> Bool
-}
-
-public protocol CodexDesktopAXMonitoring: CodexDesktopActionableSurfaceMonitoring {
-    var onPermissionStateChanged: (@Sendable (CodexDesktopAXPermissionState) -> Void)? { get set }
-
-    func start()
-    func stop()
 }
