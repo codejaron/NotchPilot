@@ -1,23 +1,34 @@
+import Combine
 import SwiftUI
 
-@MainActor
-public protocol NotchPlugin: AnyObject, Identifiable, ObservableObject {
-    var id: String { get }
-    var name: String { get }
-    var iconSystemName: String { get }
-    var isEnabled: Bool { get set }
-    var priority: Int { get }
+public struct NotchPluginPreview {
+    public let width: CGFloat
+    public let view: AnyView
 
-    func compactView(context: NotchContext) -> AnyView?
-    func compactWidth(context: NotchContext) -> CGFloat?
-    func sneakPeekView(context: NotchContext) -> AnyView?
-    func sneakPeekWidth(context: NotchContext) -> CGFloat?
-    func expandedView(context: NotchContext) -> AnyView
+    public init(width: CGFloat, view: AnyView) {
+        self.width = width
+        self.view = view
+    }
+}
+
+@MainActor
+public protocol NotchPlugin: AnyObject, Identifiable, ObservableObject where ObjectWillChangePublisher == ObservableObjectPublisher {
+    var id: String { get }
+    var title: String { get }
+    var iconSystemName: String { get }
+    var accentColor: Color { get }
+    var isEnabled: Bool { get set }
+    var dockOrder: Int { get }
+    var previewPriority: Int? { get }
+
+    func preview(context: NotchContext) -> NotchPluginPreview?
+    func contentView(context: NotchContext) -> AnyView
     func activate(bus: EventBus)
     func deactivate()
 }
 
 public extension NotchPlugin {
-    func compactWidth(context: NotchContext) -> CGFloat? { nil }
-    func sneakPeekWidth(context: NotchContext) -> CGFloat? { nil }
+    var previewPriority: Int? { nil }
+
+    func preview(context: NotchContext) -> NotchPluginPreview? { nil }
 }

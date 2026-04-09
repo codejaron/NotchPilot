@@ -9,4 +9,11 @@ final class AppDelegateTests: XCTestCase {
 
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
     }
+
+    @MainActor
+    func testInitialPluginRegistrationUsesSingleAIPlugin() {
+        let delegate = NotchPilotAppDelegate()
+
+        XCTAssertEqual(delegate.registeredPluginIDsForTesting, ["ai"])
+    }
 }

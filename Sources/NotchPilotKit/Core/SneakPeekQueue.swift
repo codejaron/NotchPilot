@@ -53,7 +53,7 @@ public final class SneakPeekQueue {
                 return $0.sequence < $1.sequence
             }
 
-            return $0.request.priority > $1.request.priority
+            return $0.request.priority < $1.request.priority
         }
     }
 }

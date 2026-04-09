@@ -21,7 +21,9 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 #endif
 
-        pluginManager.register(aiPlugin)
+        for plugin in initialPlugins() {
+            pluginManager.register(plugin)
+        }
         pluginManager.activateAll(using: bus)
 
         let multiScreenManager = MultiScreenManager(bus: bus, pluginManager: pluginManager)
@@ -125,6 +127,14 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private func stopSocketServer() {
         socketServer?.stop()
         socketServer = nil
+    }
+
+    func initialPlugins() -> [any NotchPlugin] {
+        [aiPlugin]
+    }
+
+    var registeredPluginIDsForTesting: [String] {
+        initialPlugins().map(\.id)
     }
 }
 

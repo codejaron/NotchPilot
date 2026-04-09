@@ -900,12 +900,12 @@ final class AIAgentPluginTests: XCTestCase {
             )
         }
 
-        let context = NotchContext(
-            screenID: "primary",
-            notchState: .closed,
-            notchGeometry: NotchGeometry(
-                compactSize: CGSize(width: 236, height: 38),
-                expandedSize: CGSize(width: 520, height: 320)
+            let context = NotchContext(
+                screenID: "primary",
+                notchState: .idleClosed,
+                notchGeometry: NotchGeometry(
+                    compactSize: CGSize(width: 236, height: 38),
+                    expandedSize: CGSize(width: 520, height: 320)
             ),
             isPrimaryScreen: true
         )

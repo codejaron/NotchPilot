@@ -29,22 +29,18 @@ struct NotchLayoutMetrics {
         switch session.notchState {
         case .open:
             return session.geometry.expandedSize
-        case .closed:
-            let compactWidth = max(
-                session.geometry.compactSize.width,
-                plugins.compactMap { $0.compactWidth(context: context) }.max() ?? 0
+        case .idleClosed:
+            return session.geometry.compactSize
+        case .previewClosed:
+            let previewWidth = plugins
+                .first(where: { $0.id == session.currentSneakPeek?.pluginID })
+                .flatMap { $0.preview(context: context)?.width }
+                ?? session.geometry.compactSize.width
+
+            return CGSize(
+                width: max(session.geometry.compactSize.width, previewWidth),
+                height: session.geometry.compactSize.height
             )
-            return CGSize(width: compactWidth, height: session.geometry.compactSize.height)
-        case .sneakPeek:
-            let compactWidth = max(
-                session.geometry.compactSize.width,
-                plugins.compactMap { $0.compactWidth(context: context) }.max() ?? 0
-            )
-            let sneakPeekWidth = max(
-                compactWidth,
-                plugins.compactMap { $0.sneakPeekWidth(context: context) }.max() ?? 0
-            )
-            return CGSize(width: sneakPeekWidth, height: max(session.geometry.compactSize.height + 86, 120))
         }
     }
 

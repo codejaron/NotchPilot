@@ -5,9 +5,11 @@ import SwiftUI
 @MainActor
 public final class AIAgentPlugin: NotchPlugin {
     public let id = "ai"
-    public let name = "AI Agents"
+    public let title = "AI Agents"
     public let iconSystemName = "sparkles.rectangle.stack"
-    public let priority = 1000
+    public let accentColor: Color = .orange
+    public let dockOrder = 1000
+    public let previewPriority: Int? = 100
 
     @Published public var isEnabled = true
     @Published public private(set) var sessions: [AISession] = []
@@ -95,10 +97,6 @@ public final class AIAgentPlugin: NotchPlugin {
         bus = nil
     }
 
-    public func compactView(context: NotchContext) -> AnyView? {
-        AnyView(AICompactView(plugin: self, context: context))
-    }
-
     nonisolated private func performOnMainActor(
         _ action: @escaping @MainActor (AIAgentPlugin) -> Void
     ) {
@@ -117,34 +115,29 @@ public final class AIAgentPlugin: NotchPlugin {
         }
     }
 
-    public func compactWidth(context: NotchContext) -> CGFloat? {
+    public func preview(context: NotchContext) -> NotchPluginPreview? {
         guard let metrics = compactMetrics(context: context) else {
             return nil
         }
 
-        return metrics.totalWidth
-    }
-
-    public func sneakPeekView(context: NotchContext) -> AnyView? {
-        let attentionCount = pendingApprovals.count + (codexActionableSurface == nil ? 0 : 1)
-        guard attentionCount > 0 else {
-            return nil
-        }
-
-        return AnyView(
-            AIAttentionBadgeView(
-                count: attentionCount,
-                showsCodexAction: codexActionableSurface != nil
+        return NotchPluginPreview(
+            width: metrics.totalWidth,
+            view: AnyView(
+                AICompactView(plugin: self, context: context)
             )
         )
     }
 
-    public func sneakPeekWidth(context: NotchContext) -> CGFloat? {
-        (pendingApprovals.isEmpty && codexActionableSurface == nil) ? nil : 280
+    public func contentView(context: NotchContext) -> AnyView {
+        AnyView(AIExpandedView(plugin: self))
+    }
+
+    public func compactWidth(context: NotchContext) -> CGFloat? {
+        preview(context: context)?.width
     }
 
     public func expandedView(context: NotchContext) -> AnyView {
-        AnyView(AIExpandedView(plugin: self))
+        contentView(context: context)
     }
 
     public func handle(frame: BridgeFrame, respond: @escaping @Sendable (Data) -> Void) {
@@ -368,7 +361,8 @@ public final class AIAgentPlugin: NotchPlugin {
     }
 
     private func mergedCodexSurface() -> CodexActionableSurface? {
-        guard let rawCodexSurface = codexSurfaceState.effectiveSurface else {
+        guard let rawCodexSurface = codexSurfaceState.effectiveSurface
+        else {
             return nil
         }
 
@@ -1187,7 +1181,7 @@ private struct AIExpandedView: View {
     private var sessionListView: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Text("AI Agents")
+                Text(plugin.title)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
 

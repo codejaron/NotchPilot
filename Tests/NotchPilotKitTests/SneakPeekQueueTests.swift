@@ -2,28 +2,28 @@ import XCTest
 @testable import NotchPilotKit
 
 final class SneakPeekQueueTests: XCTestCase {
-    func testQueuePrefersHigherPriorityAndPreservesFIFOForTies() {
+    func testQueuePrefersLowerPriorityAndPreservesFIFOForTies() {
         let queue = SneakPeekQueue()
-        let lowFirst = makeRequest(priority: 100)
-        let lowSecond = makeRequest(priority: 100)
-        let high = makeRequest(priority: 1000)
+        let highFirst = makeRequest(priority: 100)
+        let highSecond = makeRequest(priority: 100)
+        let low = makeRequest(priority: 0)
 
-        queue.enqueue(lowFirst)
-        queue.enqueue(lowSecond)
-        queue.enqueue(high)
+        queue.enqueue(highFirst)
+        queue.enqueue(highSecond)
+        queue.enqueue(low)
 
-        XCTAssertEqual(queue.current?.id, high.id)
-
-        _ = queue.dismissCurrent()
-        XCTAssertEqual(queue.current?.id, lowFirst.id)
+        XCTAssertEqual(queue.current?.id, low.id)
 
         _ = queue.dismissCurrent()
-        XCTAssertEqual(queue.current?.id, lowSecond.id)
+        XCTAssertEqual(queue.current?.id, highFirst.id)
+
+        _ = queue.dismissCurrent()
+        XCTAssertEqual(queue.current?.id, highSecond.id)
     }
 
     func testExpiringCurrentRequestPromotesTheNextRequest() {
         let queue = SneakPeekQueue()
-        let first = makeRequest(priority: 1000)
+        let first = makeRequest(priority: 0)
         let next = makeRequest(priority: 100)
 
         queue.enqueue(first)
@@ -39,8 +39,8 @@ final class SneakPeekQueueTests: XCTestCase {
             pluginID: "ai",
             priority: priority,
             target: .activeScreen,
-            isInteractive: priority >= 1000,
-            autoDismissAfter: priority >= 1000 ? nil : 3,
+            isInteractive: false,
+            autoDismissAfter: nil,
             createdAt: Date()
         )
     }

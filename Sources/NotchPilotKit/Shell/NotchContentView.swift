@@ -2,10 +2,9 @@ import SwiftUI
 
 public struct NotchContentView: View {
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
-    private let closeSpring = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
+    private let closeSpring = Animation.spring(response: 0.32, dampingFraction: 0.95, blendDuration: 0)
     private let closedCornerInsets = (top: CGFloat(6), bottom: CGFloat(14))
     private let openedCornerInsets = (top: CGFloat(19), bottom: CGFloat(24))
-    @State private var gestureProgress: CGFloat = 0
 
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager
@@ -26,6 +25,8 @@ public struct NotchContentView: View {
         let layoutMetrics = NotchLayoutMetrics.resolve(session: session, plugins: plugins)
         let displaySize = layoutMetrics.displaySize
         let interactionSize = layoutMetrics.interactionSize
+        let previewPlugin = pluginManager.previewPlugin(for: session.currentSneakPeek, context: context)
+        let preview = previewPlugin?.preview(context: context)
 
         ZStack(alignment: .top) {
             Color.clear
@@ -37,32 +38,25 @@ public struct NotchContentView: View {
                     if session.notchState == .open {
                         expandedBody(plugins: plugins, context: context)
                             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-                    } else if session.showsSneakPeekOverlay,
-                              let currentSneakPeek = session.currentSneakPeek,
-                              let plugin = pluginManager.plugin(id: currentSneakPeek.pluginID),
-                              let view = plugin.sneakPeekView(context: context) {
-                        sneakPeekBody(plugins: plugins, context: context, view: view)
+                    } else if session.notchState == .previewClosed,
+                              let preview {
+                        previewBody(preview)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     } else {
-                        compactBody(plugins: plugins, context: context)
+                        idleBody
                             .transition(.opacity)
                     }
                 }
                 .frame(width: displaySize.width, height: displaySize.height)
-                .scaleEffect(x: 1, y: 1 + (gestureProgress * 0.01), anchor: .top)
             }
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
-            .onTapGesture {
-                session.toggleOpen(defaultPluginID: plugins.first?.id)
-            }
-            .gesture(dragGesture(defaultPluginID: plugins.first?.id))
         }
         .frame(width: session.windowSize.width, height: session.windowSize.height, alignment: .top)
         .animation(currentAnimation, value: session.notchState)
         .animation(animationSpring, value: session.currentSneakPeek?.id)
+        .animation(animationSpring, value: previewPlugin?.id)
         .animation(animationSpring, value: displaySize)
-        .animation(.smooth, value: gestureProgress)
     }
 
     private var background: some View {
@@ -97,55 +91,22 @@ public struct NotchContentView: View {
         return NotchShape(topCornerRadius: closedCornerInsets.top, bottomCornerRadius: closedCornerInsets.bottom)
     }
 
-    private func compactBody(plugins: [any NotchPlugin], context: NotchContext) -> some View {
-        HStack(spacing: 12) {
-            ForEach(plugins, id: \.id) { plugin in
-                if let compact = plugin.compactView(context: context) {
-                    compact
-                }
-            }
-        }
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    private var idleBody: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func sneakPeekBody(plugins: [any NotchPlugin], context: NotchContext, view: AnyView) -> some View {
-        VStack(spacing: 8) {
-            compactBody(plugins: plugins, context: context)
-                .frame(height: max(context.notchGeometry.compactSize.height, 34), alignment: .top)
-
-            view
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .transition(.opacity.combined(with: .move(edge: .top)))
+    private func previewBody(_ preview: NotchPluginPreview) -> some View {
+        preview.view
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private func expandedBody(plugins: [any NotchPlugin], context: NotchContext) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                ForEach(plugins, id: \.id) { plugin in
-                    Button {
-                        session.activePluginID = plugin.id
-                    } label: {
-                        Label(plugin.name, systemImage: plugin.iconSystemName)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(session.activePluginID == plugin.id ? Color.white.opacity(0.18) : Color.white.opacity(0.06))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                }
-                Spacer()
-            }
+            dockRow(plugins: plugins)
 
             if let activePlugin = activePlugin(from: plugins) {
-                activePlugin.expandedView(context: context)
+                activePlugin.contentView(context: context)
             } else {
                 Text("No plugins enabled.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -157,6 +118,52 @@ public struct NotchContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func dockRow(plugins: [any NotchPlugin]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(plugins, id: \.id) { plugin in
+                Button {
+                    session.activePluginID = plugin.id
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: plugin.iconSystemName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.96))
+                            .frame(width: 42, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(
+                                        session.activePluginID == plugin.id
+                                            ? plugin.accentColor.opacity(0.28)
+                                            : Color.white.opacity(0.07)
+                                    )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(
+                                        session.activePluginID == plugin.id
+                                            ? plugin.accentColor.opacity(0.45)
+                                            : Color.white.opacity(0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+
+                        Text(plugin.title)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(
+                                session.activePluginID == plugin.id
+                                    ? .white.opacity(0.96)
+                                    : .white.opacity(0.52)
+                            )
+                    }
+                    .frame(width: 58)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
     private func activePlugin(from plugins: [any NotchPlugin]) -> (any NotchPlugin)? {
         if let activeID = session.activePluginID, let plugin = plugins.first(where: { $0.id == activeID }) {
             return plugin
@@ -165,34 +172,5 @@ public struct NotchContentView: View {
         let first = plugins.first
         session.activePluginID = first?.id
         return first
-    }
-
-    private func dragGesture(defaultPluginID: String?) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                let translation = value.translation.height
-
-                if session.notchState == .closed, translation > 0 {
-                    gestureProgress = min(translation / 80, 1)
-                } else if session.notchState == .open, translation < 0 {
-                    gestureProgress = max(translation / 80, -1)
-                } else {
-                    gestureProgress = 0
-                }
-            }
-            .onEnded { value in
-                defer {
-                    withAnimation(animationSpring) {
-                        gestureProgress = 0
-                    }
-                }
-
-                let translation = value.translation.height
-                if session.notchState == .closed, translation > 40 {
-                    session.toggleOpen(defaultPluginID: defaultPluginID)
-                } else if session.notchState == .open, translation < -40 {
-                    session.close()
-                }
-            }
     }
 }

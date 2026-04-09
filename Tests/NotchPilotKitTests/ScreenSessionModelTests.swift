@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class ScreenSessionModelTests: XCTestCase {
-    func testInteractiveSneakPeekAutoOpensAndReturnsToSneakPeekWhenClosed() {
+    func testPreviewRequestKeepsSessionInPreviewClosedUntilHoverOpen() {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(
                 id: "primary",
@@ -23,11 +23,23 @@ final class ScreenSessionModelTests: XCTestCase {
         )
 
         session.enqueue(request)
-        XCTAssertEqual(session.notchState, .open)
-        XCTAssertFalse(session.showsSneakPeekOverlay)
+        XCTAssertEqual(session.notchState, .previewClosed)
+        XCTAssertTrue(session.showsSneakPeekOverlay)
+
+        session.setHover(true, fallbackPluginID: "claude")
+        XCTAssertEqual(session.notchState, .previewClosed)
+
+        let expectation = XCTestExpectation(description: "hover opens previewed plugin")
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(160))
+            XCTAssertEqual(session.notchState, .open)
+            XCTAssertEqual(session.activePluginID, "ai")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
 
         session.close()
-        XCTAssertEqual(session.notchState, .sneakPeek)
+        XCTAssertEqual(session.notchState, .previewClosed)
         XCTAssertTrue(session.showsSneakPeekOverlay)
     }
 
@@ -90,7 +102,7 @@ final class ScreenSessionModelTests: XCTestCase {
         )
 
         session.setHover(true, fallbackPluginID: "ai")
-        XCTAssertEqual(session.notchState, .closed)
+        XCTAssertEqual(session.notchState, .idleClosed)
 
         try? await Task.sleep(for: .milliseconds(160))
         XCTAssertEqual(session.notchState, .open)
@@ -98,7 +110,7 @@ final class ScreenSessionModelTests: XCTestCase {
         session.setHover(false, fallbackPluginID: "ai")
         try? await Task.sleep(for: .milliseconds(160))
 
-        XCTAssertEqual(session.notchState, .closed)
+        XCTAssertEqual(session.notchState, .idleClosed)
     }
 
     func testHoverOpenedApprovalReturnsToSneakPeekWhenPointerLeaves() async {
@@ -126,7 +138,7 @@ final class ScreenSessionModelTests: XCTestCase {
         session.setHover(false, fallbackPluginID: "ai")
         try? await Task.sleep(for: .milliseconds(160))
 
-        XCTAssertEqual(session.notchState, .sneakPeek)
+        XCTAssertEqual(session.notchState, .previewClosed)
         XCTAssertTrue(session.showsSneakPeekOverlay)
     }
 
@@ -149,11 +161,33 @@ final class ScreenSessionModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(session.notchState, .sneakPeek)
+        XCTAssertEqual(session.notchState, .previewClosed)
 
         session.setHover(true, fallbackPluginID: "ai")
         try? await Task.sleep(for: .milliseconds(160))
 
         XCTAssertEqual(session.notchState, .open)
+    }
+
+    func testLastSelectedPluginWinsWhenOpeningWithoutPreview() async {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        session.open(pluginID: "codex")
+        session.close()
+
+        XCTAssertEqual(session.notchState, .idleClosed)
+        XCTAssertEqual(session.activePluginID, "codex")
+
+        session.setHover(true, fallbackPluginID: "claude")
+        try? await Task.sleep(for: .milliseconds(160))
+
+        XCTAssertEqual(session.notchState, .open)
+        XCTAssertEqual(session.activePluginID, "codex")
     }
 }

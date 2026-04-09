@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -8,6 +9,7 @@ public final class NotchWindow: NSPanel {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var lastHoverState = false
+    private var pluginObserver: AnyCancellable?
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.session = session
@@ -37,6 +39,7 @@ public final class NotchWindow: NSPanel {
         contentView = NSHostingView(rootView: NotchContentView(session: session, pluginManager: pluginManager))
         orderFrontRegardless()
         installMouseMonitors()
+        observePluginUpdates()
         updateMouseInteraction()
 
         session.layoutDidChange = { [weak self] in
@@ -74,6 +77,7 @@ public final class NotchWindow: NSPanel {
 
     override public func close() {
         removeMouseMonitors()
+        pluginObserver = nil
         super.close()
     }
 
@@ -107,6 +111,14 @@ public final class NotchWindow: NSPanel {
         if let globalMouseMonitor {
             NSEvent.removeMonitor(globalMouseMonitor)
             self.globalMouseMonitor = nil
+        }
+    }
+
+    private func observePluginUpdates() {
+        pluginObserver = pluginManager.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshFrame(animated: true)
+            }
         }
     }
 

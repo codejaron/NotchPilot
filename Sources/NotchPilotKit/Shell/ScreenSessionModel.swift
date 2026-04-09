@@ -18,10 +18,11 @@ public final class ScreenSessionModel: ObservableObject {
     private static let shadowPadding: CGFloat = 20
 
     @Published public private(set) var descriptor: ScreenDescriptor
-    @Published public private(set) var notchState: NotchState = .closed
+    @Published public private(set) var notchState: NotchState = .idleClosed
     @Published public private(set) var hoverState = false
     @Published public private(set) var currentSneakPeek: SneakPeekRequest?
     @Published public var activePluginID: String?
+    @Published public private(set) var lastSelectedPluginID: String?
 
     public var id: String { descriptor.id }
     public var layoutDidChange: (() -> Void)?
@@ -40,12 +41,7 @@ public final class ScreenSessionModel: ObservableObject {
         switch notchState {
         case .open:
             return geometry.expandedSize
-        case .sneakPeek:
-            return CGSize(
-                width: max(geometry.compactSize.width, 430),
-                height: max(geometry.compactSize.height + 74, 108)
-            )
-        case .closed:
+        case .previewClosed, .idleClosed:
             return geometry.compactSize
         }
     }
@@ -61,7 +57,7 @@ public final class ScreenSessionModel: ObservableObject {
     }
 
     public var showsSneakPeekOverlay: Bool {
-        notchState == .sneakPeek && currentSneakPeek != nil
+        notchState == .previewClosed && currentSneakPeek != nil
     }
 
     public var windowSize: CGSize {
@@ -131,7 +127,7 @@ public final class ScreenSessionModel: ObservableObject {
         if notchState == .open, openReason == .manual {
             close()
         } else {
-            open(pluginID: activePluginID ?? defaultPluginID, reason: .manual)
+            open(pluginID: currentSneakPeek?.pluginID ?? lastSelectedPluginID ?? activePluginID ?? defaultPluginID, reason: .manual)
         }
     }
 
@@ -146,7 +142,10 @@ public final class ScreenSessionModel: ObservableObject {
     private func open(pluginID: String?, reason: OpenReason) {
         hoverOpenTask?.cancel()
         hoverCloseTask?.cancel()
-        activePluginID = pluginID
+        if let pluginID {
+            activePluginID = pluginID
+            lastSelectedPluginID = pluginID
+        }
         openReason = reason
         notchState = .open
         layoutDidChange?()
@@ -190,23 +189,10 @@ public final class ScreenSessionModel: ObservableObject {
             autoDismissTask = nil
         }
 
-        let didAutoOpen = autoOpenCurrentSneakPeekIfNeeded()
-        if didAutoOpen == false, notchState != .open {
+        if notchState != .open {
             updatePresentationState()
-        }
-
-        if didAutoOpen == false {
             layoutDidChange?()
         }
-    }
-
-    private func autoOpenCurrentSneakPeekIfNeeded() -> Bool {
-        guard let request = currentSneakPeek, request.isInteractive, notchState != .open else {
-            return false
-        }
-
-        open(pluginID: request.pluginID, reason: .programmatic)
-        return true
     }
 
     private func scheduleHoverClose() {
@@ -243,11 +229,16 @@ public final class ScreenSessionModel: ObservableObject {
                 return
             }
 
-            self.openForHover(pluginID: self.activePluginID ?? fallbackPluginID)
+            self.openForHover(
+                pluginID: self.currentSneakPeek?.pluginID
+                    ?? self.lastSelectedPluginID
+                    ?? self.activePluginID
+                    ?? fallbackPluginID
+            )
         }
     }
 
     private func updatePresentationState() {
-        notchState = currentSneakPeek == nil ? .closed : .sneakPeek
+        notchState = currentSneakPeek == nil ? .idleClosed : .previewClosed
     }
 }

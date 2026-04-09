@@ -4,17 +4,17 @@ import XCTest
 
 @MainActor
 final class NotchLayoutMetricsTests: XCTestCase {
-    func testClosedInteractionSizeTracksCompactContentWidth() {
+    func testIdleClosedInteractionSizeUsesMinimalShellWidth() {
         let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
 
         let metrics = NotchLayoutMetrics.resolve(
             session: session,
-            plugins: [LayoutTestPlugin(compactWidth: 360)]
+            plugins: [LayoutTestPlugin(previewWidth: 360)]
         )
 
-        XCTAssertEqual(metrics.displaySize.width, 360, accuracy: 0.1)
+        XCTAssertEqual(metrics.displaySize.width, 236, accuracy: 0.1)
         XCTAssertEqual(metrics.displaySize.height, 38, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.width, 420, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.width, 296, accuracy: 0.1)
         XCTAssertEqual(metrics.interactionSize.height, 48, accuracy: 0.1)
     }
 
@@ -42,6 +42,31 @@ final class NotchLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(interactionFrame.maxY, session.windowFrame.maxY, accuracy: 0.1)
     }
 
+    func testPreviewClosedUsesWinningPluginPreviewWidth() {
+        let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "codex",
+                priority: 0,
+                target: .activeScreen,
+                isInteractive: false,
+                autoDismissAfter: nil
+            )
+        )
+
+        let metrics = NotchLayoutMetrics.resolve(
+            session: session,
+            plugins: [
+                LayoutTestPlugin(id: "claude", previewPriority: 10, previewWidth: 320),
+                LayoutTestPlugin(id: "codex", previewPriority: 0, previewWidth: 410),
+            ]
+        )
+
+        XCTAssertEqual(metrics.displaySize.width, 410, accuracy: 0.1)
+        XCTAssertEqual(metrics.displaySize.height, 38, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.width, 470, accuracy: 0.1)
+    }
+
     private func makeSession(closedNotchSize: CGSize) -> ScreenSessionModel {
         ScreenSessionModel(
             descriptor: ScreenDescriptor(
@@ -56,35 +81,31 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
 @MainActor
 private final class LayoutTestPlugin: NotchPlugin {
-    let id = "layout-test"
-    let name = "Layout Test"
+    let id: String
+    let title = "Layout Test"
     let iconSystemName = "ruler"
-    let priority = 1
+    let dockOrder = 1
+    let accentColor: Color = .blue
     var isEnabled = true
+    let previewPriority: Int?
 
-    private let fixedCompactWidth: CGFloat?
+    private let fixedPreviewWidth: CGFloat?
 
-    init(compactWidth: CGFloat? = nil) {
-        self.fixedCompactWidth = compactWidth
+    init(id: String = "layout-test", previewPriority: Int? = nil, previewWidth: CGFloat? = nil) {
+        self.id = id
+        self.previewPriority = previewPriority
+        self.fixedPreviewWidth = previewWidth
     }
 
-    func compactView(context: NotchContext) -> AnyView? {
-        AnyView(EmptyView())
+    func preview(context: NotchContext) -> NotchPluginPreview? {
+        guard let fixedPreviewWidth else {
+            return nil
+        }
+
+        return NotchPluginPreview(width: fixedPreviewWidth, view: AnyView(EmptyView()))
     }
 
-    func compactWidth(context: NotchContext) -> CGFloat? {
-        fixedCompactWidth
-    }
-
-    func sneakPeekView(context: NotchContext) -> AnyView? {
-        nil
-    }
-
-    func sneakPeekWidth(context: NotchContext) -> CGFloat? {
-        nil
-    }
-
-    func expandedView(context: NotchContext) -> AnyView {
+    func contentView(context: NotchContext) -> AnyView {
         AnyView(EmptyView())
     }
 

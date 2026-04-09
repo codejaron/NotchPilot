@@ -1,7 +1,7 @@
 import Foundation
 
 public enum NotchState: String, Equatable, Sendable {
-    case closed
-    case sneakPeek
+    case idleClosed
+    case previewClosed
     case open
 }
