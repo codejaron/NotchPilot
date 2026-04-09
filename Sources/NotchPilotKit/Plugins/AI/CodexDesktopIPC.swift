@@ -41,6 +41,7 @@ public enum CodexDesktopIPCError: LocalizedError, Equatable {
 
 public struct CodexDesktopIPCRequestFrame: Equatable, Sendable {
     public let requestID: String
+    public let rawRequestID: JSONValue?
     public let method: String
     public let params: [String: JSONValue]
     public let sourceClientID: String
@@ -49,6 +50,7 @@ public struct CodexDesktopIPCRequestFrame: Equatable, Sendable {
 
     public init(
         requestID: String,
+        rawRequestID: JSONValue? = nil,
         method: String,
         params: [String: JSONValue],
         sourceClientID: String,
@@ -56,6 +58,7 @@ public struct CodexDesktopIPCRequestFrame: Equatable, Sendable {
         version: Int?
     ) {
         self.requestID = requestID
+        self.rawRequestID = rawRequestID
         self.method = method
         self.params = params
         self.sourceClientID = sourceClientID
@@ -388,7 +391,7 @@ public final class CodexDesktopIPCClient {
 
     private let socketPath: String
     private let requestTimeout: TimeInterval
-    private let readQueue = DispatchQueue(label: "NotchPilot.CodexDesktopIPCClient.read")
+    private let readQueue = DispatchQueue(label: "NotchPilot.CodexDesktopIPCClient.read", qos: .userInitiated)
     private let lock = NSLock()
 
     private var socketFileDescriptor: Int32 = -1

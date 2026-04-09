@@ -28,7 +28,7 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
     public var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
     public var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
 
-    private let queue = DispatchQueue(label: "NotchPilot.CodexDesktopMonitor")
+    private let queue = DispatchQueue(label: "NotchPilot.CodexDesktopMonitor", qos: .userInitiated)
     private let detector: CodexDesktopAppDetector
     private let discovery: CodexDesktopIPCDiscovery
     private let requestTimeout: TimeInterval
@@ -179,7 +179,7 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
                 onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
             case let .approvalRequestChanged(request):
                 if let request {
-                    emitSurface(approvalController.handle(request: request))
+                    emitSurface(approvalController.handleLiveRequest(request))
                 } else {
                     _ = approvalController.reset()
                     emitSurface(nil)
@@ -236,11 +236,21 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
             }
 
             do {
-                try client.sendSuccessResponse(
-                    requestID: response.requestID,
-                    method: response.method,
-                    result: response.result
-                )
+                switch response.submission {
+                case .response:
+                    try client.sendSuccessResponse(
+                        requestID: response.requestID,
+                        method: response.method,
+                        result: response.result
+                    )
+                case let .request(method, params, targetClientID, version):
+                    _ = try client.sendRequestAndWait(
+                        method: method,
+                        params: params,
+                        targetClientID: targetClientID,
+                        version: version
+                    )
+                }
                 emitSurface(approvalController.currentSurface)
                 return true
             } catch {

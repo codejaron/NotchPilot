@@ -1,17 +1,35 @@
 import Foundation
 
+enum CodexDesktopApprovalSubmission: Equatable, Sendable {
+    case response
+    case request(
+        method: String,
+        params: [String: JSONValue],
+        targetClientID: String,
+        version: Int
+    )
+}
+
 struct CodexDesktopApprovalResponse: Equatable, Sendable {
     let requestID: String
     let method: String
     let result: JSONValue
+    let submission: CodexDesktopApprovalSubmission
 }
 
 final class CodexDesktopApprovalController {
+    private enum Delivery: Equatable {
+        case response
+        case threadFollower(ownerClientID: String, conversationID: String, version: Int)
+    }
+
     private struct PendingApproval {
         let requestID: String
+        let rawRequestID: JSONValue
         let method: String
         let responsesByOptionID: [String: JSONValue]
         let cancelResult: JSONValue
+        let delivery: Delivery
         var surface: CodexActionableSurface
     }
 
@@ -37,6 +55,21 @@ final class CodexDesktopApprovalController {
     }
 
     func handle(request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
+        handle(request: request, delivery: .response)
+    }
+
+    func handleLiveRequest(_ request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
+        guard let delivery = liveDelivery(for: request) else {
+            return handle(request: request)
+        }
+
+        return handle(request: request, delivery: delivery)
+    }
+
+    private func handle(
+        request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> CodexActionableSurface? {
         guard let method = SupportedMethod(rawValue: request.method) else {
             return nil
         }
@@ -44,13 +77,13 @@ final class CodexDesktopApprovalController {
         let pendingApproval: PendingApproval
         switch method {
         case .commandExecution:
-            pendingApproval = makeCommandApproval(from: request)
+            pendingApproval = makeCommandApproval(from: request, delivery: delivery)
         case .fileChange:
-            pendingApproval = makeFileChangeApproval(from: request)
+            pendingApproval = makeFileChangeApproval(from: request, delivery: delivery)
         case .legacyExecCommand:
-            pendingApproval = makeLegacyCommandApproval(from: request)
+            pendingApproval = makeLegacyCommandApproval(from: request, delivery: delivery)
         case .legacyApplyPatch:
-            pendingApproval = makeLegacyPatchApproval(from: request)
+            pendingApproval = makeLegacyPatchApproval(from: request, delivery: delivery)
         }
 
         self.pendingApproval = pendingApproval
@@ -96,7 +129,8 @@ final class CodexDesktopApprovalController {
             response = CodexDesktopApprovalResponse(
                 requestID: pendingApproval.requestID,
                 method: pendingApproval.method,
-                result: pendingApproval.cancelResult
+                result: pendingApproval.cancelResult,
+                submission: submission(for: pendingApproval, result: pendingApproval.cancelResult)
             )
         case .primary:
             let selectedOptionID = pendingApproval.surface.options.first(where: \.isSelected)?.id
@@ -110,7 +144,8 @@ final class CodexDesktopApprovalController {
             response = CodexDesktopApprovalResponse(
                 requestID: pendingApproval.requestID,
                 method: pendingApproval.method,
-                result: result
+                result: result,
+                submission: submission(for: pendingApproval, result: result)
             )
         }
 
@@ -124,7 +159,10 @@ final class CodexDesktopApprovalController {
         return surface
     }
 
-    private func makeCommandApproval(from request: CodexDesktopIPCRequestFrame) -> PendingApproval {
+    private func makeCommandApproval(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
         let availableDecisions = request.params.arrayValue(at: ["availableDecisions"]) ?? [.string("accept")]
         let options = makeOptions(
             decisions: availableDecisions,
@@ -137,12 +175,19 @@ final class CodexDesktopApprovalController {
             preview: request.params.stringValue(at: ["command"]),
             threadID: request.params.stringValue(at: ["threadId"]),
             options: options,
-            cancelDecision: "cancel"
+            cancelResult: cancelResult(
+                for: .commandExecution,
+                availableDecisions: availableDecisions
+            ),
+            delivery: delivery
         )
     }
 
-    private func makeFileChangeApproval(from request: CodexDesktopIPCRequestFrame) -> PendingApproval {
-        let decisions: [JSONValue] = [
+    private func makeFileChangeApproval(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
+        let decisions = request.params.arrayValue(at: ["availableDecisions"]) ?? [
             .string("accept"),
             .string("acceptForSession"),
             .string("decline"),
@@ -158,11 +203,18 @@ final class CodexDesktopApprovalController {
             preview: request.params.stringValue(at: ["grantRoot"]),
             threadID: request.params.stringValue(at: ["threadId"]),
             options: options,
-            cancelDecision: "cancel"
+            cancelResult: cancelResult(
+                for: .fileChange,
+                availableDecisions: decisions
+            ),
+            delivery: delivery
         )
     }
 
-    private func makeLegacyCommandApproval(from request: CodexDesktopIPCRequestFrame) -> PendingApproval {
+    private func makeLegacyCommandApproval(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
         let decisions: [JSONValue] = [
             .string("approved"),
             .object([
@@ -188,11 +240,17 @@ final class CodexDesktopApprovalController {
             preview: legacyCommandPreview(from: request.params),
             threadID: request.params.stringValue(at: ["conversationId"]),
             options: options,
-            cancelDecision: "abort"
+            cancelResult: .object([
+                "decision": .string("abort"),
+            ]),
+            delivery: delivery
         )
     }
 
-    private func makeLegacyPatchApproval(from request: CodexDesktopIPCRequestFrame) -> PendingApproval {
+    private func makeLegacyPatchApproval(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
         let decisions: [JSONValue] = [
             .string("approved"),
             .string("approved_for_session"),
@@ -209,7 +267,10 @@ final class CodexDesktopApprovalController {
             preview: legacyPatchPreview(from: request.params),
             threadID: request.params.stringValue(at: ["conversationId"]),
             options: options,
-            cancelDecision: "abort"
+            cancelResult: .object([
+                "decision": .string("abort"),
+            ]),
+            delivery: delivery
         )
     }
 
@@ -236,17 +297,18 @@ final class CodexDesktopApprovalController {
         preview: String?,
         threadID: String?,
         options: [(option: CodexSurfaceOption, result: JSONValue)],
-        cancelDecision: String
+        cancelResult: JSONValue,
+        delivery: Delivery
     ) -> PendingApproval {
         let surfaceID = surfaceID(for: request)
 
         return PendingApproval(
             requestID: request.requestID,
+            rawRequestID: request.rawRequestID ?? .string(request.requestID),
             method: request.method,
             responsesByOptionID: Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) }),
-            cancelResult: .object([
-                "decision": .string(cancelDecision),
-            ]),
+            cancelResult: cancelResult,
+            delivery: delivery,
             surface: CodexActionableSurface(
                 id: surfaceID,
                 summary: summary,
@@ -257,6 +319,92 @@ final class CodexDesktopApprovalController {
                 threadID: threadID
             )
         )
+    }
+
+    private func liveDelivery(for request: CodexDesktopIPCRequestFrame) -> Delivery? {
+        guard let method = SupportedMethod(rawValue: request.method) else {
+            return nil
+        }
+
+        switch method {
+        case .commandExecution, .fileChange:
+            guard let conversationID = request.params.stringValue(at: ["threadId"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  conversationID.isEmpty == false
+            else {
+                return nil
+            }
+
+            let ownerClientID = request.sourceClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard ownerClientID.isEmpty == false else {
+                return nil
+            }
+
+            return .threadFollower(ownerClientID: ownerClientID, conversationID: conversationID, version: 1)
+        case .legacyExecCommand, .legacyApplyPatch:
+            return nil
+        }
+    }
+
+    private func submission(
+        for pendingApproval: PendingApproval,
+        result: JSONValue
+    ) -> CodexDesktopApprovalSubmission {
+        switch pendingApproval.delivery {
+        case .response:
+            return .response
+        case let .threadFollower(ownerClientID, conversationID, version):
+            guard let requestMethod = threadFollowerMethod(for: pendingApproval.method),
+                  let decision = result.objectValue?["decision"]
+            else {
+                return .response
+            }
+
+            return .request(
+                method: requestMethod,
+                params: [
+                    "conversationId": .string(conversationID),
+                    "requestId": pendingApproval.rawRequestID,
+                    "decision": decision,
+                ],
+                targetClientID: ownerClientID,
+                version: version
+            )
+        }
+    }
+
+    private func threadFollowerMethod(for approvalMethod: String) -> String? {
+        switch approvalMethod {
+        case SupportedMethod.commandExecution.rawValue:
+            "thread-follower-command-approval-decision"
+        case SupportedMethod.fileChange.rawValue:
+            "thread-follower-file-approval-decision"
+        default:
+            nil
+        }
+    }
+
+    private func cancelResult(
+        for method: SupportedMethod,
+        availableDecisions: [JSONValue]
+    ) -> JSONValue {
+        let decision: JSONValue
+        switch method {
+        case .commandExecution, .fileChange:
+            let preferredNegativeDecisions = ["decline", "cancel"]
+            if let matched = preferredNegativeDecisions.compactMap({ candidate in
+                availableDecisions.first(where: { $0.stringValue == candidate })
+            }).first {
+                decision = matched
+            } else {
+                decision = .string("decline")
+            }
+        case .legacyExecCommand, .legacyApplyPatch:
+            decision = .string("abort")
+        }
+
+        return .object([
+            "decision": decision,
+        ])
     }
 
     private func surfaceID(for request: CodexDesktopIPCRequestFrame) -> String {

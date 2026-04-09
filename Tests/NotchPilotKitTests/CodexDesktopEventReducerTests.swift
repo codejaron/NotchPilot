@@ -249,9 +249,11 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         }
 
         XCTAssertEqual(request?.requestID, "2")
+        XCTAssertEqual(request?.rawRequestID, .integer(2))
         XCTAssertEqual(request?.method, "item/commandExecution/requestApproval")
         XCTAssertEqual(request?.params["threadId"]?.stringValue, "conv-approval")
         XCTAssertEqual(request?.params["command"]?.stringValue, "/bin/zsh -lc date")
+        XCTAssertEqual(request?.sourceClientID, "desktop-client")
     }
 
     func testThreadStreamPatchesClearActionableApprovalRequestWhenRequestsBecomeEmpty() throws {

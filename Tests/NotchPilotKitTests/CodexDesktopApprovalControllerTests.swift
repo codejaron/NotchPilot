@@ -85,7 +85,8 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
                 method: "item/commandExecution/requestApproval",
                 result: .object([
                     "decision": .string("acceptForSession"),
-                ])
+                ]),
+                submission: .response
             )
         )
         XCTAssertNil(controller.currentSurface)
@@ -102,6 +103,10 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
                     "turnId": .string("turn-1"),
                     "itemId": .string("item-1"),
                     "reason": .string("Would you like to make the following edits?"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("decline"),
+                    ]),
                 ],
                 sourceClientID: "desktop-client",
                 targetClientID: nil,
@@ -117,8 +122,48 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
                 requestID: "approval-3",
                 method: "item/fileChange/requestApproval",
                 result: .object([
-                    "decision": .string("cancel"),
-                ])
+                    "decision": .string("decline"),
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testCancellingCommandApprovalPrefersDeclineWhenAvailable() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "approval-4",
+                method: "item/commandExecution/requestApproval",
+                params: [
+                    "threadId": .string("thread-1"),
+                    "turnId": .string("turn-1"),
+                    "itemId": .string("item-1"),
+                    "command": .string("rm -rf '/tmp/demo'"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("decline"),
+                        .string("cancel"),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        let response = controller.perform(action: .cancel, on: "codex-ipc-approval-4")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "approval-4",
+                method: "item/commandExecution/requestApproval",
+                result: .object([
+                    "decision": .string("decline"),
+                ]),
+                submission: .response
             )
         )
         XCTAssertNil(controller.currentSurface)
@@ -200,7 +245,100 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
                 method: "execCommandApproval",
                 result: .object([
                     "decision": .string("approved_for_session"),
-                ])
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testSubmittingLiveCommandApprovalBuildsThreadFollowerDecisionRequest() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handleLiveRequest(
+            CodexDesktopIPCRequestFrame(
+                requestID: "66",
+                rawRequestID: .integer(66),
+                method: "item/commandExecution/requestApproval",
+                params: [
+                    "threadId": .string("thread-live-1"),
+                    "command": .string("rm -rf '/tmp/demo'"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: nil
+            )
+        )
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-66")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "66",
+                method: "item/commandExecution/requestApproval",
+                result: .object([
+                    "decision": .string("accept"),
+                ]),
+                submission: .request(
+                    method: "thread-follower-command-approval-decision",
+                    params: [
+                        "conversationId": .string("thread-live-1"),
+                        "requestId": .integer(66),
+                        "decision": .string("accept"),
+                    ],
+                    targetClientID: "desktop-owner-client",
+                    version: 1
+                )
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testSubmittingLiveFileApprovalBuildsThreadFollowerDecisionRequest() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handleLiveRequest(
+            CodexDesktopIPCRequestFrame(
+                requestID: "11",
+                rawRequestID: .integer(11),
+                method: "item/fileChange/requestApproval",
+                params: [
+                    "threadId": .string("thread-live-file-1"),
+                    "grantRoot": .string("/tmp/demo"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: nil
+            )
+        )
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-11")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "11",
+                method: "item/fileChange/requestApproval",
+                result: .object([
+                    "decision": .string("accept"),
+                ]),
+                submission: .request(
+                    method: "thread-follower-file-approval-decision",
+                    params: [
+                        "conversationId": .string("thread-live-file-1"),
+                        "requestId": .integer(11),
+                        "decision": .string("accept"),
+                    ],
+                    targetClientID: "desktop-owner-client",
+                    version: 1
+                )
             )
         )
         XCTAssertNil(controller.currentSurface)

@@ -29,15 +29,24 @@ public struct CodexDesktopEventReducer {
 
     private var conversationStates: [String: JSONValue] = [:]
     private var conversationApprovalRequests: [String: CodexDesktopIPCRequestFrame] = [:]
+    private var conversationOwnerClientIDs: [String: String] = [:]
 
     public init() {}
 
     public mutating func consume(frame: CodexDesktopIPCFrame) throws -> [CodexDesktopReducerOutput] {
         switch frame {
         case let .broadcast(broadcast):
-            return consume(method: broadcast.method, params: broadcast.params)
+            return consume(
+                method: broadcast.method,
+                params: broadcast.params,
+                sourceClientID: broadcast.sourceClientID
+            )
         case let .request(request):
-            return consume(method: request.method, params: request.params)
+            return consume(
+                method: request.method,
+                params: request.params,
+                sourceClientID: request.sourceClientID
+            )
         default:
             return []
         }
@@ -45,11 +54,15 @@ public struct CodexDesktopEventReducer {
 
     private mutating func consume(
         method: String,
-        params: [String: JSONValue]
+        params: [String: JSONValue],
+        sourceClientID: String?
     ) -> [CodexDesktopReducerOutput] {
         switch method {
         case "thread-stream-state-changed":
-            return handleThreadStreamStateChanged(params: params)
+            return handleThreadStreamStateChanged(
+                params: params,
+                sourceClientID: sourceClientID
+            )
         case "thread/metadata/update":
             return handleThreadMetadataUpdate(params: params)
         default:
@@ -58,7 +71,8 @@ public struct CodexDesktopEventReducer {
     }
 
     private mutating func handleThreadStreamStateChanged(
-        params: [String: JSONValue]
+        params: [String: JSONValue],
+        sourceClientID: String?
     ) -> [CodexDesktopReducerOutput] {
         guard
             let conversationID = params.stringValue(at: ["conversationId"]),
@@ -66,6 +80,11 @@ public struct CodexDesktopEventReducer {
             let changeType = change.stringValue(at: ["type"])
         else {
             return []
+        }
+
+        if let sourceClientID = sourceClientID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           sourceClientID.isEmpty == false {
+            conversationOwnerClientIDs[conversationID] = sourceClientID
         }
 
         switch changeType {
@@ -106,7 +125,11 @@ public struct CodexDesktopEventReducer {
             return []
         }
 
-        let currentApproval = approvalRequest(for: conversationID, state: state)
+        let currentApproval = approvalRequest(
+            for: conversationID,
+            state: state,
+            ownerClientID: conversationOwnerClientIDs[conversationID]
+        )
         let previousApproval = conversationApprovalRequests[conversationID]
 
         if let currentApproval {
@@ -149,14 +172,19 @@ public struct CodexDesktopEventReducer {
 
     private func approvalRequest(
         for conversationID: String,
-        state: [String: JSONValue]
+        state: [String: JSONValue],
+        ownerClientID: String?
     ) -> CodexDesktopIPCRequestFrame? {
         guard let requests = state.arrayValue(at: ["requests"]) else {
             return nil
         }
 
         for requestValue in requests {
-            guard let request = actionableApprovalRequest(from: requestValue, conversationID: conversationID) else {
+            guard let request = actionableApprovalRequest(
+                from: requestValue,
+                conversationID: conversationID,
+                ownerClientID: ownerClientID
+            ) else {
                 continue
             }
             return request
@@ -167,7 +195,8 @@ public struct CodexDesktopEventReducer {
 
     private func actionableApprovalRequest(
         from requestValue: JSONValue,
-        conversationID: String
+        conversationID: String,
+        ownerClientID: String?
     ) -> CodexDesktopIPCRequestFrame? {
         guard let request = requestValue.objectValue,
               let method = request.stringValue(at: ["method"]),
@@ -178,9 +207,10 @@ public struct CodexDesktopEventReducer {
 
         let frame = CodexDesktopIPCRequestFrame(
             requestID: requestID,
+            rawRequestID: request["id"],
             method: method,
             params: request.objectValue(at: ["params"]) ?? [:],
-            sourceClientID: conversationID,
+            sourceClientID: ownerClientID ?? conversationID,
             targetClientID: nil,
             version: nil
         )
