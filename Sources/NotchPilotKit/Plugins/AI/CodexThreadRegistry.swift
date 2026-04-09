@@ -4,6 +4,7 @@ struct CodexThreadRegistry {
     private let activityExpiry: TimeInterval
     private var contextsByID: [String: CodexThreadContext] = [:]
     private var lastActiveAtByID: [String: Date] = [:]
+    private var firstActiveAtByID: [String: Date] = [:]
     private var latestContextThreadID: String?
     private var currentActiveThreadID: String?
 
@@ -14,17 +15,28 @@ struct CodexThreadRegistry {
     mutating func reset() {
         contextsByID.removeAll()
         lastActiveAtByID.removeAll()
+        firstActiveAtByID.removeAll()
         latestContextThreadID = nil
         currentActiveThreadID = nil
     }
 
     mutating func apply(_ update: CodexThreadUpdate) {
         let context = update.context
+        let previousContext = contextsByID[context.threadID]
         contextsByID[context.threadID] = context
         latestContextThreadID = context.threadID
 
         guard update.marksActivity else {
             return
+        }
+
+        let shouldResetFirstActiveAt = shouldResetActivityStart(
+            previousPhase: previousContext?.phase,
+            nextPhase: context.phase
+        )
+
+        if shouldResetFirstActiveAt || firstActiveAtByID[context.threadID] == nil {
+            firstActiveAtByID[context.threadID] = context.updatedAt
         }
 
         if let current = lastActiveAtByID[context.threadID] {
@@ -39,6 +51,9 @@ struct CodexThreadRegistry {
         let cutoff = now.addingTimeInterval(-activityExpiry)
         lastActiveAtByID = lastActiveAtByID.filter { _, updatedAt in
             updatedAt >= cutoff
+        }
+        firstActiveAtByID = firstActiveAtByID.filter { threadID, _ in
+            lastActiveAtByID[threadID] != nil
         }
 
         if let currentActiveThreadID,
@@ -82,6 +97,20 @@ struct CodexThreadRegistry {
         }
 
         return sessions().first
+    }
+
+    func preferredActivityStartedAt(for surfaceThreadID: String?) -> Date? {
+        if let surfaceThreadID,
+           let startedAt = firstActiveAtByID[surfaceThreadID] {
+            return startedAt
+        }
+
+        if let currentActiveThreadID,
+           let startedAt = firstActiveAtByID[currentActiveThreadID] {
+            return startedAt
+        }
+
+        return sessions().first.flatMap { firstActiveAtByID[$0.id] }
     }
 
     func preferredContext(for surfaceThreadID: String?) -> CodexThreadContext? {
@@ -139,5 +168,18 @@ struct CodexThreadRegistry {
         case .error, .unknown:
             return .unknown("codex/\(phase.rawValue)")
         }
+    }
+
+    private func shouldResetActivityStart(
+        previousPhase: CodexThreadPhase?,
+        nextPhase: CodexThreadPhase
+    ) -> Bool {
+        guard let previousPhase else {
+            return true
+        }
+
+        let terminalPhases: Set<CodexThreadPhase> = [.completed, .interrupted, .error]
+        let activePhases: Set<CodexThreadPhase> = [.connected, .plan, .working]
+        return terminalPhases.contains(previousPhase) && activePhases.contains(nextPhase)
     }
 }

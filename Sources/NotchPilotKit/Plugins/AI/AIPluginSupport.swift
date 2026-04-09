@@ -138,6 +138,7 @@ struct AIPluginCompactActivity: Equatable {
     let outputTokenCount: Int?
     let approvalCount: Int
     let sessionTitle: String?
+    let runtimeDurationText: String?
 }
 
 struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
@@ -149,9 +150,15 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     let approvalRequestID: String?
     let codexSurfaceID: String?
     let updatedAt: Date
+    let inputTokenCount: Int?
+    let outputTokenCount: Int?
 
     var hasAttention: Bool {
         approvalRequestID != nil || codexSurfaceID != nil
+    }
+
+    var hasTokenUsage: Bool {
+        inputTokenCount != nil || outputTokenCount != nil
     }
 }
 
@@ -206,11 +213,15 @@ struct AIPluginCodexSurfaceReviewState: Equatable {
             return
         }
 
-        guard selectedSurfaceID == nil || currentSelectionMatchesSurface == false else {
+        guard let selectedSurfaceID else {
             return
         }
 
-        selectedSurfaceID = currentSurfaceID
+        guard currentSelectionMatchesSurface == false else {
+            return
+        }
+
+        self.selectedSurfaceID = selectedSurfaceID == currentSurfaceID ? selectedSurfaceID : currentSurfaceID
     }
 }
 
@@ -622,8 +633,6 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     .foregroundStyle(.white)
 
                 Spacer()
-
-                settingsButton
             }
 
             if plugin.expandedSessionSummaries.isEmpty {
@@ -722,22 +731,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             }
 
             Spacer()
-
-            settingsButton
         }
-    }
-
-    private var settingsButton: some View {
-        Button {
-            NotificationCenter.default.post(name: .openSettings, object: nil)
-        } label: {
-            Image(systemName: "gear")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(6)
-                .background(Circle().fill(Color.white.opacity(0.1)))
-        }
-        .buttonStyle(.plain)
     }
 
     private func sessionRow(_ summary: AIPluginExpandedSessionSummary) -> some View {
@@ -784,18 +778,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
                 Spacer()
 
-                if summary.hasAttention {
-                    Text("\(summary.approvalCount)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.orange.opacity(0.2)))
-                        .foregroundStyle(.orange)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
+                sessionRowAccessory(summary)
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
@@ -803,6 +786,37 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         }
         .buttonStyle(.plain)
         .disabled(summary.hasAttention == false)
+    }
+
+    @ViewBuilder
+    private func sessionRowAccessory(_ summary: AIPluginExpandedSessionSummary) -> some View {
+        if summary.hasTokenUsage || summary.approvalCount > 0 {
+            HStack(spacing: 12) {
+                if summary.hasTokenUsage {
+                    HStack(spacing: 8) {
+                        tokenUsageLabel(symbol: "↑", value: summary.inputTokenCount)
+                        tokenUsageLabel(symbol: "↓", value: summary.outputTokenCount)
+                    }
+                }
+
+                if summary.approvalCount > 0 {
+                    Text("\(summary.approvalCount)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(hostColor(for: summary.host).opacity(0.9))
+                        )
+                }
+            }
+        }
+    }
+
+    private func tokenUsageLabel(symbol: String, value: Int?) -> some View {
+        Text("\(symbol)\(plugin.formattedTokenCount(value))")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.74))
     }
 
     private func exitDetail() {

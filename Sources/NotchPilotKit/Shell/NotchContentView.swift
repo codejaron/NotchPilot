@@ -161,7 +161,30 @@ public struct NotchContentView: View {
             }
 
             Spacer(minLength: 0)
+
+            shellSettingsButton
         }
+    }
+
+    private var shellSettingsButton: some View {
+        Button {
+            NotificationCenter.default.post(name: .openSettings, object: nil)
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.1))
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Settings")
     }
 
     private func activePlugin(from plugins: [any NotchPlugin]) -> (any NotchPlugin)? {

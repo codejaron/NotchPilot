@@ -136,7 +136,8 @@ public final class ClaudePlugin: AIPluginRendering {
                 inputTokenCount: matchingSession?.inputTokenCount,
                 outputTokenCount: matchingSession?.outputTokenCount,
                 approvalCount: pendingApprovals.count,
-                sessionTitle: matchingSession.flatMap(displayTitle(for:))
+                sessionTitle: matchingSession.flatMap(displayTitle(for:)),
+                runtimeDurationText: nil
             )
         }
 
@@ -150,7 +151,8 @@ public final class ClaudePlugin: AIPluginRendering {
             inputTokenCount: session.inputTokenCount,
             outputTokenCount: session.outputTokenCount,
             approvalCount: 0,
-            sessionTitle: displayTitle(for: session)
+            sessionTitle: displayTitle(for: session),
+            runtimeDurationText: nil
         )
     }
 
@@ -169,7 +171,9 @@ public final class ClaudePlugin: AIPluginRendering {
                     approvalCount: sessionApprovals.count,
                     approvalRequestID: firstApproval?.requestID,
                     codexSurfaceID: nil,
-                    updatedAt: session.updatedAt
+                    updatedAt: session.updatedAt,
+                    inputTokenCount: session.inputTokenCount,
+                    outputTokenCount: session.outputTokenCount
                 )
             }
             .sorted { lhs, rhs in

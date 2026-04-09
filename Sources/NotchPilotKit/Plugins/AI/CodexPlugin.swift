@@ -3,6 +3,10 @@ import SwiftUI
 
 @MainActor
 public final class CodexPlugin: AIPluginRendering {
+    private enum SneakPeekKey {
+        static let activity = "codex-activity"
+    }
+
     public let id = "codex"
     public let title = "Codex"
     public let iconSystemName = "terminal"
@@ -58,6 +62,7 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     public func deactivate() {
+        dismissSneakPeek(for: SneakPeekKey.activity)
         codexMonitor.stop()
         codexMonitor.onThreadContextChanged = nil
         codexMonitor.onConnectionStateChanged = nil
@@ -71,6 +76,36 @@ public final class CodexPlugin: AIPluginRendering {
         bus = nil
     }
 
+    public func preview(context: NotchContext) -> NotchPluginPreview? {
+        guard let activity = currentCompactActivity else {
+            return nil
+        }
+
+        let durationText = activity.runtimeDurationText ?? activity.label
+        let sideFrameWidth = max(
+            34,
+            compactPreviewTextWidth(durationText)
+        )
+        let totalWidth =
+            10 * 2
+            + context.notchGeometry.compactSize.width
+            + sideFrameWidth * 2
+
+        return NotchPluginPreview(
+            width: totalWidth,
+            view: AnyView(
+                CodexCompactPreviewView(
+                    iconSystemName: iconSystemName,
+                    accentColor: accentColor,
+                    durationText: durationText,
+                    sideFrameWidth: sideFrameWidth,
+                    totalWidth: totalWidth,
+                    notchWidth: context.notchGeometry.compactSize.width
+                )
+            )
+        )
+    }
+
     var currentCompactActivity: AIPluginCompactActivity? {
         if let codexActionableSurface {
             return AIPluginCompactActivity(
@@ -81,7 +116,8 @@ public final class CodexPlugin: AIPluginRendering {
                 inputTokenCount: preferredCodexSession(for: codexActionableSurface)?.inputTokenCount,
                 outputTokenCount: preferredCodexSession(for: codexActionableSurface)?.outputTokenCount,
                 approvalCount: 1,
-                sessionTitle: preferredCodexTitle(for: codexActionableSurface)
+                sessionTitle: preferredCodexTitle(for: codexActionableSurface),
+                runtimeDurationText: runtimeDurationText(for: codexActionableSurface)
             )
         }
 
@@ -95,7 +131,8 @@ public final class CodexPlugin: AIPluginRendering {
             inputTokenCount: session.inputTokenCount,
             outputTokenCount: session.outputTokenCount,
             approvalCount: 0,
-            sessionTitle: displayTitle(for: session)
+            sessionTitle: displayTitle(for: session),
+            runtimeDurationText: runtimeDurationText(for: nil)
         )
     }
 
@@ -113,7 +150,9 @@ public final class CodexPlugin: AIPluginRendering {
                     approvalCount: codexSurface == nil ? 0 : 1,
                     approvalRequestID: nil,
                     codexSurfaceID: codexSurface?.id,
-                    updatedAt: session.updatedAt
+                    updatedAt: session.updatedAt,
+                    inputTokenCount: session.inputTokenCount,
+                    outputTokenCount: session.outputTokenCount
                 )
             }
             .sorted { lhs, rhs in
@@ -205,6 +244,7 @@ public final class CodexPlugin: AIPluginRendering {
     private func handleCodexThreadContextChange(_ update: CodexThreadUpdate) {
         codexThreads.apply(update)
         syncState()
+        syncSneakPeek()
     }
 
     private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
@@ -212,16 +252,9 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func handleCodexSurfaceChange(_ surface: CodexActionableSurface?) {
-        let previousSurfaceID = rawCodexActionableSurface?.id
         rawCodexActionableSurface = surface
         syncState()
-
-        if let previousSurfaceID, previousSurfaceID != surface?.id {
-            dismissSneakPeek(for: previousSurfaceID)
-        }
-        if let surfaceID = surface?.id, previousSurfaceID != surfaceID {
-            presentSneakPeek(for: surfaceID)
-        }
+        syncSneakPeek()
     }
 
     private func optimisticallyUpdateCodexSurface(
@@ -273,5 +306,84 @@ public final class CodexPlugin: AIPluginRendering {
         }
 
         bus?.emit(.dismissSneakPeek(requestID: sneakPeekID, target: .allScreens))
+    }
+
+    private func syncSneakPeek() {
+        if currentCompactActivity == nil {
+            dismissSneakPeek(for: SneakPeekKey.activity)
+            return
+        }
+
+        presentSneakPeek(for: SneakPeekKey.activity)
+    }
+
+    private func runtimeDurationText(for surface: CodexActionableSurface?) -> String? {
+        guard let startedAt = codexThreads.preferredActivityStartedAt(for: surface?.threadID) else {
+            return nil
+        }
+
+        return formatRuntimeDuration(
+            max(0, nowProvider().timeIntervalSince(startedAt))
+        )
+    }
+
+    private func formatRuntimeDuration(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration.rounded(.down))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
+        }
+        return "\(seconds)s"
+    }
+
+    private func compactPreviewTextWidth(_ text: String) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+        ]
+        return ceil((text as NSString).size(withAttributes: attributes).width)
+    }
+}
+
+private struct CodexCompactPreviewView: View {
+    let iconSystemName: String
+    let accentColor: Color
+    let durationText: String
+    let sideFrameWidth: CGFloat
+    let totalWidth: CGFloat
+    let notchWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack {
+                Image(systemName: iconSystemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.96))
+                    .frame(width: 34, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(accentColor.opacity(0.28))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                    )
+            }
+            .frame(width: sideFrameWidth, alignment: .leading)
+
+            Spacer(minLength: notchWidth)
+
+            Text(durationText)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.82))
+                .frame(width: sideFrameWidth, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: totalWidth, alignment: .center)
     }
 }

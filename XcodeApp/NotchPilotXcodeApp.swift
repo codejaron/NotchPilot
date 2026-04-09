@@ -7,7 +7,7 @@ struct NotchPilotXcodeApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(selectedTab: .aiHooks)
+            SettingsView(selectedPane: .pluginsOverview)
         }
     }
 }

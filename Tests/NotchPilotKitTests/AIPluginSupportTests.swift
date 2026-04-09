@@ -33,7 +33,7 @@ final class AIPluginSupportTests: XCTestCase {
         XCTAssertNil(state.selectedApprovalRequestID)
     }
 
-    func testCodexSurfaceReviewStateSelectsInitialSurfaceOnFirstSync() {
+    func testCodexSurfaceReviewStateDoesNotAutoSelectInitialSurface() {
         var state = AIPluginCodexSurfaceReviewState()
 
         state.sync(
@@ -42,7 +42,7 @@ final class AIPluginSupportTests: XCTestCase {
             currentSelectionMatchesSurface: false
         )
 
-        XCTAssertEqual(state.selectedSurfaceID, "surface-initial")
+        XCTAssertNil(state.selectedSurfaceID)
     }
 
     func testCodexSurfaceReviewStateDoesNotStealFocusWhileReviewingApprovals() {

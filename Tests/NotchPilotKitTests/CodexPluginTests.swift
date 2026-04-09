@@ -6,7 +6,10 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(codexMonitor: codexMonitor)
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 5) }
+            )
         }
 
         await MainActor.run {
@@ -38,8 +41,83 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(activity?.label, "Action Needed")
         XCTAssertEqual(activity?.approvalCount, 1)
         XCTAssertEqual(activity?.sessionTitle, "Write plan")
+        XCTAssertEqual(summaries.first?.inputTokenCount, 120)
+        XCTAssertEqual(summaries.first?.outputTokenCount, 45)
         XCTAssertEqual(summaries.first?.codexSurfaceID, "surface-1")
         XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
+    }
+
+    func testActiveThreadEmitsSneakPeekWithoutActionableSurface() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 5) }
+            )
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-preview",
+                    title: "Preview Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    inputTokenCount: 12,
+                    outputTokenCount: 3,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        await Task.yield()
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            return XCTFail("expected a sneak peek request")
+        }
+
+        XCTAssertEqual(request.pluginID, "codex")
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testCurrentCompactActivityFormatsObservedRunDuration() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 66) }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-runtime",
+                    title: "Runtime Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        XCTAssertEqual(activity?.runtimeDurationText, "1m 6s")
     }
 
     func testActionableSurfaceEmitsInteractiveSneakPeek() async {
