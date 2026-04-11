@@ -3,10 +3,12 @@ import SwiftUI
 
 public struct NotchPluginPreview {
     public let width: CGFloat
+    public let height: CGFloat?
     public let view: AnyView
 
-    public init(width: CGFloat, view: AnyView) {
+    public init(width: CGFloat, height: CGFloat? = nil, view: AnyView) {
         self.width = width
+        self.height = height
         self.view = view
     }
 }

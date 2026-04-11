@@ -7,7 +7,7 @@ public final class ClaudePlugin: AIPluginRendering {
     public let id = "claude"
     public let title = "Claude"
     public let iconSystemName = "sparkles"
-    public let accentColor: Color = .orange
+    public let accentColor: Color = NotchPilotTheme.claude
     public let dockOrder = 100
     public let previewPriority: Int? = 100
 

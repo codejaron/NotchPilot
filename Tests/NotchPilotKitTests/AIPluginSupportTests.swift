@@ -2,6 +2,31 @@ import XCTest
 @testable import NotchPilotKit
 
 final class AIPluginSupportTests: XCTestCase {
+    func testExpandedSessionListPresentationHidesEmptyAgentSurfaces() {
+        let presentation = AIPluginExpandedSessionListPresentation(summaries: [])
+
+        XCTAssertFalse(presentation.shouldRender)
+    }
+
+    func testExpandedSessionListPresentationRendersWhenAThreadExists() {
+        let summary = AIPluginExpandedSessionSummary(
+            id: "thread-1",
+            host: .claude,
+            title: "create a react dashboard for my app",
+            subtitle: "Processing",
+            approvalCount: 0,
+            approvalRequestID: nil,
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
+
+        let presentation = AIPluginExpandedSessionListPresentation(summaries: [summary])
+
+        XCTAssertTrue(presentation.shouldRender)
+    }
+
     func testApprovalReviewStateAdvancesToNextPendingApprovalWhileReviewing() {
         var state = AIPluginApprovalReviewState()
         state.beginReviewing(requestID: "req-queue-1")

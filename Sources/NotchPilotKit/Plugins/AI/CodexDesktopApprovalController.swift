@@ -5,7 +5,7 @@ enum CodexDesktopApprovalSubmission: Equatable, Sendable {
     case request(
         method: String,
         params: [String: JSONValue],
-        targetClientID: String,
+        targetClientID: String?,
         version: Int
     )
 }
@@ -15,6 +15,27 @@ struct CodexDesktopApprovalResponse: Equatable, Sendable {
     let method: String
     let result: JSONValue
     let submission: CodexDesktopApprovalSubmission
+    let followUpSubmission: CodexDesktopApprovalSubmission?
+    let fallbackFollowUpSubmission: CodexDesktopApprovalSubmission?
+    let followUpConversationID: String?
+
+    init(
+        requestID: String,
+        method: String,
+        result: JSONValue,
+        submission: CodexDesktopApprovalSubmission,
+        followUpSubmission: CodexDesktopApprovalSubmission? = nil,
+        fallbackFollowUpSubmission: CodexDesktopApprovalSubmission? = nil,
+        followUpConversationID: String? = nil
+    ) {
+        self.requestID = requestID
+        self.method = method
+        self.result = result
+        self.submission = submission
+        self.followUpSubmission = followUpSubmission
+        self.fallbackFollowUpSubmission = fallbackFollowUpSubmission
+        self.followUpConversationID = followUpConversationID
+    }
 }
 
 final class CodexDesktopApprovalController {
@@ -23,24 +44,61 @@ final class CodexDesktopApprovalController {
         case threadFollower(ownerClientID: String, conversationID: String, version: Int)
     }
 
+    private struct FollowUpRequest {
+        let threadID: String
+        let turnID: JSONValue?
+        let cwd: String?
+    }
+
+    private struct FeedbackFollowUpPlan {
+        let preferredSubmission: CodexDesktopApprovalSubmission
+        let fallbackSubmission: CodexDesktopApprovalSubmission?
+        let conversationID: String
+    }
+
+    private enum SelectionMode {
+        case optionResults([String: JSONValue])
+        case optionResultsWithOther(
+            [String: JSONValue],
+            negativeResult: JSONValue,
+            followUp: FollowUpRequest?
+        )
+        case userInput(
+            questionID: String,
+            optionAnswersByOptionID: [String: String],
+            isOther: Bool
+        )
+    }
+
     private struct PendingApproval {
         let requestID: String
         let rawRequestID: JSONValue
         let method: String
-        let responsesByOptionID: [String: JSONValue]
+        let selectionMode: SelectionMode
         let cancelResult: JSONValue
         let delivery: Delivery
+        let followUpDelivery: Delivery
         var surface: CodexActionableSurface
     }
 
     private enum SupportedMethod: String {
         case commandExecution = "item/commandExecution/requestApproval"
         case fileChange = "item/fileChange/requestApproval"
+        case toolRequestUserInput = "item/tool/requestUserInput"
         case legacyExecCommand = "execCommandApproval"
         case legacyApplyPatch = "applyPatchApproval"
     }
 
     private var pendingApproval: PendingApproval?
+    private let followUpCreatedAtMillisecondsProvider: @Sendable () -> Int
+
+    init(
+        followUpCreatedAtMillisecondsProvider: @escaping @Sendable () -> Int = {
+            Int(Date().timeIntervalSince1970 * 1000)
+        }
+    ) {
+        self.followUpCreatedAtMillisecondsProvider = followUpCreatedAtMillisecondsProvider
+    }
 
     var currentSurface: CodexActionableSurface? {
         pendingApproval?.surface
@@ -80,6 +138,8 @@ final class CodexDesktopApprovalController {
             pendingApproval = makeCommandApproval(from: request, delivery: delivery)
         case .fileChange:
             pendingApproval = makeFileChangeApproval(from: request, delivery: delivery)
+        case .toolRequestUserInput:
+            pendingApproval = makeUserInputRequest(from: request, delivery: delivery)
         case .legacyExecCommand:
             pendingApproval = makeLegacyCommandApproval(from: request, delivery: delivery)
         case .legacyApplyPatch:
@@ -93,7 +153,7 @@ final class CodexDesktopApprovalController {
     func selectOption(_ optionID: String, on surfaceID: String) -> CodexActionableSurface? {
         guard var pendingApproval,
               pendingApproval.surface.id == surfaceID,
-              pendingApproval.responsesByOptionID[optionID] != nil
+              pendingApproval.surface.options.contains(where: { $0.id == optionID })
         else {
             return nil
         }
@@ -111,7 +171,10 @@ final class CodexDesktopApprovalController {
             return nil
         }
 
-        pendingApproval.surface = pendingApproval.surface.updatingText(text)
+        let updatedSurface = pendingApproval.surface.updatingText(text)
+        pendingApproval.surface = shouldClearSelectionOnTextUpdate(for: pendingApproval.selectionMode)
+            ? surfaceByClearingSelection(updatedSurface)
+            : updatedSurface
         self.pendingApproval = pendingApproval
         return pendingApproval.surface
     }
@@ -134,19 +197,63 @@ final class CodexDesktopApprovalController {
             )
         case .primary:
             let selectedOptionID = pendingApproval.surface.options.first(where: \.isSelected)?.id
-                ?? pendingApproval.surface.options.first?.id
-            guard let selectedOptionID,
-                  let result = pendingApproval.responsesByOptionID[selectedOptionID]
-            else {
-                return nil
-            }
+            let trimmedText = normalizedInputText(pendingApproval.surface.textInput?.text)
 
-            response = CodexDesktopApprovalResponse(
-                requestID: pendingApproval.requestID,
-                method: pendingApproval.method,
-                result: result,
-                submission: submission(for: pendingApproval, result: result)
-            )
+            switch pendingApproval.selectionMode {
+            case let .optionResults(responsesByOptionID):
+                let effectiveOptionID = selectedOptionID ?? pendingApproval.surface.options.first?.id
+                guard let effectiveOptionID,
+                      let result = responsesByOptionID[effectiveOptionID]
+                else {
+                    return nil
+                }
+
+                response = CodexDesktopApprovalResponse(
+                    requestID: pendingApproval.requestID,
+                    method: pendingApproval.method,
+                    result: result,
+                    submission: submission(for: pendingApproval, result: result)
+                )
+            case let .optionResultsWithOther(responsesByOptionID, negativeResult, followUp):
+                if let selectedOptionID,
+                   let result = responsesByOptionID[selectedOptionID] {
+                    response = CodexDesktopApprovalResponse(
+                        requestID: pendingApproval.requestID,
+                        method: pendingApproval.method,
+                        result: result,
+                        submission: submission(for: pendingApproval, result: result)
+                    )
+                } else {
+                    let feedbackPlan = feedbackFollowUpPlan(
+                        for: pendingApproval,
+                        followUp: followUp,
+                        text: trimmedText
+                    )
+                    response = CodexDesktopApprovalResponse(
+                        requestID: pendingApproval.requestID,
+                        method: pendingApproval.method,
+                        result: negativeResult,
+                        submission: submission(for: pendingApproval, result: negativeResult),
+                        followUpSubmission: feedbackPlan?.preferredSubmission,
+                        fallbackFollowUpSubmission: feedbackPlan?.fallbackSubmission,
+                        followUpConversationID: feedbackPlan?.conversationID
+                    )
+                }
+            case let .userInput(questionID, optionAnswersByOptionID, isOther):
+                let answer = userInputAnswer(
+                    selectedOptionID: selectedOptionID,
+                    optionAnswersByOptionID: optionAnswersByOptionID,
+                    text: trimmedText,
+                    isOther: isOther
+                )
+                let result = userInputResult(questionID: questionID, answer: answer)
+                response = CodexDesktopApprovalResponse(
+                    requestID: pendingApproval.requestID,
+                    method: pendingApproval.method,
+                    result: result,
+                    submission: submission(for: pendingApproval, result: result)
+                )
+            }
         }
 
         self.pendingApproval = nil
@@ -164,21 +271,34 @@ final class CodexDesktopApprovalController {
         delivery: Delivery
     ) -> PendingApproval {
         let availableDecisions = request.params.arrayValue(at: ["availableDecisions"]) ?? [.string("accept")]
-        let options = makeOptions(
-            decisions: availableDecisions,
+        let positiveOptions = makeOptions(
+            decisions: positiveDecisions(
+                from: availableDecisions,
+                method: .commandExecution
+            ),
             method: .commandExecution,
             request: request
+        )
+        let negativeResult = cancelResult(
+            for: .commandExecution,
+            availableDecisions: availableDecisions
         )
         return makePendingApproval(
             request: request,
             summary: request.params.stringValue(at: ["reason"]) ?? "Would you like to run the following command?",
             preview: request.params.stringValue(at: ["command"]),
             threadID: request.params.stringValue(at: ["threadId"]),
-            options: options,
-            cancelResult: cancelResult(
-                for: .commandExecution,
-                availableDecisions: availableDecisions
+            options: positiveOptions,
+            textInput: CodexSurfaceTextInput(
+                text: "",
+                isEditable: true
             ),
+            selectionMode: .optionResultsWithOther(
+                Dictionary(uniqueKeysWithValues: positiveOptions.map { ($0.option.id, $0.result) }),
+                negativeResult: negativeResult,
+                followUp: makeFollowUpRequest(from: request)
+            ),
+            cancelResult: negativeResult,
             delivery: delivery
         )
     }
@@ -192,21 +312,83 @@ final class CodexDesktopApprovalController {
             .string("acceptForSession"),
             .string("decline"),
         ]
-        let options = makeOptions(
-            decisions: decisions,
+        let positiveOptions = makeOptions(
+            decisions: positiveDecisions(
+                from: decisions,
+                method: .fileChange
+            ),
             method: .fileChange,
             request: request
+        )
+        let negativeResult = cancelResult(
+            for: .fileChange,
+            availableDecisions: decisions
         )
         return makePendingApproval(
             request: request,
             summary: request.params.stringValue(at: ["reason"]) ?? "Would you like to make the following edits?",
             preview: request.params.stringValue(at: ["grantRoot"]),
             threadID: request.params.stringValue(at: ["threadId"]),
-            options: options,
-            cancelResult: cancelResult(
-                for: .fileChange,
-                availableDecisions: decisions
+            options: positiveOptions,
+            textInput: CodexSurfaceTextInput(
+                text: "",
+                isEditable: true
             ),
+            selectionMode: .optionResultsWithOther(
+                Dictionary(uniqueKeysWithValues: positiveOptions.map { ($0.option.id, $0.result) }),
+                negativeResult: negativeResult,
+                followUp: makeFollowUpRequest(from: request)
+            ),
+            cancelResult: negativeResult,
+            delivery: delivery
+        )
+    }
+
+    private func makeUserInputRequest(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
+        let question = request.params.arrayValue(at: ["questions"])?.first?.objectValue ?? [:]
+        let questionID = question.stringValue(at: ["id"]) ?? "question-0"
+        let summary = question.stringValue(at: ["question"])
+            ?? question.stringValue(at: ["header"])
+            ?? "Codex needs your input"
+        let preview: String?
+        if let header = question.stringValue(at: ["header"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+           header.isEmpty == false,
+           header != summary {
+            preview = header
+        } else {
+            preview = nil
+        }
+
+        let options = makeUserInputOptions(
+            from: question.arrayValue(at: ["options"]) ?? [],
+            request: request
+        )
+        let isOther = question.jsonValue(at: ["isOther"])?.boolValue ?? false
+        let showsTextInput = isOther || options.isEmpty
+        return makePendingApproval(
+            request: request,
+            summary: summary,
+            preview: preview,
+            threadID: request.params.stringValue(at: ["threadId"]),
+            options: options.map { (option: $0.option, result: .null) },
+            textInput: showsTextInput
+                ? CodexSurfaceTextInput(
+                    title: isOther ? nil : "Type here",
+                    text: "",
+                    isEditable: true
+                )
+                : nil,
+            selectionMode: .userInput(
+                questionID: questionID,
+                optionAnswersByOptionID: Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.answer) }),
+                isOther: isOther
+            ),
+            cancelResult: .object([
+                "answers": .object([:]),
+            ]),
             delivery: delivery
         )
     }
@@ -240,6 +422,10 @@ final class CodexDesktopApprovalController {
             preview: legacyCommandPreview(from: request.params),
             threadID: request.params.stringValue(at: ["conversationId"]),
             options: options,
+            textInput: nil,
+            selectionMode: .optionResults(
+                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
+            ),
             cancelResult: .object([
                 "decision": .string("abort"),
             ]),
@@ -267,6 +453,10 @@ final class CodexDesktopApprovalController {
             preview: legacyPatchPreview(from: request.params),
             threadID: request.params.stringValue(at: ["conversationId"]),
             options: options,
+            textInput: nil,
+            selectionMode: .optionResults(
+                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
+            ),
             cancelResult: .object([
                 "decision": .string("abort"),
             ]),
@@ -297,18 +487,22 @@ final class CodexDesktopApprovalController {
         preview: String?,
         threadID: String?,
         options: [(option: CodexSurfaceOption, result: JSONValue)],
+        textInput: CodexSurfaceTextInput?,
+        selectionMode: SelectionMode,
         cancelResult: JSONValue,
         delivery: Delivery
     ) -> PendingApproval {
         let surfaceID = surfaceID(for: request)
+        let followUpDelivery = liveDelivery(for: request) ?? delivery
 
         return PendingApproval(
             requestID: request.requestID,
             rawRequestID: request.rawRequestID ?? .string(request.requestID),
             method: request.method,
-            responsesByOptionID: Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) }),
+            selectionMode: selectionMode,
             cancelResult: cancelResult,
             delivery: delivery,
+            followUpDelivery: followUpDelivery,
             surface: CodexActionableSurface(
                 id: surfaceID,
                 summary: summary,
@@ -316,6 +510,7 @@ final class CodexDesktopApprovalController {
                 primaryButtonTitle: "Submit",
                 cancelButtonTitle: "Skip",
                 options: options.map(\.option),
+                textInput: textInput,
                 threadID: threadID
             )
         )
@@ -327,7 +522,7 @@ final class CodexDesktopApprovalController {
         }
 
         switch method {
-        case .commandExecution, .fileChange:
+        case .commandExecution, .fileChange, .toolRequestUserInput:
             guard let conversationID = request.params.stringValue(at: ["threadId"])?.trimmingCharacters(in: .whitespacesAndNewlines),
                   conversationID.isEmpty == false
             else {
@@ -353,33 +548,49 @@ final class CodexDesktopApprovalController {
         case .response:
             return .response
         case let .threadFollower(ownerClientID, conversationID, version):
-            guard let requestMethod = threadFollowerMethod(for: pendingApproval.method),
-                  let decision = result.objectValue?["decision"]
-            else {
+            switch pendingApproval.method {
+            case SupportedMethod.commandExecution.rawValue:
+                guard let decision = result.objectValue?["decision"] else {
+                    return .response
+                }
+                return .request(
+                    method: "thread-follower-command-approval-decision",
+                    params: [
+                        "conversationId": .string(conversationID),
+                        "requestId": pendingApproval.rawRequestID,
+                        "decision": decision,
+                    ],
+                    targetClientID: ownerClientID,
+                    version: version
+                )
+            case SupportedMethod.fileChange.rawValue:
+                guard let decision = result.objectValue?["decision"] else {
+                    return .response
+                }
+                return .request(
+                    method: "thread-follower-file-approval-decision",
+                    params: [
+                        "conversationId": .string(conversationID),
+                        "requestId": pendingApproval.rawRequestID,
+                        "decision": decision,
+                    ],
+                    targetClientID: ownerClientID,
+                    version: version
+                )
+            case SupportedMethod.toolRequestUserInput.rawValue:
+                return .request(
+                    method: "thread-follower-submit-user-input",
+                    params: [
+                        "conversationId": .string(conversationID),
+                        "requestId": pendingApproval.rawRequestID,
+                        "response": result,
+                    ],
+                    targetClientID: ownerClientID,
+                    version: version
+                )
+            default:
                 return .response
             }
-
-            return .request(
-                method: requestMethod,
-                params: [
-                    "conversationId": .string(conversationID),
-                    "requestId": pendingApproval.rawRequestID,
-                    "decision": decision,
-                ],
-                targetClientID: ownerClientID,
-                version: version
-            )
-        }
-    }
-
-    private func threadFollowerMethod(for approvalMethod: String) -> String? {
-        switch approvalMethod {
-        case SupportedMethod.commandExecution.rawValue:
-            "thread-follower-command-approval-decision"
-        case SupportedMethod.fileChange.rawValue:
-            "thread-follower-file-approval-decision"
-        default:
-            nil
         }
     }
 
@@ -398,6 +609,8 @@ final class CodexDesktopApprovalController {
             } else {
                 decision = .string("decline")
             }
+        case .toolRequestUserInput:
+            decision = .null
         case .legacyExecCommand, .legacyApplyPatch:
             decision = .string("abort")
         }
@@ -494,6 +707,301 @@ final class CodexDesktopApprovalController {
         }
 
         return nil
+    }
+
+    private func makeUserInputOptions(
+        from options: [JSONValue],
+        request: CodexDesktopIPCRequestFrame
+    ) -> [(option: CodexSurfaceOption, answer: String)] {
+        let surfaceID = surfaceID(for: request)
+        return options.enumerated().compactMap { index, optionValue in
+            guard let option = optionValue.objectValue else {
+                return nil
+            }
+
+            let label = option.stringValue(at: ["label"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let description = option.stringValue(at: ["description"])?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = label.isEmpty ? (description ?? "") : label
+            guard title.isEmpty == false else {
+                return nil
+            }
+
+            return (
+                option: CodexSurfaceOption(
+                    id: "\(surfaceID)-option-\(index)",
+                    index: index + 1,
+                    title: title,
+                    isSelected: index == 0
+                ),
+                answer: title
+            )
+        }
+    }
+
+    private func positiveDecisions(
+        from decisions: [JSONValue],
+        method: SupportedMethod
+    ) -> [JSONValue] {
+        decisions.filter { isNegativeDecision($0, method: method) == false }
+    }
+
+    private func isNegativeDecision(
+        _ decision: JSONValue,
+        method: SupportedMethod
+    ) -> Bool {
+        guard let rawDecision = decision.stringValue else {
+            return false
+        }
+
+        switch method {
+        case .commandExecution, .fileChange:
+            return rawDecision == "decline" || rawDecision == "cancel"
+        case .toolRequestUserInput:
+            return false
+        case .legacyExecCommand, .legacyApplyPatch:
+            return rawDecision == "denied" || rawDecision == "abort"
+        }
+    }
+
+    private func shouldClearSelectionOnTextUpdate(for selectionMode: SelectionMode) -> Bool {
+        switch selectionMode {
+        case .optionResults:
+            return false
+        case .optionResultsWithOther:
+            return true
+        case let .userInput(_, _, isOther):
+            return isOther
+        }
+    }
+
+    private func surfaceByClearingSelection(_ surface: CodexActionableSurface) -> CodexActionableSurface {
+        CodexActionableSurface(
+            id: surface.id,
+            summary: surface.summary,
+            commandPreview: surface.commandPreview,
+            primaryButtonTitle: surface.primaryButtonTitle,
+            cancelButtonTitle: surface.cancelButtonTitle,
+            options: surface.options.map { option in
+                CodexSurfaceOption(
+                    id: option.id,
+                    index: option.index,
+                    title: option.title,
+                    isSelected: false
+                )
+            },
+            textInput: surface.textInput,
+            threadID: surface.threadID,
+            threadTitle: surface.threadTitle
+        )
+    }
+
+    private func normalizedInputText(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              text.isEmpty == false else {
+            return nil
+        }
+
+        return text
+    }
+
+    private func userInputAnswer(
+        selectedOptionID: String?,
+        optionAnswersByOptionID: [String: String],
+        text: String?,
+        isOther: Bool
+    ) -> String? {
+        if let selectedOptionID,
+           let selectedAnswer = optionAnswersByOptionID[selectedOptionID]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           selectedAnswer.isEmpty == false {
+            return selectedAnswer
+        }
+
+        if optionAnswersByOptionID.isEmpty || isOther {
+            return text
+        }
+
+        return nil
+    }
+
+    private func userInputResult(questionID: String, answer: String?) -> JSONValue {
+        guard let answer else {
+            return .object([
+                "answers": .object([:]),
+            ])
+        }
+
+        return .object([
+            "answers": .object([
+                questionID: .object([
+                    "answers": .array([
+                        .string(answer),
+                    ]),
+                ]),
+            ]),
+        ])
+    }
+
+    private func feedbackFollowUpPlan(
+        for pendingApproval: PendingApproval,
+        followUp: FollowUpRequest?,
+        text: String?
+    ) -> FeedbackFollowUpPlan? {
+        guard let followUp,
+              let text else {
+            return nil
+        }
+
+        switch pendingApproval.followUpDelivery {
+        case .response:
+            let textInputItems = inputItems(for: text)
+            let cwd: JSONValue = followUp.cwd.map { .string($0) } ?? .null
+            let startTurnParams: [String: JSONValue] = [
+                "threadId": .string(followUp.threadID),
+                "input": .array(textInputItems),
+                "cwd": cwd,
+                "approvalPolicy": .null,
+                "approvalsReviewer": .string("user"),
+                "sandboxPolicy": .null,
+                "model": .null,
+                "serviceTier": .null,
+                "effort": .null,
+                "summary": .string("none"),
+                "personality": .null,
+                "outputSchema": .null,
+                "collaborationMode": .null,
+                "attachments": .array([]),
+            ]
+            let startTurnSubmission: CodexDesktopApprovalSubmission = .request(
+                method: "turn/start",
+                params: startTurnParams,
+                targetClientID: nil,
+                version: 1
+            )
+
+            guard let turnID = followUp.turnID else {
+                return FeedbackFollowUpPlan(
+                    preferredSubmission: startTurnSubmission,
+                    fallbackSubmission: nil,
+                    conversationID: followUp.threadID
+                )
+            }
+
+            let steerParams: [String: JSONValue] = [
+                "threadId": .string(followUp.threadID),
+                "input": .array(textInputItems),
+                "expectedTurnId": turnID,
+            ]
+            return FeedbackFollowUpPlan(
+                preferredSubmission: .request(
+                    method: "turn/steer",
+                    params: steerParams,
+                    targetClientID: nil,
+                    version: 1
+                ),
+                fallbackSubmission: startTurnSubmission,
+                conversationID: followUp.threadID
+            )
+        case let .threadFollower(ownerClientID, conversationID, version):
+            let textInputItems = inputItems(for: text)
+            let cwd: JSONValue = followUp.cwd.map { .string($0) } ?? .null
+            let restoreMessage = feedbackRestoreMessage(
+                prompt: text,
+                requestID: pendingApproval.requestID,
+                cwd: followUp.cwd
+            )
+            let steerParams: [String: JSONValue] = [
+                "conversationId": .string(conversationID),
+                "input": .array(textInputItems),
+                "attachments": .array([]),
+                "restoreMessage": restoreMessage,
+            ]
+            let startTurnParams: [String: JSONValue] = [
+                "conversationId": .string(conversationID),
+                "turnStartParams": .object([
+                    "input": .array(textInputItems),
+                    "cwd": cwd,
+                    "model": .null,
+                    "effort": .null,
+                    "approvalPolicy": .null,
+                    "approvalsReviewer": .string("user"),
+                    "sandboxPolicy": .null,
+                    "attachments": .array([]),
+                    "collaborationMode": .null,
+                ]),
+            ]
+            return FeedbackFollowUpPlan(
+                preferredSubmission: .request(
+                    method: "thread-follower-steer-turn",
+                    params: steerParams,
+                    targetClientID: ownerClientID,
+                    version: version
+                ),
+                fallbackSubmission: .request(
+                    method: "thread-follower-start-turn",
+                    params: startTurnParams,
+                    targetClientID: ownerClientID,
+                    version: version
+                ),
+                conversationID: conversationID
+            )
+        }
+    }
+
+    private func makeFollowUpRequest(from request: CodexDesktopIPCRequestFrame) -> FollowUpRequest? {
+        guard let threadID = request.params.stringValue(at: ["threadId"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+              threadID.isEmpty == false else {
+            return nil
+        }
+
+        return FollowUpRequest(
+            threadID: threadID,
+            turnID: request.params.jsonValue(at: ["turnId"]),
+            cwd: request.params.stringValue(at: ["cwd"])
+        )
+    }
+
+    private func inputItems(for text: String) -> [JSONValue] {
+        [
+            .object([
+                "type": .string("text"),
+                "text": .string(text),
+                "text_elements": .array([]),
+            ]),
+        ]
+    }
+
+    private func feedbackRestoreMessage(
+        prompt: String,
+        requestID: String,
+        cwd: String?
+    ) -> JSONValue {
+        let workspaceRoots: [JSONValue]
+        if let cwd,
+           cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            workspaceRoots = [.string(cwd)]
+        } else {
+            workspaceRoots = []
+        }
+
+        return .object([
+            "id": .string("approval-follow-up-\(requestID)"),
+            "text": .string(prompt),
+            "context": .object([
+                "prompt": .string(prompt),
+                "addedFiles": .array([]),
+                "collaborationMode": .null,
+                "ideContext": .null,
+                "imageAttachments": .array([]),
+                "fileAttachments": .array([]),
+                "commentAttachments": .array([]),
+                "pullRequestChecks": .array([]),
+                "reviewFindings": .array([]),
+                "priorConversation": .null,
+                "workspaceRoots": .array(workspaceRoots),
+            ]),
+            "cwd": cwd.map(JSONValue.string) ?? .null,
+            "createdAt": .integer(followUpCreatedAtMillisecondsProvider()),
+        ])
     }
 
     private func legacyCommandPreview(from params: [String: JSONValue]) -> String? {

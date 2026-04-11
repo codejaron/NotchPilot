@@ -141,6 +141,66 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertTrue(marksActivity)
     }
 
+    func testLatestTurnInProgressReflectsLatestTurnStatus() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-turn-state"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-turn-state"),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-1"),
+                                        "status": .string("inProgress"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(reducer.isLatestTurnInProgress(for: "conv-turn-state"), true)
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-turn-state"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("turns"), .integer(0), .string("status")]),
+                                    "value": .string("completed"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(reducer.isLatestTurnInProgress(for: "conv-turn-state"), false)
+        XCTAssertNil(reducer.isLatestTurnInProgress(for: "missing-conversation"))
+    }
+
     func testThreadMetadataUpdateRequestSetsThreadTitleWithoutMarkingActivity() throws {
         var reducer = CodexDesktopEventReducer()
 
@@ -325,6 +385,79 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         }
 
         XCTAssertNil(request)
+    }
+
+    func testThreadStreamSnapshotPrefersUserInputRequestOverApprovalRequest() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-prefer-user-input"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-prefer-user-input"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(20),
+                                        "params": .object([
+                                            "threadId": .string("conv-prefer-user-input"),
+                                            "turnId": .string("turn-prefer-user-input"),
+                                            "command": .string("rm -rf '/tmp/demo'"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                                .string("decline"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                    .object([
+                                        "method": .string("item/tool/requestUserInput"),
+                                        "id": .integer(21),
+                                        "params": .object([
+                                            "threadId": .string("conv-prefer-user-input"),
+                                            "turnId": .string("turn-prefer-user-input"),
+                                            "itemId": .string("item-prefer-user-input"),
+                                            "questions": .array([
+                                                .object([
+                                                    "id": .string("question-prefer-user-input"),
+                                                    "question": .string("How should Codex adjust?"),
+                                                    "isOther": .bool(true),
+                                                    "options": .array([
+                                                        .object([
+                                                            "label": .string("Proceed as-is"),
+                                                            "description": .string("Keep going."),
+                                                        ]),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .approvalRequestChanged(request)? = outputs.last else {
+            return XCTFail("expected actionable request output")
+        }
+
+        XCTAssertEqual(request?.requestID, "21")
+        XCTAssertEqual(request?.rawRequestID, .integer(21))
+        XCTAssertEqual(request?.method, "item/tool/requestUserInput")
+        XCTAssertEqual(request?.params["threadId"]?.stringValue, "conv-prefer-user-input")
     }
 
     func testThreadStreamPatchesEmitApprovalRequestWhenArrayIndexPathUsesStringIndex() throws {

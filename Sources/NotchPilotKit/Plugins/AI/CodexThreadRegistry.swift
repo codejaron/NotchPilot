@@ -99,18 +99,16 @@ struct CodexThreadRegistry {
         return sessions().first
     }
 
-    func preferredActivityStartedAt(for surfaceThreadID: String?) -> Date? {
-        if let surfaceThreadID,
-           let startedAt = firstActiveAtByID[surfaceThreadID] {
-            return startedAt
+    func preferredActivityDuration(for surfaceThreadID: String?, now: Date) -> TimeInterval? {
+        guard let threadID = preferredActivityThreadID(for: surfaceThreadID),
+              let startedAt = firstActiveAtByID[threadID]
+        else {
+            return nil
         }
 
-        if let currentActiveThreadID,
-           let startedAt = firstActiveAtByID[currentActiveThreadID] {
-            return startedAt
-        }
-
-        return sessions().first.flatMap { firstActiveAtByID[$0.id] }
+        let context = contextsByID[threadID]
+        let endedAt = context?.phase.isTerminal == true ? context?.updatedAt : nil
+        return max(0, (endedAt ?? now).timeIntervalSince(startedAt))
     }
 
     func preferredContext(for surfaceThreadID: String?) -> CodexThreadContext? {
@@ -170,6 +168,20 @@ struct CodexThreadRegistry {
         }
     }
 
+    private func preferredActivityThreadID(for surfaceThreadID: String?) -> String? {
+        if let surfaceThreadID,
+           firstActiveAtByID[surfaceThreadID] != nil {
+            return surfaceThreadID
+        }
+
+        if let currentActiveThreadID,
+           firstActiveAtByID[currentActiveThreadID] != nil {
+            return currentActiveThreadID
+        }
+
+        return sessions().first?.id
+    }
+
     private func shouldResetActivityStart(
         previousPhase: CodexThreadPhase?,
         nextPhase: CodexThreadPhase
@@ -181,5 +193,16 @@ struct CodexThreadRegistry {
         let terminalPhases: Set<CodexThreadPhase> = [.completed, .interrupted, .error]
         let activePhases: Set<CodexThreadPhase> = [.connected, .plan, .working]
         return terminalPhases.contains(previousPhase) && activePhases.contains(nextPhase)
+    }
+}
+
+private extension CodexThreadPhase {
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .interrupted, .error:
+            return true
+        case .plan, .working, .connected, .unknown:
+            return false
+        }
     }
 }

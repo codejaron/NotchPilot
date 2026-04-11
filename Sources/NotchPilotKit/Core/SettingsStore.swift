@@ -9,6 +9,7 @@ public final class SettingsStore: ObservableObject {
         static let claudeHookInstalled = "claude.hookInstalled"
         static let autoStartSocket = "bridge.autoStartSocket"
         static let bridgeScriptPath = "bridge.scriptPath"
+        static let approvalSneakNotificationsEnabled = "approval.sneakNotificationsEnabled"
     }
 
     private let defaults: UserDefaults
@@ -32,6 +33,12 @@ public final class SettingsStore: ObservableObject {
 
     @Published public var bridgeScriptPath: String {
         didSet { defaults.set(bridgeScriptPath, forKey: Key.bridgeScriptPath) }
+    }
+
+    @Published public var approvalSneakNotificationsEnabled: Bool {
+        didSet {
+            defaults.set(approvalSneakNotificationsEnabled, forKey: Key.approvalSneakNotificationsEnabled)
+        }
     }
 
     public var claudeCodeDetected: Bool {
@@ -63,6 +70,8 @@ public final class SettingsStore: ObservableObject {
         self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
+        self.approvalSneakNotificationsEnabled =
+            defaults.object(forKey: Key.approvalSneakNotificationsEnabled) as? Bool ?? true
     }
 
     public func synchronizeInstallationState() {

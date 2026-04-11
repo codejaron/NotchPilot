@@ -73,11 +73,18 @@ public struct CodexSurfaceTextInput: Equatable, Sendable {
     public let title: String?
     public let text: String
     public let isEditable: Bool
+    public let attachedOptionID: String?
 
-    public init(title: String? = nil, text: String, isEditable: Bool) {
+    public init(
+        title: String? = nil,
+        text: String,
+        isEditable: Bool,
+        attachedOptionID: String? = nil
+    ) {
         self.title = title
         self.text = text
         self.isEditable = isEditable
+        self.attachedOptionID = attachedOptionID
     }
 }
 
@@ -176,7 +183,8 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             textInput: CodexSurfaceTextInput(
                 title: textInput.title,
                 text: text,
-                isEditable: textInput.isEditable
+                isEditable: textInput.isEditable,
+                attachedOptionID: textInput.attachedOptionID
             ),
             threadID: threadID,
             threadTitle: threadTitle

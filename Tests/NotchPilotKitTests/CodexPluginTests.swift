@@ -117,7 +117,74 @@ final class CodexPluginTests: XCTestCase {
         }
 
         let activity = await MainActor.run { plugin.currentCompactActivity }
-        XCTAssertEqual(activity?.runtimeDurationText, "1m 6s")
+        XCTAssertEqual(activity?.runtimeDurationText, "1m06s")
+    }
+
+    func testCurrentCompactActivityRuntimeDurationDoesNotIntroduceLineBreakSpaces() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 70) }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-runtime",
+                    title: "Runtime Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        XCTAssertEqual(activity?.runtimeDurationText, "1m10s")
+    }
+
+    func testCompletedCompactActivityFreezesObservedRunDuration() async {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 120))
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { now.value }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-runtime",
+                    title: "Runtime Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-runtime",
+                    title: "Runtime Thread",
+                    activityLabel: "Completed",
+                    phase: .completed,
+                    updatedAt: Date(timeIntervalSince1970: 66)
+                ),
+                marksActivity: false
+            )
+        }
+
+        now.value = Date(timeIntervalSince1970: 180)
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        XCTAssertEqual(activity?.runtimeDurationText, "1m06s")
     }
 
     func testActionableSurfaceEmitsInteractiveSneakPeek() async {
@@ -186,5 +253,13 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(ipcPerformedActions.map(\.0), [.primary])
         XCTAssertEqual(ipcPerformedActions.map(\.1), ["surface-ipc-open"])
         XCTAssertNil(surface)
+    }
+}
+
+private final class MutableDateProvider: @unchecked Sendable {
+    var value: Date
+
+    init(_ value: Date) {
+        self.value = value
     }
 }

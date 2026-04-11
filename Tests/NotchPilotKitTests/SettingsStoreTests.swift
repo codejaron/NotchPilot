@@ -81,4 +81,24 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertTrue(store.codexDetected)
     }
+
+    @MainActor
+    func testApprovalSneakNotificationsDefaultToEnabledAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.approvalSneakNotificationsEnabled)
+
+        store.approvalSneakNotificationsEnabled = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        XCTAssertFalse(reloadedStore.approvalSneakNotificationsEnabled)
+    }
 }

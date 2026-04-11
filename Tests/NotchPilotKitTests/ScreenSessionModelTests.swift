@@ -31,7 +31,7 @@ final class ScreenSessionModelTests: XCTestCase {
 
         let expectation = XCTestExpectation(description: "hover opens previewed plugin")
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(160))
+            try? await Task.sleep(for: .milliseconds(360))
             XCTAssertEqual(session.notchState, .open)
             XCTAssertEqual(session.activePluginID, "ai")
             expectation.fulfill()
@@ -103,8 +103,12 @@ final class ScreenSessionModelTests: XCTestCase {
 
         session.setHover(true, fallbackPluginID: "ai")
         XCTAssertEqual(session.notchState, .idleClosed)
+        XCTAssertTrue(session.hoverFeedbackTrigger)
 
-        try? await Task.sleep(for: .milliseconds(160))
+        try? await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(session.notchState, .idleClosed)
+
+        try? await Task.sleep(for: .milliseconds(180))
         XCTAssertEqual(session.notchState, .open)
 
         session.setHover(false, fallbackPluginID: "ai")
@@ -164,7 +168,7 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertEqual(session.notchState, .previewClosed)
 
         session.setHover(true, fallbackPluginID: "ai")
-        try? await Task.sleep(for: .milliseconds(160))
+        try? await Task.sleep(for: .milliseconds(360))
 
         XCTAssertEqual(session.notchState, .open)
     }
@@ -185,7 +189,7 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertEqual(session.activePluginID, "codex")
 
         session.setHover(true, fallbackPluginID: "claude")
-        try? await Task.sleep(for: .milliseconds(160))
+        try? await Task.sleep(for: .milliseconds(360))
 
         XCTAssertEqual(session.notchState, .open)
         XCTAssertEqual(session.activePluginID, "codex")

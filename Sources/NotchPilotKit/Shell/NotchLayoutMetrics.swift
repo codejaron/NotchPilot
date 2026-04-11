@@ -32,14 +32,15 @@ struct NotchLayoutMetrics {
         case .idleClosed:
             return session.geometry.compactSize
         case .previewClosed:
-            let previewWidth = plugins
+            let preview = plugins
                 .first(where: { $0.id == session.currentSneakPeek?.pluginID })
-                .flatMap { $0.preview(context: context)?.width }
-                ?? session.geometry.compactSize.width
+                .flatMap { $0.preview(context: context) }
+            let previewWidth = preview?.width ?? session.geometry.compactSize.width
+            let previewHeight = preview?.height ?? session.geometry.compactSize.height
 
             return CGSize(
                 width: max(session.geometry.compactSize.width, previewWidth),
-                height: session.geometry.compactSize.height
+                height: max(session.geometry.compactSize.height, previewHeight)
             )
         }
     }

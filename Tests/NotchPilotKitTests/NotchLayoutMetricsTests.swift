@@ -67,6 +67,30 @@ final class NotchLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.interactionSize.width, 470, accuracy: 0.1)
     }
 
+    func testPreviewClosedUsesWinningPluginPreviewHeight() {
+        let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "codex",
+                priority: 0,
+                target: .activeScreen,
+                isInteractive: false,
+                autoDismissAfter: nil
+            )
+        )
+
+        let metrics = NotchLayoutMetrics.resolve(
+            session: session,
+            plugins: [
+                LayoutTestPlugin(id: "codex", previewPriority: 0, previewWidth: 360, previewHeight: 72),
+            ]
+        )
+
+        XCTAssertEqual(metrics.displaySize.width, 360, accuracy: 0.1)
+        XCTAssertEqual(metrics.displaySize.height, 72, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.height, 82, accuracy: 0.1)
+    }
+
     private func makeSession(closedNotchSize: CGSize) -> ScreenSessionModel {
         ScreenSessionModel(
             descriptor: ScreenDescriptor(
@@ -90,11 +114,18 @@ private final class LayoutTestPlugin: NotchPlugin {
     let previewPriority: Int?
 
     private let fixedPreviewWidth: CGFloat?
+    private let fixedPreviewHeight: CGFloat?
 
-    init(id: String = "layout-test", previewPriority: Int? = nil, previewWidth: CGFloat? = nil) {
+    init(
+        id: String = "layout-test",
+        previewPriority: Int? = nil,
+        previewWidth: CGFloat? = nil,
+        previewHeight: CGFloat? = nil
+    ) {
         self.id = id
         self.previewPriority = previewPriority
         self.fixedPreviewWidth = previewWidth
+        self.fixedPreviewHeight = previewHeight
     }
 
     func preview(context: NotchContext) -> NotchPluginPreview? {
@@ -102,7 +133,7 @@ private final class LayoutTestPlugin: NotchPlugin {
             return nil
         }
 
-        return NotchPluginPreview(width: fixedPreviewWidth, view: AnyView(EmptyView()))
+        return NotchPluginPreview(width: fixedPreviewWidth, height: fixedPreviewHeight, view: AnyView(EmptyView()))
     }
 
     func contentView(context: NotchContext) -> AnyView {

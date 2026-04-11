@@ -11,7 +11,7 @@ public final class ScreenSessionModel: ObservableObject {
     }
 
     private static let fallbackExpandedSize = CGSize(width: 520, height: 320)
-    private static let hoverOpenDelay: Duration = .milliseconds(120)
+    private static let hoverOpenDelay: Duration = .milliseconds(300)
     private static let hoverCloseDelay: Duration = .milliseconds(100)
     private static let horizontalHoverPadding: CGFloat = 30
     private static let bottomHoverPadding: CGFloat = 10
@@ -20,6 +20,7 @@ public final class ScreenSessionModel: ObservableObject {
     @Published public private(set) var descriptor: ScreenDescriptor
     @Published public private(set) var notchState: NotchState = .idleClosed
     @Published public private(set) var hoverState = false
+    @Published public private(set) var hoverFeedbackTrigger = false
     @Published public private(set) var currentSneakPeek: SneakPeekRequest?
     @Published public var activePluginID: String?
     @Published public private(set) var lastSelectedPluginID: String?
@@ -106,6 +107,9 @@ public final class ScreenSessionModel: ObservableObject {
 
         if hovering {
             hoverCloseTask?.cancel()
+            if notchState != .open {
+                hoverFeedbackTrigger.toggle()
+            }
             scheduleHoverOpen(fallbackPluginID: fallbackPluginID)
 
             return

@@ -251,6 +251,13 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
                         version: version
                     )
                 }
+
+                try performFollowUp(
+                    preferredSubmission: response.followUpSubmission,
+                    fallbackSubmission: response.fallbackFollowUpSubmission,
+                    conversationID: response.followUpConversationID,
+                    using: client
+                )
                 emitSurface(approvalController.currentSurface)
                 return true
             } catch {
@@ -289,5 +296,94 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
 
     static func shouldAcknowledgeRequest(method: String) -> Bool {
         method == "thread/metadata/update"
+    }
+
+    private func performFollowUp(
+        preferredSubmission: CodexDesktopApprovalSubmission?,
+        fallbackSubmission: CodexDesktopApprovalSubmission?,
+        conversationID: String?,
+        using client: CodexDesktopIPCClient
+    ) throws {
+        guard let preferredSubmission else {
+            return
+        }
+
+        if shouldUseFallbackFollowUpDirectly(
+            preferredSubmission: preferredSubmission,
+            fallbackSubmission: fallbackSubmission,
+            conversationID: conversationID
+        ), let fallbackSubmission {
+            try sendFollowUpSubmission(fallbackSubmission, using: client)
+            return
+        }
+
+        do {
+            try sendFollowUpSubmission(preferredSubmission, using: client)
+        } catch {
+            guard let fallbackSubmission,
+                  isSteerSubmission(preferredSubmission),
+                  isInactiveSteerError(error)
+            else {
+                throw error
+            }
+
+            try sendFollowUpSubmission(fallbackSubmission, using: client)
+        }
+    }
+
+    private func sendFollowUpSubmission(
+        _ submission: CodexDesktopApprovalSubmission,
+        using client: CodexDesktopIPCClient
+    ) throws {
+        switch submission {
+        case .response:
+            return
+        case let .request(method, params, targetClientID, version):
+            _ = try client.sendRequestAndWait(
+                method: method,
+                params: params,
+                targetClientID: targetClientID,
+                version: version
+            )
+        }
+    }
+
+    private func shouldUseFallbackFollowUpDirectly(
+        preferredSubmission: CodexDesktopApprovalSubmission,
+        fallbackSubmission: CodexDesktopApprovalSubmission?,
+        conversationID: String?
+    ) -> Bool {
+        guard fallbackSubmission != nil,
+              isSteerSubmission(preferredSubmission),
+              let conversationID,
+              let isInProgress = reducer.isLatestTurnInProgress(for: conversationID)
+        else {
+            return false
+        }
+
+        return isInProgress == false
+    }
+
+    private func isSteerSubmission(_ submission: CodexDesktopApprovalSubmission) -> Bool {
+        guard case let .request(method, _, _, _) = submission else {
+            return false
+        }
+
+        return method == "turn/steer" || method == "thread-follower-steer-turn"
+    }
+
+    private func isInactiveSteerError(_ error: Error) -> Bool {
+        let message: String
+        if let ipcError = error as? CodexDesktopIPCError,
+           case let .responseError(responseMessage) = ipcError {
+            message = responseMessage
+        } else {
+            message = error.localizedDescription
+        }
+
+        let normalized = message.lowercased()
+        return normalized.contains("steerturninactiveerror")
+            || normalized.contains("expected active turn id")
+            || (normalized.contains("cannot steer conversation") && normalized.contains("inactive"))
     }
 }

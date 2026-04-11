@@ -138,12 +138,12 @@ struct CodexApprovalInteractionState: Equatable {
     }
 
     static func feedbackOptionID(for surface: CodexActionableSurface) -> String? {
-        guard surface.textInput != nil,
-              surface.options.count >= 3 else {
+        guard let attachedOptionID = surface.textInput?.attachedOptionID,
+              surface.options.contains(where: { $0.id == attachedOptionID }) else {
             return nil
         }
 
-        return surface.options.last?.id
+        return attachedOptionID
     }
 
     private mutating func updatePendingSelection(for target: CodexApprovalFocusTarget?) {

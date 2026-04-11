@@ -33,6 +33,23 @@ public struct CodexDesktopEventReducer {
 
     public init() {}
 
+    func isLatestTurnInProgress(for conversationID: String) -> Bool? {
+        guard let state = conversationStates[conversationID]?.objectValue,
+              let status = latestTurnStatus(from: state)
+        else {
+            return nil
+        }
+
+        switch phaseForStatus(status) {
+        case .plan, .working:
+            return true
+        case .completed, .connected, .interrupted, .error:
+            return false
+        case .unknown:
+            return nil
+        }
+    }
+
     public mutating func consume(frame: CodexDesktopIPCFrame) throws -> [CodexDesktopReducerOutput] {
         switch frame {
         case let .broadcast(broadcast):
@@ -179,18 +196,19 @@ public struct CodexDesktopEventReducer {
             return nil
         }
 
-        for requestValue in requests {
-            guard let request = actionableApprovalRequest(
+        let actionableRequests = requests.compactMap { requestValue in
+            actionableApprovalRequest(
                 from: requestValue,
                 conversationID: conversationID,
                 ownerClientID: ownerClientID
-            ) else {
-                continue
-            }
-            return request
+            )
         }
 
-        return nil
+        if let preferredUserInput = actionableRequests.first(where: { $0.method == "item/tool/requestUserInput" }) {
+            return preferredUserInput
+        }
+
+        return actionableRequests.first
     }
 
     private func actionableApprovalRequest(

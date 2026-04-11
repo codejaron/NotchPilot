@@ -37,6 +37,14 @@ final class CodexDesktopMonitorTests: XCTestCase {
             targetClientID: nil,
             version: 1
         )
+        let userInputRequest = CodexDesktopIPCRequestFrame(
+            requestID: "req-1input",
+            method: "item/tool/requestUserInput",
+            params: [:],
+            sourceClientID: "desktop-client",
+            targetClientID: nil,
+            version: 1
+        )
         let permissionsRequest = CodexDesktopIPCRequestFrame(
             requestID: "req-1c",
             method: "item/permissions/requestApproval",
@@ -58,6 +66,7 @@ final class CodexDesktopMonitorTests: XCTestCase {
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(fileChangeRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyExecRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyPatchRequest))
+        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(userInputRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(permissionsRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nonApprovalRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nil))
@@ -154,6 +163,643 @@ final class CodexDesktopMonitorTests: XCTestCase {
         XCTAssertEqual(request.params["conversationId"]?.stringValue, "conv-live-approval")
         XCTAssertEqual(request.params["requestId"], .integer(66))
         XCTAssertEqual(request.params["decision"], .string("accept"))
+        XCTAssertEqual(request.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: request.requestID,
+                    method: request.method,
+                    result: .object([:]),
+                    error: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(performResult.value)
+    }
+
+    func testPerformingDirectCommandApprovalFeedbackRepliesThenUsesThreadFollowerFollowUpWithInactiveFallback() throws {
+        let server = try TestCodexIPCServer()
+        defer { server.stop() }
+
+        let monitor = CodexDesktopMonitor(
+            detector: CodexDesktopAppDetector(
+                fileManager: .default,
+                homeDirectoryURL: server.installedAppHomeDirectoryURL
+            ),
+            discovery: CodexDesktopIPCDiscovery(directoryURL: server.socketDirectoryURL),
+            requestTimeout: 1
+        )
+        let surfaceSignal = DispatchSemaphore(value: 0)
+        monitor.onSurfaceChanged = { surface in
+            guard surface?.id == "codex-ipc-approval-feedback-direct" else { return }
+            surfaceSignal.signal()
+        }
+
+        monitor.start()
+        defer { monitor.stop() }
+
+        let initializeFrame = try server.waitForRequest(method: "initialize")
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: initializeFrame.requestID,
+                    method: "initialize",
+                    result: .object([
+                        "clientId": .string("notchpilot-test-client"),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        try server.send(
+            frame: .request(
+                CodexDesktopIPCRequestFrame(
+                    requestID: "approval-feedback-direct",
+                    method: "item/commandExecution/requestApproval",
+                    params: [
+                        "threadId": .string("thread-direct-feedback"),
+                        "turnId": .string("turn-direct-feedback"),
+                        "itemId": .string("item-direct-feedback"),
+                        "reason": .string("Run rm -rf?"),
+                        "command": .string("rm -rf '/tmp/demo'"),
+                        "availableDecisions": .array([
+                            .string("accept"),
+                            .string("decline"),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(surfaceSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(monitor.updateText("Use trash instead.", on: "codex-ipc-approval-feedback-direct"))
+
+        let performResult = BooleanBox()
+        let performSignal = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            performResult.value = monitor.perform(action: .primary, on: "codex-ipc-approval-feedback-direct")
+            performSignal.signal()
+        }
+
+        let responseFrame = try server.waitForNextFrame()
+        guard case let .response(response) = responseFrame else {
+            return XCTFail("expected approval response, got \(responseFrame)")
+        }
+
+        XCTAssertEqual(response.requestID, "approval-feedback-direct")
+        XCTAssertEqual(response.method, "item/commandExecution/requestApproval")
+        XCTAssertEqual(
+            response.result,
+            .object([
+                "decision": .string("decline"),
+            ])
+        )
+        XCTAssertNil(response.error)
+
+        let steerFrame = try server.waitForNextFrame()
+        guard case let .request(steerRequest) = steerFrame else {
+            return XCTFail("expected steer request, got \(steerFrame)")
+        }
+
+        XCTAssertEqual(steerRequest.method, "thread-follower-steer-turn")
+        XCTAssertEqual(steerRequest.params["conversationId"]?.stringValue, "thread-direct-feedback")
+        XCTAssertEqual(
+            steerRequest.params["input"],
+            .array([
+                .object([
+                    "type": .string("text"),
+                    "text": .string("Use trash instead."),
+                    "text_elements": .array([]),
+                ]),
+            ])
+        )
+        XCTAssertEqual(steerRequest.params["attachments"], .array([]))
+        XCTAssertEqual(steerRequest.params["restoreMessage"]?.objectValue?["text"], .string("Use trash instead."))
+        XCTAssertEqual(steerRequest.targetClientID, "desktop-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: steerRequest.requestID,
+                    method: steerRequest.method,
+                    result: nil,
+                    error: .string("SteerTurnInactiveError")
+                )
+            )
+        )
+
+        let startTurnFrame = try server.waitForNextFrame()
+        guard case let .request(startTurnRequest) = startTurnFrame else {
+            return XCTFail("expected start-turn request, got \(startTurnFrame)")
+        }
+
+        XCTAssertEqual(startTurnRequest.method, "thread-follower-start-turn")
+        XCTAssertEqual(startTurnRequest.params["conversationId"]?.stringValue, "thread-direct-feedback")
+        XCTAssertEqual(startTurnRequest.targetClientID, "desktop-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: startTurnRequest.requestID,
+                    method: startTurnRequest.method,
+                    result: .object([
+                        "ok": .bool(true),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(performResult.value)
+    }
+
+    func testPerformingLiveCommandApprovalFeedbackSendsDeclineAndFallsBackToStartTurnWhenSteerIsInactive() throws {
+        let server = try TestCodexIPCServer()
+        defer { server.stop() }
+
+        let monitor = CodexDesktopMonitor(
+            detector: CodexDesktopAppDetector(
+                fileManager: .default,
+                homeDirectoryURL: server.installedAppHomeDirectoryURL
+            ),
+            discovery: CodexDesktopIPCDiscovery(directoryURL: server.socketDirectoryURL),
+            requestTimeout: 1
+        )
+        let surfaceSignal = DispatchSemaphore(value: 0)
+        monitor.onSurfaceChanged = { surface in
+            guard surface?.id == "codex-ipc-77" else { return }
+            surfaceSignal.signal()
+        }
+
+        monitor.start()
+        defer { monitor.stop() }
+
+        let initializeFrame = try server.waitForRequest(method: "initialize")
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: initializeFrame.requestID,
+                    method: "initialize",
+                    result: .object([
+                        "clientId": .string("notchpilot-test-client"),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        try server.send(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-feedback"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-live-feedback"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-live-feedback"),
+                                        "status": .string("inProgress"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(77),
+                                        "params": .object([
+                                            "threadId": .string("conv-live-feedback"),
+                                            "turnId": .string("turn-live-feedback"),
+                                            "reason": .string("Run rm -rf?"),
+                                            "command": .string("rm -rf '/tmp/demo'"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                                .string("decline"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-owner-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(surfaceSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(monitor.updateText("Use trash instead.", on: "codex-ipc-77"))
+
+        let performResult = BooleanBox()
+        let performSignal = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            performResult.value = monitor.perform(action: .primary, on: "codex-ipc-77")
+            performSignal.signal()
+        }
+
+        let declineFrame = try server.waitForNextFrame()
+        guard case let .request(declineRequest) = declineFrame else {
+            return XCTFail("expected decline request, got \(declineFrame)")
+        }
+
+        XCTAssertEqual(declineRequest.method, "thread-follower-command-approval-decision")
+        XCTAssertEqual(declineRequest.params["conversationId"]?.stringValue, "conv-live-feedback")
+        XCTAssertEqual(declineRequest.params["requestId"], .integer(77))
+        XCTAssertEqual(declineRequest.params["decision"], .string("decline"))
+        XCTAssertEqual(declineRequest.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: declineRequest.requestID,
+                    method: declineRequest.method,
+                    result: .object([:]),
+                    error: nil
+                )
+            )
+        )
+
+        let steerFrame = try server.waitForNextFrame()
+        guard case let .request(steerRequest) = steerFrame else {
+            return XCTFail("expected steer request, got \(steerFrame)")
+        }
+
+        XCTAssertEqual(steerRequest.method, "thread-follower-steer-turn")
+        XCTAssertEqual(steerRequest.params["conversationId"]?.stringValue, "conv-live-feedback")
+        XCTAssertEqual(
+            steerRequest.params["input"],
+            .array([
+                .object([
+                    "type": .string("text"),
+                    "text": .string("Use trash instead."),
+                    "text_elements": .array([]),
+                ]),
+            ])
+        )
+        XCTAssertEqual(steerRequest.params["attachments"], .array([]))
+        let restoreMessage = steerRequest.params["restoreMessage"]?.objectValue
+        let restoreContext = restoreMessage?["context"]?.objectValue
+        XCTAssertEqual(
+            restoreMessage?["text"],
+            .string("Use trash instead.")
+        )
+        XCTAssertEqual(
+            restoreContext?["prompt"],
+            .string("Use trash instead.")
+        )
+        XCTAssertEqual(
+            restoreContext?["workspaceRoots"],
+            .array([])
+        )
+        XCTAssertEqual(
+            restoreMessage?["cwd"],
+            .null
+        )
+        XCTAssertEqual(steerRequest.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: steerRequest.requestID,
+                    method: steerRequest.method,
+                    result: nil,
+                    error: .string("SteerTurnInactiveError")
+                )
+            )
+        )
+
+        let startTurnFrame = try server.waitForNextFrame()
+        guard case let .request(startTurnRequest) = startTurnFrame else {
+            return XCTFail("expected start-turn request, got \(startTurnFrame)")
+        }
+
+        XCTAssertEqual(startTurnRequest.method, "thread-follower-start-turn")
+        XCTAssertEqual(startTurnRequest.params["conversationId"]?.stringValue, "conv-live-feedback")
+        XCTAssertEqual(
+            startTurnRequest.params["turnStartParams"],
+            .object([
+                "input": .array([
+                    .object([
+                        "type": .string("text"),
+                        "text": .string("Use trash instead."),
+                        "text_elements": .array([]),
+                    ]),
+                ]),
+                "cwd": .null,
+                "model": .null,
+                "effort": .null,
+                "approvalPolicy": .null,
+                "approvalsReviewer": .string("user"),
+                "sandboxPolicy": .null,
+                "attachments": .array([]),
+                "collaborationMode": .null,
+            ])
+        )
+        XCTAssertEqual(startTurnRequest.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: startTurnRequest.requestID,
+                    method: startTurnRequest.method,
+                    result: .object([
+                        "ok": .bool(true),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(performResult.value)
+    }
+
+    func testPerformingLiveCommandApprovalFeedbackStartsTurnDirectlyWhenLatestTurnAlreadyCompleted() throws {
+        let server = try TestCodexIPCServer()
+        defer { server.stop() }
+
+        let monitor = CodexDesktopMonitor(
+            detector: CodexDesktopAppDetector(
+                fileManager: .default,
+                homeDirectoryURL: server.installedAppHomeDirectoryURL
+            ),
+            discovery: CodexDesktopIPCDiscovery(directoryURL: server.socketDirectoryURL),
+            requestTimeout: 1
+        )
+        let surfaceSignal = DispatchSemaphore(value: 0)
+        monitor.onSurfaceChanged = { surface in
+            guard surface?.id == "codex-ipc-78" else { return }
+            surfaceSignal.signal()
+        }
+
+        monitor.start()
+        defer { monitor.stop() }
+
+        let initializeFrame = try server.waitForRequest(method: "initialize")
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: initializeFrame.requestID,
+                    method: "initialize",
+                    result: .object([
+                        "clientId": .string("notchpilot-test-client"),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        try server.send(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-completed"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-live-completed"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-live-completed"),
+                                        "status": .string("completed"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/commandExecution/requestApproval"),
+                                        "id": .integer(78),
+                                        "params": .object([
+                                            "threadId": .string("conv-live-completed"),
+                                            "turnId": .string("turn-live-completed"),
+                                            "reason": .string("Run rm -rf?"),
+                                            "command": .string("rm -rf '/tmp/demo'"),
+                                            "availableDecisions": .array([
+                                                .string("accept"),
+                                                .string("decline"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-owner-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(surfaceSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(monitor.updateText("Use trash instead.", on: "codex-ipc-78"))
+
+        let performResult = BooleanBox()
+        let performSignal = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            performResult.value = monitor.perform(action: .primary, on: "codex-ipc-78")
+            performSignal.signal()
+        }
+
+        let declineFrame = try server.waitForNextFrame()
+        guard case let .request(declineRequest) = declineFrame else {
+            return XCTFail("expected decline request, got \(declineFrame)")
+        }
+
+        XCTAssertEqual(declineRequest.method, "thread-follower-command-approval-decision")
+        XCTAssertEqual(declineRequest.params["conversationId"]?.stringValue, "conv-live-completed")
+        XCTAssertEqual(declineRequest.params["requestId"], .integer(78))
+        XCTAssertEqual(declineRequest.params["decision"], .string("decline"))
+        XCTAssertEqual(declineRequest.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: declineRequest.requestID,
+                    method: declineRequest.method,
+                    result: .object([:]),
+                    error: nil
+                )
+            )
+        )
+
+        let startTurnFrame = try server.waitForNextFrame()
+        guard case let .request(startTurnRequest) = startTurnFrame else {
+            return XCTFail("expected start-turn request, got \(startTurnFrame)")
+        }
+
+        XCTAssertEqual(startTurnRequest.method, "thread-follower-start-turn")
+        XCTAssertEqual(startTurnRequest.params["conversationId"]?.stringValue, "conv-live-completed")
+        XCTAssertEqual(
+            startTurnRequest.params["turnStartParams"],
+            .object([
+                "input": .array([
+                    .object([
+                        "type": .string("text"),
+                        "text": .string("Use trash instead."),
+                        "text_elements": .array([]),
+                    ]),
+                ]),
+                "cwd": .null,
+                "model": .null,
+                "effort": .null,
+                "approvalPolicy": .null,
+                "approvalsReviewer": .string("user"),
+                "sandboxPolicy": .null,
+                "attachments": .array([]),
+                "collaborationMode": .null,
+            ])
+        )
+        XCTAssertEqual(startTurnRequest.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: startTurnRequest.requestID,
+                    method: startTurnRequest.method,
+                    result: .object([
+                        "ok": .bool(true),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(performResult.value)
+    }
+
+    func testPerformingLiveUserInputSendsThreadFollowerSubmitRequest() throws {
+        let server = try TestCodexIPCServer()
+        defer { server.stop() }
+
+        let monitor = CodexDesktopMonitor(
+            detector: CodexDesktopAppDetector(
+                fileManager: .default,
+                homeDirectoryURL: server.installedAppHomeDirectoryURL
+            ),
+            discovery: CodexDesktopIPCDiscovery(directoryURL: server.socketDirectoryURL),
+            requestTimeout: 1
+        )
+        let surfaceSignal = DispatchSemaphore(value: 0)
+        monitor.onSurfaceChanged = { surface in
+            guard surface?.id == "codex-ipc-89" else { return }
+            surfaceSignal.signal()
+        }
+
+        monitor.start()
+        defer { monitor.stop() }
+
+        let initializeFrame = try server.waitForRequest(method: "initialize")
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: initializeFrame.requestID,
+                    method: "initialize",
+                    result: .object([
+                        "clientId": .string("notchpilot-test-client"),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        try server.send(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-user-input"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-live-user-input"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/tool/requestUserInput"),
+                                        "id": .integer(89),
+                                        "params": .object([
+                                            "threadId": .string("conv-live-user-input"),
+                                            "turnId": .string("turn-live-user-input"),
+                                            "itemId": .string("item-live-user-input"),
+                                            "questions": .array([
+                                                .object([
+                                                    "id": .string("question-live-input"),
+                                                    "question": .string("How should Codex adjust?"),
+                                                    "isOther": .bool(true),
+                                                    "options": .array([
+                                                        .object([
+                                                            "label": .string("Proceed as-is"),
+                                                            "description": .string("Keep going."),
+                                                        ]),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-owner-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        XCTAssertEqual(surfaceSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(monitor.updateText("Do not delete the file.", on: "codex-ipc-89"))
+
+        let performResult = BooleanBox()
+        let performSignal = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            performResult.value = monitor.perform(action: .primary, on: "codex-ipc-89")
+            performSignal.signal()
+        }
+
+        let outboundFrame = try server.waitForNextFrame()
+        guard case let .request(request) = outboundFrame else {
+            return XCTFail("expected user-input submission request, got \(outboundFrame)")
+        }
+
+        XCTAssertEqual(request.method, "thread-follower-submit-user-input")
+        XCTAssertEqual(request.params["conversationId"]?.stringValue, "conv-live-user-input")
+        XCTAssertEqual(request.params["requestId"], .integer(89))
+        XCTAssertEqual(
+            request.params["response"],
+            .object([
+                "answers": .object([
+                    "question-live-input": .object([
+                        "answers": .array([
+                            .string("Do not delete the file."),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
         XCTAssertEqual(request.targetClientID, "desktop-owner-client")
 
         try server.send(

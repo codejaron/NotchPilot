@@ -25,12 +25,7 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     }
 
     var accentColor: Color {
-        switch self {
-        case .claude:
-            return .orange
-        case .codex:
-            return .blue
-        }
+        NotchPilotTheme.brand(for: self)
     }
 }
 
@@ -86,10 +81,14 @@ struct PluginsOverviewSettingsView: View {
 
     var body: some View {
         SettingsDetailScrollView(title: "插件", subtitle: "统一管理 NotchPilot 插件。选择左侧插件查看单独配置。") {
-            SettingsSectionCard(title: "共享基础设施", description: "Claude 和 Codex 共用同一个 bridge/socket 基础设施。") {
+            SettingsSectionCard(
+                title: "共享基础设施",
+                description: "Claude 和 Codex 共用同一个 bridge/socket 基础设施。",
+                accent: NotchPilotTheme.codex
+            ) {
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(store.autoStartSocket ? Color.green : Color.gray)
+                        .fill(store.autoStartSocket ? NotchPilotTheme.success : Color.secondary.opacity(0.45))
                         .frame(width: 8, height: 8)
 
                     Text("Bridge socket")
@@ -115,7 +114,11 @@ struct PluginsOverviewSettingsView: View {
                 }
             }
 
-            SettingsSectionCard(title: "已注册插件", description: "插件属于同一个一级导航，具体配置在子项详情里管理。") {
+            SettingsSectionCard(
+                title: "已注册插件",
+                description: "插件属于同一个一级导航，具体配置在子项详情里管理。",
+                accent: NotchPilotTheme.codex
+            ) {
                 Button {
                     onSelectPlugin(.claude)
                 } label: {
@@ -163,15 +166,15 @@ struct PluginsOverviewSettingsView: View {
 
     private var claudeStatusColor: Color {
         if store.claudeCodeDetected == false {
-            return .gray
+            return .secondary
         }
         if store.claudeHookInstalled == false {
-            return .orange
+            return NotchPilotTheme.warning
         }
         if store.claudeHooksNeedUpdate {
-            return .yellow
+            return NotchPilotTheme.warning
         }
-        return .green
+        return NotchPilotTheme.success
     }
 
     private var codexStatusText: String {
@@ -195,20 +198,20 @@ struct PluginsOverviewSettingsView: View {
 
     private var codexStatusColor: Color {
         if store.codexDetected == false || store.codexDesktopConnection.status == .notFound {
-            return .gray
+            return .secondary
         }
 
         switch store.codexDesktopConnection.status {
         case .disconnected:
-            return .orange
+            return NotchPilotTheme.warning
         case .connecting:
-            return .yellow
+            return NotchPilotTheme.warning
         case .connected:
-            return .green
+            return NotchPilotTheme.success
         case .error:
-            return .red
+            return NotchPilotTheme.danger
         case .notFound:
-            return .gray
+            return .secondary
         }
     }
 }
@@ -221,7 +224,11 @@ struct ClaudePluginSettingsView: View {
 
     var body: some View {
         SettingsDetailScrollView(title: "Claude", subtitle: "通过 hook 集成 Claude Code 的审批、会话和 token 数据。") {
-            SettingsSectionCard(title: "集成状态", description: "Claude 插件使用 PermissionRequest、PreToolUse、PostToolUse、Session 和 Prompt hooks。") {
+            SettingsSectionCard(
+                title: "集成状态",
+                description: "Claude 插件使用 PermissionRequest、PreToolUse、PostToolUse、Session 和 Prompt hooks。",
+                accent: NotchPilotTheme.claude
+            ) {
                 ClaudeSettingsStatusCard(
                     detected: store.claudeCodeDetected,
                     installed: store.claudeHookInstalled,
@@ -233,7 +240,11 @@ struct ClaudePluginSettingsView: View {
                 )
             }
 
-            SettingsSectionCard(title: "能力", description: "这里展示当前 Claude 插件已经接入的运行能力。") {
+            SettingsSectionCard(
+                title: "能力",
+                description: "这里展示当前 Claude 插件已经接入的运行能力。",
+                accent: NotchPilotTheme.claude
+            ) {
                 PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Allow / Deny / Always Allow", isEnabled: true)
                 PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Session monitoring", isEnabled: true)
                 PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Token usage tracking", isEnabled: true)
@@ -307,14 +318,22 @@ struct CodexPluginSettingsView: View {
 
     var body: some View {
         SettingsDetailScrollView(title: "Codex", subtitle: "通过 Desktop IPC 集成 Codex 的上下文、审批和会话活动。") {
-            SettingsSectionCard(title: "集成状态", description: "Codex 插件只使用 Desktop IPC，不再依赖 AX。") {
+            SettingsSectionCard(
+                title: "集成状态",
+                description: "Codex 插件只使用 Desktop IPC，不再依赖 AX。",
+                accent: NotchPilotTheme.codex
+            ) {
                 CodexSettingsStatusCard(
                     detected: store.codexDetected,
                     connection: store.codexDesktopConnection
                 )
             }
 
-            SettingsSectionCard(title: "能力", description: "这里展示当前 Codex 插件已经接入的运行能力。") {
+            SettingsSectionCard(
+                title: "能力",
+                description: "这里展示当前 Codex 插件已经接入的运行能力。",
+                accent: NotchPilotTheme.codex
+            ) {
                 PluginCapabilityRow(
                     icon: "checkmark.circle.fill",
                     text: "Context monitoring via IPC",
@@ -339,6 +358,8 @@ struct CodexPluginSettingsView: View {
 }
 
 private struct SettingsDetailScrollView<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let subtitle: String
     let content: Content
@@ -358,11 +379,11 @@ private struct SettingsDetailScrollView<Content: View>: View {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
 
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NotchPilotTheme.settingsTextSecondary(for: colorScheme))
                 }
 
                 content
@@ -371,22 +392,27 @@ private struct SettingsDetailScrollView<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(NotchPilotTheme.settingsCanvas(for: colorScheme))
     }
 }
 
 private struct SettingsSectionCard<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let description: String
+    let accent: Color?
     let content: Content
 
     init(
         title: String,
         description: String,
+        accent: Color? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.description = description
+        self.accent = accent
         self.content = content()
     }
 
@@ -394,25 +420,25 @@ private struct SettingsSectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.settingsTextSecondary(for: colorScheme))
 
                 Text(description)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+
+                if let accent {
+                    RoundedRectangle(cornerRadius: 999, style: .continuous)
+                        .fill(accent.opacity(0.7))
+                        .frame(width: 44, height: 4)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                content
+            NotchPilotToolPanel(accent: accent, cornerRadius: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    content
+                }
+                .padding(20)
             }
-            .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
-            )
         }
     }
 }
@@ -425,14 +451,7 @@ private struct PluginOverviewRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: plugin.iconSystemName)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(plugin.accentColor)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(plugin.accentColor.opacity(0.12))
-                )
+            NotchPilotIconTile(systemName: plugin.iconSystemName, accent: plugin.accentColor, size: 34)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -440,16 +459,11 @@ private struct PluginOverviewRow: View {
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
 
-                    Text(statusText)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(statusColor.opacity(0.18)))
-                        .foregroundStyle(statusColor)
+                    NotchPilotStatusBadge(text: statusText, color: statusColor)
                 }
 
                 Text(summary)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
@@ -475,9 +489,7 @@ private struct ClaudeSettingsStatusCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.orange)
+                NotchPilotIconTile(systemName: "sparkles", accent: NotchPilotTheme.claude, size: 36)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -503,6 +515,7 @@ private struct ClaudeSettingsStatusCard: View {
                         Button("更新 Hooks", action: installAction)
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                            .tint(NotchPilotTheme.claude)
                             .disabled(isWorking)
                     } else if installed {
                         Button("卸载", action: uninstallAction)
@@ -513,6 +526,7 @@ private struct ClaudeSettingsStatusCard: View {
                         Button("安装 Hooks", action: installAction)
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                            .tint(NotchPilotTheme.claude)
                             .disabled(isWorking)
                     }
                 }
@@ -534,9 +548,7 @@ private struct CodexSettingsStatusCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.blue)
+                NotchPilotIconTile(systemName: "terminal", accent: NotchPilotTheme.codex, size: 36)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -567,6 +579,8 @@ private struct CodexSettingsStatusCard: View {
 }
 
 private struct PluginCapabilityRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let icon: String
     let text: String
     let isEnabled: Bool
@@ -575,12 +589,13 @@ private struct PluginCapabilityRow: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 11))
-                .foregroundStyle(isEnabled ? .green : .gray)
+                .foregroundStyle(isEnabled ? NotchPilotTheme.success : .secondary)
 
             Text(text)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(isEnabled ? .primary : .secondary)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(isEnabled ? .primary : NotchPilotTheme.settingsTextSecondary(for: colorScheme))
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -591,13 +606,13 @@ private struct ClaudeStatusBadge: View {
 
     var body: some View {
         if detected == false {
-            SettingsBadge(text: "Not found", fill: Color.gray.opacity(0.3), foreground: .primary)
+            SettingsBadge(text: "Not found", color: .secondary)
         } else if installed == false {
-            SettingsBadge(text: "Not configured", fill: Color.orange.opacity(0.25), foreground: .orange)
+            SettingsBadge(text: "Not configured", color: NotchPilotTheme.warning)
         } else if needsUpdate {
-            SettingsBadge(text: "Update available", fill: Color.yellow.opacity(0.25), foreground: .yellow)
+            SettingsBadge(text: "Update available", color: NotchPilotTheme.warning)
         } else {
-            SettingsBadge(text: "Connected", fill: Color.green.opacity(0.25), foreground: .green)
+            SettingsBadge(text: "Connected", color: NotchPilotTheme.success)
         }
     }
 }
@@ -608,19 +623,19 @@ private struct CodexStatusBadge: View {
 
     var body: some View {
         if detected == false || connection.status == .notFound {
-            SettingsBadge(text: "Not found", fill: Color.gray.opacity(0.3), foreground: .primary)
+            SettingsBadge(text: "Not found", color: .secondary)
         } else {
             switch connection.status {
             case .disconnected:
-                SettingsBadge(text: "Disconnected", fill: Color.orange.opacity(0.25), foreground: .orange)
+                SettingsBadge(text: "Disconnected", color: NotchPilotTheme.warning)
             case .connecting:
-                SettingsBadge(text: "Connecting", fill: Color.yellow.opacity(0.25), foreground: .yellow)
+                SettingsBadge(text: "Connecting", color: NotchPilotTheme.warning)
             case .connected:
-                SettingsBadge(text: "Connected", fill: Color.green.opacity(0.25), foreground: .green)
+                SettingsBadge(text: "Connected", color: NotchPilotTheme.success)
             case .error:
-                SettingsBadge(text: "Error", fill: Color.red.opacity(0.2), foreground: .red)
+                SettingsBadge(text: "Error", color: NotchPilotTheme.danger)
             case .notFound:
-                SettingsBadge(text: "Not found", fill: Color.gray.opacity(0.3), foreground: .primary)
+                SettingsBadge(text: "Not found", color: .secondary)
             }
         }
     }
@@ -628,15 +643,12 @@ private struct CodexStatusBadge: View {
 
 private struct SettingsBadge: View {
     let text: String
-    let fill: Color
-    let foreground: Color
+    let color: Color
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(fill))
-            .foregroundStyle(foreground)
+        NotchPilotStatusBadge(
+            text: text,
+            color: color
+        )
     }
 }

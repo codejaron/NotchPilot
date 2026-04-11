@@ -340,7 +340,8 @@ final class CodexApprovalInteractionTests: XCTestCase {
             textInput: CodexSurfaceTextInput(
                 title: "告诉 Codex 如何调整",
                 text: "",
-                isEditable: true
+                isEditable: true,
+                attachedOptionID: "option-3"
             )
         )
     }
