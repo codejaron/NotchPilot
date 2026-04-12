@@ -88,7 +88,7 @@ public struct NotchContentView: View {
     }
 
     private var expandedSafeHorizontalPadding: CGFloat {
-        openedCornerInsets.top + 8
+        NotchExpandedLayout.safeHorizontalPadding
     }
 
     private func visualDisplaySize(_ baseSize: CGSize) -> CGSize {
@@ -124,9 +124,7 @@ public struct NotchContentView: View {
             headerRow(plugins: plugins, activePlugin: activePlugin)
 
             if let activePlugin {
-                activePlugin.contentView(context: context)
-                    .padding(.horizontal, expandedSafeHorizontalPadding)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                pluginContentViewport(activePlugin, context: context)
             } else {
                 NotchPilotHUDPanel(cornerRadius: 28) {
                     Text("No plugins enabled.")
@@ -138,9 +136,26 @@ public struct NotchContentView: View {
                 .padding(.horizontal, expandedSafeHorizontalPadding)
             }
         }
-        .padding(.top, 7)
-        .padding(.bottom, 16)
+        .padding(.top, NotchExpandedLayout.topPadding)
+        .padding(.bottom, NotchExpandedLayout.bottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func pluginContentViewport(
+        _ plugin: any NotchPlugin,
+        context: NotchContext
+    ) -> some View {
+        plugin.contentView(context: context)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
+            .padding(.horizontal, expandedSafeHorizontalPadding)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: context.notchGeometry.expandedSize.height),
+                maxHeight: NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: context.notchGeometry.expandedSize.height),
+                alignment: .topLeading
+            )
+            .clipped()
     }
 
     private func headerRow(
@@ -161,7 +176,7 @@ public struct NotchContentView: View {
 
             shellSettingsButton
         }
-        .frame(height: 32)
+        .frame(height: NotchExpandedLayout.headerHeight)
         .padding(.horizontal, expandedSafeHorizontalPadding)
     }
 
@@ -174,14 +189,17 @@ public struct NotchContentView: View {
         } label: {
             ZStack {
                 if let glyph = NotchPilotBrandGlyph(pluginID: plugin.id) {
-                    NotchPilotBrandIcon(glyph: glyph, size: 16)
+                    NotchPilotBrandIcon(glyph: glyph, size: NotchExpandedLayout.pluginTabIconSize)
                 } else {
                     Image(systemName: plugin.iconSystemName)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: NotchExpandedLayout.pluginTabIconSize - 2, weight: .bold))
                         .foregroundStyle(isActive ? NotchPilotTheme.islandTextPrimary : plugin.accentColor)
                 }
             }
-            .frame(width: 42, height: 28)
+            .frame(
+                width: NotchExpandedLayout.pluginTabSize.width,
+                height: NotchExpandedLayout.pluginTabSize.height
+            )
             .background(
                 Capsule(style: .continuous)
                     .fill(
@@ -216,17 +234,20 @@ public struct NotchContentView: View {
             NotificationCenter.default.post(name: .openSettings, object: nil)
         } label: {
             Image(systemName: "gearshape.fill")
-                .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .frame(width: 30, height: 30)
-            .background(
-                Circle()
-                    .fill(Color.white.opacity(0.08))
-            )
-            .overlay {
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-            }
+                .font(.system(size: NotchExpandedLayout.settingsIconSize, weight: .bold))
+                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .frame(
+                    width: NotchExpandedLayout.settingsButtonSize,
+                    height: NotchExpandedLayout.settingsButtonSize
+                )
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.08))
+                )
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open Settings")

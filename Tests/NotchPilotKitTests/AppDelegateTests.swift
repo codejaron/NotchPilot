@@ -14,6 +14,6 @@ final class AppDelegateTests: XCTestCase {
     func testInitialPluginRegistrationUsesSeparateClaudeAndCodexPlugins() {
         let delegate = NotchPilotAppDelegate()
 
-        XCTAssertEqual(delegate.registeredPluginIDsForTesting, ["claude", "codex"])
+        XCTAssertEqual(delegate.registeredPluginIDsForTesting, ["system-monitor", "claude", "codex"])
     }
 }

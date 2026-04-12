@@ -126,7 +126,7 @@ public struct SettingsView: View {
                             Text("插件")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
 
-                            Text("Claude / Codex")
+                            Text("Claude / Codex / System")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundStyle(NotchPilotTheme.settingsTextSecondary(for: colorScheme))
                         }
@@ -176,7 +176,7 @@ public struct SettingsView: View {
                     ForEach(SettingsPluginID.allCases) { plugin in
                         sidebarRow(
                             title: plugin.title,
-                            subtitle: plugin == .claude ? "Hooks + approvals" : "IPC + approvals",
+                            subtitle: sidebarSubtitle(for: plugin),
                             systemImage: plugin.iconSystemName,
                             accent: plugin.accentColor,
                             isSelected: sidebarState.selectedPane == .plugin(plugin),
@@ -207,10 +207,23 @@ public struct SettingsView: View {
                     ClaudePluginSettingsView()
                 case .codex:
                     CodexPluginSettingsView()
+                case .systemMonitor:
+                    SystemMonitorPluginSettingsView()
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func sidebarSubtitle(for plugin: SettingsPluginID) -> String {
+        switch plugin {
+        case .claude:
+            return "Hooks + approvals"
+        case .codex:
+            return "IPC + approvals"
+        case .systemMonitor:
+            return "System metrics"
+        }
     }
 
     private func sidebarRow(

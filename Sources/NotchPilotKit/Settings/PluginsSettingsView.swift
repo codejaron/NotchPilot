@@ -1,6 +1,7 @@
 import SwiftUI
 
 public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case systemMonitor = "system-monitor"
     case claude
     case codex
 
@@ -12,6 +13,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return "Claude"
         case .codex:
             return "Codex"
+        case .systemMonitor:
+            return "System"
         }
     }
 
@@ -21,6 +24,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return "sparkles"
         case .codex:
             return "terminal"
+        case .systemMonitor:
+            return "speedometer"
         }
     }
 
@@ -141,6 +146,20 @@ struct PluginsOverviewSettingsView: View {
                         statusText: codexStatusText,
                         statusColor: codexStatusColor,
                         summary: "Desktop IPC context, approvals, session activity"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                Button {
+                    onSelectPlugin(.systemMonitor)
+                } label: {
+                    PluginOverviewRow(
+                        plugin: .systemMonitor,
+                        statusText: "Enabled",
+                        statusColor: NotchPilotTheme.success,
+                        summary: "CPU, memory, network, disk, thermal, battery"
                     )
                 }
                 .buttonStyle(.plain)
@@ -353,6 +372,218 @@ struct CodexPluginSettingsView: View {
         }
         .onAppear {
             store.synchronizeInstallationState()
+        }
+    }
+}
+
+struct SystemMonitorPluginSettingsView: View {
+    @ObservedObject private var store = SettingsStore.shared
+
+    var body: some View {
+        SettingsDetailScrollView(title: "System", subtitle: "展示 iStat 风格的系统监控 sneak 和展开仪表盘。") {
+            SettingsSectionCard(
+                title: "Sneak 预览",
+                description: "闭合态左右两侧各最多两个槽位；每个槽位都可以隐藏或自由选择指标。",
+                accent: NotchPilotTheme.systemMonitor
+            ) {
+                HStack {
+                    Text("启用系统监控 sneak")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+
+                    Spacer()
+
+                    Toggle("", isOn: $store.systemMonitorSneakPreviewEnabled)
+                        .labelsHidden()
+                }
+
+                Divider()
+
+                HStack(alignment: .top, spacing: 16) {
+                    SystemMonitorSneakSideSettings(
+                        title: "左侧",
+                        subtitle: "最多两个指标",
+                        firstMetric: metricBinding(side: .left, index: 0),
+                        secondMetric: metricBinding(side: .left, index: 1)
+                    )
+
+                    Divider()
+                        .frame(height: 112)
+
+                    SystemMonitorSneakSideSettings(
+                        title: "右侧",
+                        subtitle: "最多两个指标",
+                        firstMetric: metricBinding(side: .right, index: 0),
+                        secondMetric: metricBinding(side: .right, index: 1)
+                    )
+                }
+                .disabled(store.systemMonitorSneakPreviewEnabled == false)
+                .opacity(store.systemMonitorSneakPreviewEnabled ? 1 : 0.45)
+            }
+
+            SettingsSectionCard(
+                title: "展示",
+                description: "闭合态使用纯文本槽位；展开态分为 CPU、内存、网络、硬盘状态四块。",
+                accent: NotchPilotTheme.systemMonitor
+            ) {
+                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Text-only sneak preview", isEnabled: true)
+                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Stable four-block expanded dashboard", isEnabled: true)
+                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Stats-style Mach/top/ps/nettop/IOKit/SMC data", isEnabled: true)
+                PluginCapabilityRow(icon: "thermometer.medium", text: "Temperature hidden when no real sensor is available", isEnabled: true)
+            }
+        }
+    }
+
+    private func metricBinding(side: SystemMonitorSneakSide, index: Int) -> Binding<SystemMonitorMetric?> {
+        Binding(
+            get: {
+                metric(side: side, index: index)
+            },
+            set: { metric in
+                updateMetric(metric, side: side, index: index)
+            }
+        )
+    }
+
+    private func metric(side: SystemMonitorSneakSide, index: Int) -> SystemMonitorMetric? {
+        let metrics = metrics(side: side)
+        guard metrics.indices.contains(index) else {
+            return nil
+        }
+        return metrics[index]
+    }
+
+    private func metrics(side: SystemMonitorSneakSide) -> [SystemMonitorMetric] {
+        switch side {
+        case .left:
+            return store.systemMonitorSneakConfiguration.leftMetrics
+        case .right:
+            return store.systemMonitorSneakConfiguration.rightMetrics
+        }
+    }
+
+    private func updateMetric(_ metric: SystemMonitorMetric?, side: SystemMonitorSneakSide, index: Int) {
+        let configuration = store.systemMonitorSneakConfiguration
+        switch side {
+        case .left:
+            store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                left: updatedMetrics(configuration.leftMetrics, setting: metric, at: index),
+                right: configuration.rightMetrics
+            )
+        case .right:
+            store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                left: configuration.leftMetrics,
+                right: updatedMetrics(configuration.rightMetrics, setting: metric, at: index)
+            )
+        }
+    }
+
+    private func updatedMetrics(
+        _ metrics: [SystemMonitorMetric],
+        setting metric: SystemMonitorMetric?,
+        at index: Int
+    ) -> [SystemMonitorMetric] {
+        var updatedMetrics = Array(metrics.prefix(SystemMonitorSneakConfiguration.defaultLimit))
+
+        if let metric {
+            updatedMetrics.removeAll { $0 == metric }
+            updatedMetrics.insert(metric, at: min(index, updatedMetrics.count))
+        } else if updatedMetrics.indices.contains(index) {
+            updatedMetrics.remove(at: index)
+        }
+
+        return Array(updatedMetrics.prefix(SystemMonitorSneakConfiguration.defaultLimit))
+    }
+}
+
+private enum SystemMonitorSneakSide {
+    case left
+    case right
+}
+
+private struct SystemMonitorSneakSideSettings: View {
+    let title: String
+    let subtitle: String
+    let firstMetric: Binding<SystemMonitorMetric?>
+    let secondMetric: Binding<SystemMonitorMetric?>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            SystemMonitorSneakSlotPicker(title: "槽位 1", metric: firstMetric)
+            SystemMonitorSneakSlotPicker(title: "槽位 2", metric: secondMetric)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct SystemMonitorSneakSlotPicker: View {
+    let title: String
+    @Binding var metric: SystemMonitorMetric?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Picker("", selection: $metric) {
+                Label("隐藏", systemImage: "minus.circle")
+                    .tag(SystemMonitorMetric?.none)
+
+                ForEach(SystemMonitorMetric.allCases, id: \.self) { metric in
+                    Label(metric.settingsTitle, systemImage: metric.settingsIconSystemName)
+                        .tag(Optional(metric))
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 150)
+        }
+    }
+}
+
+private extension SystemMonitorMetric {
+    var settingsTitle: String {
+        switch self {
+        case .cpu:
+            return "CPU"
+        case .memory:
+            return "Memory"
+        case .network:
+            return "Network"
+        case .disk:
+            return "Disk free"
+        case .temperature:
+            return "Temperature"
+        case .battery:
+            return "Battery"
+        }
+    }
+
+    var settingsIconSystemName: String {
+        switch self {
+        case .cpu:
+            return "cpu"
+        case .memory:
+            return "memorychip"
+        case .network:
+            return "arrow.down.up"
+        case .disk:
+            return "internaldrive"
+        case .temperature:
+            return "thermometer.medium"
+        case .battery:
+            return "battery.75percent"
         }
     }
 }

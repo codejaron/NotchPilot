@@ -19,4 +19,8 @@ final class SettingsSidebarStateTests: XCTestCase {
         XCTAssertTrue(state.isPluginsExpanded)
         XCTAssertEqual(state.selectedPane, .plugin(.codex))
     }
+
+    func testSettingsPluginIDsIncludeSystemMonitor() {
+        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .claude, .codex])
+    }
 }

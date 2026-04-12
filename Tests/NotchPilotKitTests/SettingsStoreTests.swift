@@ -101,4 +101,51 @@ final class SettingsStoreTests: XCTestCase {
         )
         XCTAssertFalse(reloadedStore.approvalSneakNotificationsEnabled)
     }
+
+    @MainActor
+    func testSystemMonitorSneakSettingsDefaultToApprovedLayoutAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.systemMonitorSneakPreviewEnabled)
+        XCTAssertEqual(store.systemMonitorSneakConfiguration.leftMetrics, [.cpu, .memory])
+        XCTAssertEqual(store.systemMonitorSneakConfiguration.rightMetrics, [.network, .temperature])
+
+        store.systemMonitorSneakPreviewEnabled = false
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            left: [.disk],
+            right: [.battery, .network]
+        )
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        XCTAssertFalse(reloadedStore.systemMonitorSneakPreviewEnabled)
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.leftMetrics, [.disk])
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.rightMetrics, [.battery, .network])
+    }
+
+    @MainActor
+    func testSystemMonitorSneakSettingsAllowEmptySides() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(left: [], right: [])
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.leftMetrics, [])
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.rightMetrics, [])
+    }
 }

@@ -30,6 +30,19 @@ final class NotchLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.interactionSize.height, 320, accuracy: 0.1)
     }
 
+    func testExpandedPluginViewportIsOwnedByShellChrome() {
+        let viewportHeight = NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: 320)
+
+        XCTAssertEqual(viewportHeight, 253, accuracy: 0.1)
+        XCTAssertEqual(NotchExpandedLayout.safeHorizontalPadding, 27, accuracy: 0.1)
+    }
+
+    func testExpandedPluginTabsUseCompactShellOwnedSize() {
+        XCTAssertEqual(NotchExpandedLayout.pluginTabSize.width, 34, accuracy: 0.1)
+        XCTAssertEqual(NotchExpandedLayout.pluginTabSize.height, 24, accuracy: 0.1)
+        XCTAssertEqual(NotchExpandedLayout.pluginTabIconSize, 13, accuracy: 0.1)
+    }
+
     func testClosedInteractionFrameIsPinnedToTopCenterOfWindow() {
         let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
         let metrics = NotchLayoutMetrics.resolve(session: session, plugins: [LayoutTestPlugin()])

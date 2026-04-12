@@ -4,6 +4,7 @@ import SwiftUI
 enum NotchPilotTheme {
     static let claude = Color(red: 0.80, green: 0.51, blue: 0.38)
     static let codex = Color(red: 0.37, green: 0.53, blue: 0.86)
+    static let systemMonitor = Color(red: 0.36, green: 0.82, blue: 1.0)
     static let success = Color(red: 0.36, green: 0.84, blue: 0.54)
     static let warning = Color(red: 1.0, green: 0.67, blue: 0.18)
     static let danger = Color(red: 1.0, green: 0.41, blue: 0.41)
@@ -28,11 +29,16 @@ enum NotchPilotTheme {
             return claude
         case .codex:
             return codex
+        case .systemMonitor:
+            return systemMonitor
         }
     }
 
     static func brand(for pluginID: String?) -> Color {
-        pluginID == "claude" ? claude : codex
+        if pluginID == "system-monitor" {
+            return systemMonitor
+        }
+        return pluginID == "claude" ? claude : codex
     }
 
     static func settingsCanvas(for colorScheme: ColorScheme) -> LinearGradient {

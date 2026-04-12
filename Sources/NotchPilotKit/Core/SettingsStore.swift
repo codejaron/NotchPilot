@@ -10,6 +10,9 @@ public final class SettingsStore: ObservableObject {
         static let autoStartSocket = "bridge.autoStartSocket"
         static let bridgeScriptPath = "bridge.scriptPath"
         static let approvalSneakNotificationsEnabled = "approval.sneakNotificationsEnabled"
+        static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
+        static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
+        static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
     }
 
     private let defaults: UserDefaults
@@ -38,6 +41,18 @@ public final class SettingsStore: ObservableObject {
     @Published public var approvalSneakNotificationsEnabled: Bool {
         didSet {
             defaults.set(approvalSneakNotificationsEnabled, forKey: Key.approvalSneakNotificationsEnabled)
+        }
+    }
+
+    @Published var systemMonitorSneakPreviewEnabled: Bool {
+        didSet {
+            defaults.set(systemMonitorSneakPreviewEnabled, forKey: Key.systemMonitorSneakPreviewEnabled)
+        }
+    }
+
+    @Published var systemMonitorSneakConfiguration: SystemMonitorSneakConfiguration {
+        didSet {
+            persistSystemMonitorSneakConfiguration(systemMonitorSneakConfiguration)
         }
     }
 
@@ -72,6 +87,9 @@ public final class SettingsStore: ObservableObject {
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
         self.approvalSneakNotificationsEnabled =
             defaults.object(forKey: Key.approvalSneakNotificationsEnabled) as? Bool ?? true
+        self.systemMonitorSneakPreviewEnabled =
+            defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
+        self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)
     }
 
     public func synchronizeInstallationState() {
@@ -88,5 +106,39 @@ public final class SettingsStore: ObservableObject {
 
     public func updateCodexDesktopConnection(_ state: CodexDesktopConnectionState) {
         codexDesktopConnection = state
+    }
+
+    private static func systemMonitorSneakConfiguration(from defaults: UserDefaults) -> SystemMonitorSneakConfiguration {
+        let defaultConfiguration = SystemMonitorSneakConfiguration.default
+        return SystemMonitorSneakConfiguration(
+            left: systemMonitorMetrics(
+                from: defaults,
+                key: Key.systemMonitorSneakLeftMetrics,
+                fallback: defaultConfiguration.leftMetrics
+            ),
+            right: systemMonitorMetrics(
+                from: defaults,
+                key: Key.systemMonitorSneakRightMetrics,
+                fallback: defaultConfiguration.rightMetrics
+            )
+        )
+    }
+
+    private static func systemMonitorMetrics(
+        from defaults: UserDefaults,
+        key: String,
+        fallback: [SystemMonitorMetric]
+    ) -> [SystemMonitorMetric] {
+        guard defaults.object(forKey: key) != nil else {
+            return fallback
+        }
+
+        return defaults.stringArray(forKey: key)?
+            .compactMap(SystemMonitorMetric.init(rawValue:)) ?? []
+    }
+
+    private func persistSystemMonitorSneakConfiguration(_ configuration: SystemMonitorSneakConfiguration) {
+        defaults.set(configuration.leftMetrics.map(\.rawValue), forKey: Key.systemMonitorSneakLeftMetrics)
+        defaults.set(configuration.rightMetrics.map(\.rawValue), forKey: Key.systemMonitorSneakRightMetrics)
     }
 }

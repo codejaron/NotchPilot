@@ -7,6 +7,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let pluginManager = PluginManager()
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
+    private let systemMonitorPlugin = SystemMonitorPlugin()
     private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
@@ -25,11 +26,11 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         for plugin in initialPlugins() {
             pluginManager.register(plugin)
         }
-        pluginManager.activateAll(using: bus)
 
         let multiScreenManager = MultiScreenManager(bus: bus, pluginManager: pluginManager)
         multiScreenManager.start()
         self.multiScreenManager = multiScreenManager
+        pluginManager.activateAll(using: bus)
 
         statusItemController = StatusItemController(
             openHandler: { [weak self] in
@@ -137,7 +138,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func initialPlugins() -> [any NotchPlugin] {
-        [claudePlugin, codexPlugin]
+        [systemMonitorPlugin, claudePlugin, codexPlugin]
     }
 
     var registeredPluginIDsForTesting: [String] {
