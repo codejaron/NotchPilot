@@ -60,6 +60,23 @@ final class SystemMonitorSamplerTests: XCTestCase {
         XCTAssertEqual(SystemMonitorBestEffortSampler.batteryPercent(fromPMSetOutput: output), 0.84)
     }
 
+    func testMemoryPressureParsesAppleQueryOutputIntoPressurePercentage() throws {
+        let output = """
+        The system has 17179869184 (1048576 pages with a page size of 16384).
+        System-wide memory free percentage: 46%
+        """
+
+        let pressure = try XCTUnwrap(
+            SystemMonitorBestEffortSampler.memoryPressure(fromMemoryPressureOutput: output)
+        )
+
+        XCTAssertEqual(
+            pressure,
+            0.54,
+            accuracy: 0.001
+        )
+    }
+
     func testBestEffortSamplerProducesRealMachineBackedSnapshot() {
         let sampler = SystemMonitorBestEffortSampler()
 
@@ -75,6 +92,17 @@ final class SystemMonitorSamplerTests: XCTestCase {
             XCTAssertGreaterThan(temperatureCelsius, 0)
             XCTAssertLessThan(temperatureCelsius, 121)
         }
+    }
+
+    func testBestEffortSamplerUsesMemoryPressureAsMemorySummaryAndLabelsBothValues() {
+        let sampler = SystemMonitorBestEffortSampler()
+
+        let snapshot = sampler.snapshot()
+        let memoryBlock = try? XCTUnwrap(snapshot.blocks.first(where: { $0.kind == .memory }))
+
+        XCTAssertNotNil(memoryBlock)
+        XCTAssertTrue(memoryBlock?.detail.hasPrefix("Pressure \(memoryBlock?.summary ?? "")") == true)
+        XCTAssertTrue(memoryBlock?.detail.contains("Memory ") == true)
     }
 
     func testCPUUsageUsesMachTickDeltas() {

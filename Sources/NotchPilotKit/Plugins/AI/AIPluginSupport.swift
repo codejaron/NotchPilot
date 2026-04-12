@@ -26,6 +26,9 @@ protocol AIPluginRendering: NotchPlugin {
 
 extension AIPluginRendering {
     public func preview(context: NotchContext) -> NotchPluginPreview? {
+        guard shouldRenderCompactPreview else {
+            return nil
+        }
         guard let metrics = compactMetrics(context: context) else {
             return nil
         }
@@ -42,6 +45,19 @@ extension AIPluginRendering {
 
     public func contentView(context: NotchContext) -> AnyView {
         AnyView(AIPluginExpandedView(plugin: self))
+    }
+
+    var shouldRenderCompactPreview: Bool {
+        codexActionableSurface != nil
+            || pendingApprovals.isEmpty == false
+            || compactPreviewSession() != nil
+    }
+
+    func compactPreviewSession() -> AISession? {
+        sessions
+            .filter(\.isLiveCompactPreviewCandidate)
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
     }
 
     func compactMetrics(context: NotchContext) -> AIPluginCompactMetrics? {
@@ -141,6 +157,17 @@ struct AIPluginCompactActivity: Equatable {
     let approvalCount: Int
     let sessionTitle: String?
     let runtimeDurationText: String?
+}
+
+private extension AISession {
+    var isLiveCompactPreviewCandidate: Bool {
+        switch lastEventType {
+        case .preToolUse, .userPromptSubmit, .unknown:
+            return true
+        case .permissionRequest, .postToolUse, .sessionStart, .stop:
+            return false
+        }
+    }
 }
 
 struct AIPluginApprovalSneakNotice: Equatable {

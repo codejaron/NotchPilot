@@ -141,7 +141,7 @@ public final class ClaudePlugin: AIPluginRendering {
             )
         }
 
-        guard let session = sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).first else {
+        guard let session = compactPreviewSession() else {
             return nil
         }
 

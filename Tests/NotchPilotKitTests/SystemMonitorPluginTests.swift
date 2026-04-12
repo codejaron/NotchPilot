@@ -57,6 +57,44 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertLessThan(preview?.width ?? .greatestFiniteMagnitude, 430)
     }
 
+    func testPreviewReservesStableWidthForNetworkMetricAcrossRateChanges() throws {
+        let lowRatePlugin = SystemMonitorPlugin(
+            sampler: SystemMonitorStaticSampler(snapshot: SystemMonitorSnapshot(
+                cpuUsage: nil,
+                memoryUsage: nil,
+                downloadBytesPerSecond: 1_000,
+                uploadBytesPerSecond: 4_000,
+                temperatureCelsius: nil,
+                diskFreeBytes: nil,
+                batteryPercent: nil,
+                blocks: SystemMonitorSnapshot.unavailable.blocks
+            )),
+            sneakConfiguration: SystemMonitorSneakConfiguration(left: [], right: [.network])
+        )
+        let highRatePlugin = SystemMonitorPlugin(
+            sampler: SystemMonitorStaticSampler(snapshot: SystemMonitorSnapshot(
+                cpuUsage: nil,
+                memoryUsage: nil,
+                downloadBytesPerSecond: 3_200_000,
+                uploadBytesPerSecond: 32_000,
+                temperatureCelsius: nil,
+                diskFreeBytes: nil,
+                batteryPercent: nil,
+                blocks: SystemMonitorSnapshot.unavailable.blocks
+            )),
+            sneakConfiguration: SystemMonitorSneakConfiguration(left: [], right: [.network])
+        )
+
+        let lowRatePreview = lowRatePlugin.preview(context: Self.context)
+        let highRatePreview = highRatePlugin.preview(context: Self.context)
+
+        XCTAssertEqual(
+            try XCTUnwrap(lowRatePreview?.width),
+            try XCTUnwrap(highRatePreview?.width),
+            accuracy: 0.1
+        )
+    }
+
     func testRefreshUsesInjectedSamplerSnapshot() async {
         let expectedSnapshot = SystemMonitorSnapshot(
             cpuUsage: 0.22,

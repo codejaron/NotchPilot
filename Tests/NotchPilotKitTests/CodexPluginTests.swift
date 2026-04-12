@@ -93,6 +93,105 @@ final class CodexPluginTests: XCTestCase {
         }
     }
 
+    func testConnectedThreadDoesNotEmitSneakPeekWithoutLiveWork() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 5) }
+            )
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-connected",
+                    title: "Connected Thread",
+                    activityLabel: "Connected",
+                    phase: .connected,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                ),
+                marksActivity: false
+            )
+        }
+
+        await Task.yield()
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        XCTAssertTrue(receivedEvents.isEmpty)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testCompletedThreadDismissesActivitySneakPeekAndFallsBackToSystem() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 70) }
+            )
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-terminal",
+                    title: "Terminal Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-terminal",
+                    title: "Terminal Thread",
+                    activityLabel: "Completed",
+                    phase: .completed,
+                    updatedAt: Date(timeIntervalSince1970: 10)
+                ),
+                marksActivity: false
+            )
+        }
+
+        await Task.yield()
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            return XCTFail("expected initial codex sneak peek request")
+        }
+        guard case let .dismissSneakPeek(requestID, _)? = receivedEvents.last else {
+            return XCTFail("expected codex sneak peek dismissal after completion")
+        }
+
+        XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertEqual(requestID, request.id)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
     func testCurrentCompactActivityFormatsObservedRunDuration() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

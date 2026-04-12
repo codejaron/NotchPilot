@@ -65,6 +65,32 @@ final class SystemMonitorModelsTests: XCTestCase {
         XCTAssertEqual(SystemMonitorFormat.diskFree(49_000_000_000), "49.0 GB")
     }
 
+    func testCompactNetworkRowsShowUploadAboveDownload() {
+        let snapshot = SystemMonitorSnapshot(
+            cpuUsage: nil,
+            memoryUsage: nil,
+            downloadBytesPerSecond: 95_000,
+            uploadBytesPerSecond: 12_000,
+            temperatureCelsius: nil,
+            diskFreeBytes: nil,
+            batteryPercent: nil,
+            blocks: SystemMonitorSnapshot.unavailable.blocks
+        )
+
+        XCTAssertEqual(snapshot.compactNetworkRows, [
+            SystemMonitorSneakNetworkRow(symbolSystemName: "arrow.up.right", value: "12 KB/s"),
+            SystemMonitorSneakNetworkRow(symbolSystemName: "arrow.down.left", value: "95 KB/s"),
+        ])
+    }
+
+    func testUnavailableSnapshotLabelsMemoryPressureAndUsage() {
+        let snapshot = SystemMonitorSnapshot.unavailable
+        let memoryBlock = snapshot.blocks.first(where: { $0.kind == .memory })
+
+        XCTAssertEqual(memoryBlock?.summary, "--")
+        XCTAssertEqual(memoryBlock?.detail, "Pressure -- · Memory --")
+    }
+
     func testUnavailableSnapshotStillHasStableDashboardBlocks() {
         let snapshot = SystemMonitorSnapshot.unavailable
 

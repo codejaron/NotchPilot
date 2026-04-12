@@ -2,6 +2,16 @@ import XCTest
 @testable import NotchPilotKit
 
 final class ClaudePluginTests: XCTestCase {
+    private static let previewContext = NotchContext(
+        screenID: "test-screen",
+        notchState: .previewClosed,
+        notchGeometry: NotchGeometry(
+            compactSize: CGSize(width: 185, height: 32),
+            expandedSize: CGSize(width: 520, height: 320)
+        ),
+        isPrimaryScreen: true
+    )
+
     func testPermissionRequestEmitsInteractiveSneakPeek() async {
         let bus = await MainActor.run { EventBus() }
         let plugin = await MainActor.run { ClaudePlugin() }
@@ -73,5 +83,33 @@ final class ClaudePluginTests: XCTestCase {
         let pendingCount = await MainActor.run { plugin.pendingApprovals.count }
         XCTAssertEqual(pendingCount, 0)
         XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+    }
+
+    func testStoppedSessionDoesNotRenderCompactPreviewWithoutApproval() async {
+        let plugin = await MainActor.run { ClaudePlugin() }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "claude-stop-1",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "Stop",
+                      "session_id": "claude-session-stop-1"
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+        }
+
+        let hasPreview = await MainActor.run {
+            plugin.preview(context: Self.previewContext) != nil
+        }
+
+        XCTAssertFalse(hasPreview)
     }
 }

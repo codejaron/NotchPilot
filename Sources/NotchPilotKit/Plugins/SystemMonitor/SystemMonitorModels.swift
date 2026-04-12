@@ -58,6 +58,11 @@ struct SystemMonitorTopItem: Equatable, Identifiable, Sendable {
     }
 }
 
+struct SystemMonitorSneakNetworkRow: Equatable, Sendable {
+    let symbolSystemName: String
+    let value: String
+}
+
 struct SystemMonitorBlockSnapshot: Equatable, Identifiable, Sendable {
     static let topItemLimit = 5
 
@@ -86,6 +91,7 @@ struct SystemMonitorBlockSnapshot: Equatable, Identifiable, Sendable {
 
 struct SystemMonitorSnapshot: Equatable, Sendable {
     let cpuUsage: Double?
+    let memoryPressure: Double?
     let memoryUsage: Double?
     let downloadBytesPerSecond: Double?
     let uploadBytesPerSecond: Double?
@@ -94,15 +100,46 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
     let batteryPercent: Double?
     let blocks: [SystemMonitorBlockSnapshot]
 
+    init(
+        cpuUsage: Double?,
+        memoryPressure: Double? = nil,
+        memoryUsage: Double?,
+        downloadBytesPerSecond: Double?,
+        uploadBytesPerSecond: Double?,
+        temperatureCelsius: Double?,
+        diskFreeBytes: Int64?,
+        batteryPercent: Double?,
+        blocks: [SystemMonitorBlockSnapshot]
+    ) {
+        self.cpuUsage = cpuUsage
+        self.memoryPressure = memoryPressure
+        self.memoryUsage = memoryUsage
+        self.downloadBytesPerSecond = downloadBytesPerSecond
+        self.uploadBytesPerSecond = uploadBytesPerSecond
+        self.temperatureCelsius = temperatureCelsius
+        self.diskFreeBytes = diskFreeBytes
+        self.batteryPercent = batteryPercent
+        self.blocks = blocks
+    }
+
     var cpuText: String { SystemMonitorFormat.percent(cpuUsage) }
-    var memoryText: String { SystemMonitorFormat.percent(memoryUsage) }
+    var memoryText: String { memoryPressureText }
+    var memoryPressureText: String { SystemMonitorFormat.percent(memoryPressure) }
+    var memoryUsageText: String { SystemMonitorFormat.percent(memoryUsage) }
     var downloadText: String { SystemMonitorFormat.compactByteRate(downloadBytesPerSecond) }
     var uploadText: String { SystemMonitorFormat.compactByteRate(uploadBytesPerSecond) }
     var temperatureText: String { SystemMonitorFormat.temperature(temperatureCelsius) }
     var batteryText: String { SystemMonitorFormat.percent(batteryPercent) }
+    var compactNetworkRows: [SystemMonitorSneakNetworkRow] {
+        [
+            SystemMonitorSneakNetworkRow(symbolSystemName: "arrow.up.right", value: uploadText),
+            SystemMonitorSneakNetworkRow(symbolSystemName: "arrow.down.left", value: downloadText),
+        ]
+    }
 
     static let unavailable = SystemMonitorSnapshot(
         cpuUsage: nil,
+        memoryPressure: nil,
         memoryUsage: nil,
         downloadBytesPerSecond: nil,
         uploadBytesPerSecond: nil,
@@ -111,7 +148,11 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
         batteryPercent: nil,
         blocks: [
             SystemMonitorBlockSnapshot(kind: .cpu, title: "CPU", summary: "--", detail: "", topItems: []),
-            SystemMonitorBlockSnapshot(kind: .memory, title: "MEMORY", summary: "--", detail: "", topItems: []),
+            SystemMonitorBlockFactory.memoryBlock(
+                memoryPressure: nil,
+                memoryUsage: nil,
+                topItems: []
+            ),
             SystemMonitorBlockFactory.networkBlock(
                 downloadBytesPerSecond: nil,
                 uploadBytesPerSecond: nil,
@@ -128,6 +169,23 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
 
 enum SystemMonitorBlockFactory {
     static let networkTopItemCount = 3
+
+    static func memoryBlock(
+        memoryPressure: Double?,
+        memoryUsage: Double?,
+        topItems: [SystemMonitorTopItem]
+    ) -> SystemMonitorBlockSnapshot {
+        SystemMonitorBlockSnapshot(
+            kind: .memory,
+            title: "MEMORY",
+            summary: SystemMonitorFormat.percent(memoryPressure),
+            detail: SystemMonitorFormat.memoryStatusDetail(
+                pressure: memoryPressure,
+                memoryUsage: memoryUsage
+            ),
+            topItems: topItems
+        )
+    }
 
     static func networkBlock(
         downloadBytesPerSecond: Double?,
@@ -245,6 +303,10 @@ enum SystemMonitorFormat {
         }
 
         return String(format: "%.1f GB", Double(value) / 1_000_000_000)
+    }
+
+    static func memoryStatusDetail(pressure: Double?, memoryUsage: Double?) -> String {
+        "Pressure \(percent(pressure)) · Memory \(percent(memoryUsage))"
     }
 
     static func storage(_ value: Int64) -> String {

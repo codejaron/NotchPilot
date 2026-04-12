@@ -577,7 +577,7 @@ private extension SystemMonitorMetric {
         case .memory:
             return "memorychip"
         case .network:
-            return "arrow.down.up"
+            return "arrow.up.arrow.down"
         case .disk:
             return "internaldrive"
         case .temperature:

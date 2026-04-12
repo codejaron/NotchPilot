@@ -8,6 +8,7 @@ enum SystemMonitorSneakPreviewLayout {
     static let metricSpacing: CGFloat = 8
     static let labelValueSpacing: CGFloat = 3
     static let networkArrowValueSpacing: CGFloat = 5
+    static let reservedNetworkValueSample = "999 KB/s"
 
     private static let labelFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
     private static let valueFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
@@ -42,20 +43,29 @@ enum SystemMonitorSneakPreviewLayout {
 
     private static func metricWidth(for metric: SystemMonitorMetric, snapshot: SystemMonitorSnapshot) -> CGFloat {
         if metric == .network {
-            let arrowWidth = max(
-                textWidth("↙", font: networkArrowFont),
-                textWidth("↗", font: networkArrowFont)
-            )
-            let valueWidth = max(
-                textWidth(snapshot.downloadText, font: networkValueFont),
-                textWidth(snapshot.uploadText, font: networkValueFont)
-            )
-            return arrowWidth + networkArrowValueSpacing + valueWidth
+            return networkArrowColumnWidth(snapshot: snapshot)
+                + networkArrowValueSpacing
+                + networkValueColumnWidth(snapshot: snapshot)
         }
 
         return textWidth(metric.compactLabel, font: labelFont)
             + labelValueSpacing
             + textWidth(metric.compactValue(in: snapshot), font: valueFont)
+    }
+
+    static func networkArrowColumnWidth(snapshot: SystemMonitorSnapshot) -> CGFloat {
+        max(
+            snapshot.compactNetworkRows.map { textWidth(symbolText(for: $0.symbolSystemName), font: networkArrowFont) }.max() ?? 0,
+            textWidth("↗", font: networkArrowFont),
+            textWidth("↙", font: networkArrowFont)
+        )
+    }
+
+    static func networkValueColumnWidth(snapshot: SystemMonitorSnapshot) -> CGFloat {
+        max(
+            textWidth(reservedNetworkValueSample, font: networkValueFont),
+            snapshot.compactNetworkRows.map { textWidth($0.value, font: networkValueFont) }.max() ?? 0
+        )
     }
 
     private static func textWidth(_ text: String, font: NSFont) -> CGFloat {
@@ -65,6 +75,17 @@ enum SystemMonitorSneakPreviewLayout {
 
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         return ceil((text as NSString).size(withAttributes: attributes).width)
+    }
+
+    private static func symbolText(for systemName: String) -> String {
+        switch systemName {
+        case "arrow.up.right":
+            return "↗"
+        case "arrow.down.left":
+            return "↙"
+        default:
+            return ""
+        }
     }
 }
 
@@ -122,21 +143,27 @@ struct SystemMonitorSneakPreviewView: View {
     }
 
     private var networkMetric: some View {
-        HStack(spacing: SystemMonitorSneakPreviewLayout.networkArrowValueSpacing) {
-            VStack(spacing: 0) {
-                Image(systemName: "arrow.down.left")
-                Image(systemName: "arrow.up.right")
-            }
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+        let arrowWidth = SystemMonitorSneakPreviewLayout.networkArrowColumnWidth(snapshot: snapshot)
+        let valueWidth = SystemMonitorSneakPreviewLayout.networkValueColumnWidth(snapshot: snapshot)
 
+        return HStack(spacing: SystemMonitorSneakPreviewLayout.networkArrowValueSpacing) {
             VStack(alignment: .trailing, spacing: 0) {
-                Text(snapshot.downloadText)
-                Text(snapshot.uploadText)
+                ForEach(Array(snapshot.compactNetworkRows.enumerated()), id: \.offset) { rowEntry in
+                    let row = rowEntry.element
+                    HStack(spacing: SystemMonitorSneakPreviewLayout.networkArrowValueSpacing) {
+                        Image(systemName: row.symbolSystemName)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                            .frame(width: arrowWidth, alignment: .trailing)
+
+                        Text(row.value)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .monospacedDigit()
+                            .frame(width: valueWidth, alignment: .trailing)
+                    }
+                }
             }
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .monospacedDigit()
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
@@ -211,6 +238,7 @@ enum SystemMonitorDashboardTypography {
     static let systemStatusUsesMonospacedRowValues = false
     static let standardSummaryFontSize: CGFloat = 18
     static let networkSummaryFontSize: CGFloat = 13
+    static let detailFontSize: CGFloat = 10
 }
 
 private struct SystemMonitorBlockView: View {
@@ -231,6 +259,14 @@ private struct SystemMonitorBlockView: View {
                     .foregroundStyle(NotchPilotTheme.islandTextPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
+            }
+
+            if block.detail.isEmpty == false {
+                Text(block.detail)
+                    .font(.system(size: SystemMonitorDashboardTypography.detailFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
 
             VStack(alignment: .leading, spacing: 2) {

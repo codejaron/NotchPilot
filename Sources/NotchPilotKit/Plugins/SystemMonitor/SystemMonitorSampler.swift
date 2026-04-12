@@ -179,6 +179,14 @@ enum SystemMonitorSampleMath {
         return clamp(Double(counters.usedBytes) / Double(physicalMemoryBytes))
     }
 
+    static func memoryPressure(rawPercent: Int32?) -> Double? {
+        guard let rawPercent else {
+            return nil
+        }
+
+        return clamp(Double(rawPercent) / 100)
+    }
+
     static func bytesPerSecond(previous: UInt64?, current: UInt64?, interval: TimeInterval?) -> Double? {
         guard let previous,
               let current,
@@ -356,6 +364,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             counters: memoryCounters(),
             physicalMemoryBytes: physicalMemoryBytes()
         )
+        let memoryPressure = memoryPressure()
         let processInterval = previousProcessDate.map { date.timeIntervalSince($0) }
         let processCounters = processCounters()
         let processActivities = SystemMonitorSampleMath.processActivities(
@@ -390,6 +399,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
         return SystemMonitorSnapshot(
             cpuUsage: cpuUsage,
+            memoryPressure: memoryPressure,
             memoryUsage: memoryUsage,
             downloadBytesPerSecond: networkRates.download,
             uploadBytesPerSecond: networkRates.upload,
@@ -398,6 +408,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             batteryPercent: batteryPercent,
             blocks: blocks(
                 cpuUsage: cpuUsage,
+                memoryPressure: memoryPressure,
                 memoryUsage: memoryUsage,
                 downloadBytesPerSecond: networkRates.download,
                 uploadBytesPerSecond: networkRates.upload,
@@ -494,6 +505,28 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         }
 
         return UInt64(info.max_mem)
+    }
+
+    private func memoryPressure() -> Double? {
+        runProcess(executable: "/usr/bin/memory_pressure", arguments: ["-Q"], timeout: 4)
+            .flatMap(Self.memoryPressure(fromMemoryPressureOutput:))
+    }
+
+    static func memoryPressure(fromMemoryPressureOutput output: String) -> Double? {
+        guard let freeRange = output.range(
+            of: #"System-wide memory free percentage:\s*([0-9]+(?:\.[0-9]+)?)%"#,
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+
+        let match = String(output[freeRange])
+        let digits = match.filter { $0.isNumber || $0 == "." }
+        guard let freePercent = Double(digits) else {
+            return nil
+        }
+
+        return min(1, max(0, 1 - (freePercent / 100)))
     }
 
     private func processCounters() -> [SystemMonitorProcessCounter] {
@@ -1032,6 +1065,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
     private func blocks(
         cpuUsage: Double?,
+        memoryPressure: Double?,
         memoryUsage: Double?,
         downloadBytesPerSecond: Double?,
         uploadBytesPerSecond: Double?,
@@ -1096,11 +1130,9 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 detail: "",
                 topItems: topCPU
             ),
-            SystemMonitorBlockSnapshot(
-                kind: .memory,
-                title: "MEMORY",
-                summary: SystemMonitorFormat.percent(memoryUsage),
-                detail: "",
+            SystemMonitorBlockFactory.memoryBlock(
+                memoryPressure: memoryPressure,
+                memoryUsage: memoryUsage,
                 topItems: topMemory
             ),
             SystemMonitorBlockFactory.networkBlock(

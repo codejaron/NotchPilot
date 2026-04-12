@@ -77,6 +77,9 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
+        guard shouldRenderCompactPreview else {
+            return nil
+        }
         guard let activity = currentCompactActivity else {
             return nil
         }
@@ -315,12 +318,29 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func syncSneakPeek() {
-        if currentCompactActivity == nil {
+        guard shouldRenderCompactPreview, currentCompactActivity != nil else {
             dismissSneakPeek(for: SneakPeekKey.activity)
             return
         }
 
         presentSneakPeek(for: SneakPeekKey.activity)
+    }
+
+    private var shouldRenderCompactPreview: Bool {
+        if codexActionableSurface != nil {
+            return true
+        }
+
+        guard let context = codexThreads.preferredContext(for: nil) else {
+            return false
+        }
+
+        switch context.phase {
+        case .plan, .working:
+            return true
+        case .completed, .connected, .interrupted, .error, .unknown:
+            return false
+        }
     }
 
     private func runtimeDurationText(for surface: CodexActionableSurface?) -> String? {
