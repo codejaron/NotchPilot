@@ -2,6 +2,18 @@ import AppKit
 import Combine
 import SwiftUI
 
+struct NotchWindowFrameRefreshPlan: Equatable {
+    let targetFrame: CGRect
+    let needsWindowFrameUpdate: Bool
+
+    static func resolve(currentFrame: CGRect, targetFrame: CGRect) -> NotchWindowFrameRefreshPlan {
+        NotchWindowFrameRefreshPlan(
+            targetFrame: targetFrame,
+            needsWindowFrameUpdate: currentFrame.equalTo(targetFrame) == false
+        )
+    }
+}
+
 @MainActor
 public final class NotchWindow: NSPanel {
     private unowned let session: ScreenSessionModel
@@ -56,8 +68,17 @@ public final class NotchWindow: NSPanel {
     }
 
     public func refreshFrame(animated: Bool) {
-        let targetFrame = session.windowFrame
+        let refreshPlan = NotchWindowFrameRefreshPlan.resolve(
+            currentFrame: frame,
+            targetFrame: session.windowFrame
+        )
 
+        guard refreshPlan.needsWindowFrameUpdate else {
+            updateMouseInteraction()
+            return
+        }
+
+        let targetFrame = refreshPlan.targetFrame
         guard animated else {
             setContentSize(targetFrame.size)
             setFrameOrigin(targetFrame.origin)

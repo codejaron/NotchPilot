@@ -57,7 +57,7 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertLessThan(preview?.width ?? .greatestFiniteMagnitude, 430)
     }
 
-    func testRefreshUsesInjectedSamplerSnapshot() {
+    func testRefreshUsesInjectedSamplerSnapshot() async {
         let expectedSnapshot = SystemMonitorSnapshot(
             cpuUsage: 0.22,
             memoryUsage: 0.37,
@@ -74,9 +74,35 @@ final class SystemMonitorPluginTests: XCTestCase {
             sampler: SystemMonitorStaticSampler(snapshot: expectedSnapshot)
         )
 
-        plugin.refresh()
+        await plugin.refresh()
 
         XCTAssertEqual(plugin.snapshot, expectedSnapshot)
+    }
+
+    func testActivateDoesNotBlockMainActorWhenSamplerIsSlow() {
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorSlowSampler(delay: 0.5, snapshot: .unavailable),
+            settingsStore: makeSettingsStore()
+        )
+        let bus = EventBus()
+
+        let start = Date()
+        plugin.activate(bus: bus)
+        let elapsed = Date().timeIntervalSince(start)
+        plugin.deactivate()
+
+        XCTAssertLessThan(elapsed, 0.15)
+    }
+
+    func testInitDoesNotBlockMainActorWhenSamplerIsSlow() {
+        let start = Date()
+        _ = SystemMonitorPlugin(
+            sampler: SystemMonitorSlowSampler(delay: 0.5, snapshot: .unavailable),
+            settingsStore: makeSettingsStore()
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(elapsed, 0.15)
     }
 
     func testExpandedSnapshotKeepsStableDashboardBlocksByDefault() {
@@ -186,5 +212,20 @@ final class SystemMonitorPluginTests: XCTestCase {
             fileManager: .default,
             homeDirectoryURL: FileManager.default.temporaryDirectory
         )
+    }
+}
+
+private struct SystemMonitorSlowSampler: SystemMonitorSampling {
+    let delay: TimeInterval
+    let storedSnapshot: SystemMonitorSnapshot
+
+    init(delay: TimeInterval, snapshot: SystemMonitorSnapshot) {
+        self.delay = delay
+        self.storedSnapshot = snapshot
+    }
+
+    func snapshot() -> SystemMonitorSnapshot {
+        Thread.sleep(forTimeInterval: delay)
+        return storedSnapshot
     }
 }

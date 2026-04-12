@@ -1,6 +1,18 @@
 import Combine
 import SwiftUI
 
+private actor SystemMonitorSamplerWorker {
+    private let sampler: any SystemMonitorSampling
+
+    init(sampler: any SystemMonitorSampling) {
+        self.sampler = sampler
+    }
+
+    func snapshot() -> SystemMonitorSnapshot {
+        sampler.snapshot()
+    }
+}
+
 @MainActor
 public final class SystemMonitorPlugin: NotchPlugin {
     private enum SneakPreviewRequest {
@@ -18,9 +30,11 @@ public final class SystemMonitorPlugin: NotchPlugin {
     @Published private(set) var snapshot: SystemMonitorSnapshot
     @Published private(set) var sneakConfiguration: SystemMonitorSneakConfiguration
 
-    private let sampler: any SystemMonitorSampling
+    private let samplerWorker: SystemMonitorSamplerWorker
     private let settingsStore: SettingsStore
     private var refreshCancellable: AnyCancellable?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration: UInt64 = 0
     private var settingsCancellables: Set<AnyCancellable> = []
     private weak var bus: EventBus?
     private var sneakPeekRequestID: UUID?
@@ -34,10 +48,10 @@ public final class SystemMonitorPlugin: NotchPlugin {
         settingsStore: SettingsStore = .shared,
         sneakConfiguration: SystemMonitorSneakConfiguration? = nil
     ) {
-        self.sampler = sampler
+        self.samplerWorker = SystemMonitorSamplerWorker(sampler: sampler)
         self.settingsStore = settingsStore
         self.sneakConfiguration = sneakConfiguration ?? settingsStore.systemMonitorSneakConfiguration
-        self.snapshot = sampler.snapshot()
+        self.snapshot = .unavailable
 
         if sneakConfiguration == nil {
             settingsStore.$systemMonitorSneakConfiguration
@@ -87,17 +101,20 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
     public func activate(bus: EventBus) {
         self.bus = bus
-        refresh()
+        scheduleRefresh()
         syncSneakPeekRequest()
         refreshCancellable?.cancel()
         refreshCancellable = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
     }
 
     public func deactivate() {
+        refreshGeneration &+= 1
+        refreshTask?.cancel()
+        refreshTask = nil
         refreshCancellable?.cancel()
         refreshCancellable = nil
         dismissSneakPeekRequest()
@@ -105,8 +122,38 @@ public final class SystemMonitorPlugin: NotchPlugin {
         snapshot = .unavailable
     }
 
-    func refresh() {
-        snapshot = sampler.snapshot()
+    func refresh() async {
+        let latestSnapshot = await samplerWorker.snapshot()
+        guard Task.isCancelled == false else {
+            return
+        }
+        snapshot = latestSnapshot
+    }
+
+    private func scheduleRefresh() {
+        guard refreshTask == nil else {
+            return
+        }
+
+        let generation = refreshGeneration
+        refreshTask = Task { [weak self] in
+            await self?.completeScheduledRefresh(generation: generation)
+        }
+    }
+
+    private func completeScheduledRefresh(generation: UInt64) async {
+        let latestSnapshot = await samplerWorker.snapshot()
+        let wasCancelled = Task.isCancelled
+
+        guard refreshGeneration == generation else {
+            return
+        }
+
+        refreshTask = nil
+        guard wasCancelled == false else {
+            return
+        }
+        snapshot = latestSnapshot
     }
 
     private func syncSneakPeekRequest() {
