@@ -21,6 +21,9 @@ public struct CodexDesktopConnectionState: Equatable, Sendable {
     public static let disconnected = CodexDesktopConnectionState(status: .disconnected)
     public static let connecting = CodexDesktopConnectionState(status: .connecting)
     public static let connected = CodexDesktopConnectionState(status: .connected)
+    public static func error(message: String? = nil) -> CodexDesktopConnectionState {
+        CodexDesktopConnectionState(status: .error, message: message)
+    }
 }
 
 public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContextMonitoring, CodexDesktopActionableSurfaceMonitoring {

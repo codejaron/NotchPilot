@@ -56,6 +56,95 @@ final class ClaudePluginTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testPermissionRequestDoesNotEmitSneakPeekWhenApprovalSneakSettingIsDisabled() {
+        let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
+        SettingsStore.shared.approvalSneakNotificationsEnabled = false
+        defer {
+            SettingsStore.shared.approvalSneakNotificationsEnabled = previousValue
+        }
+
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-req-disabled",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-disabled",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo hidden" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(recorder.events.isEmpty)
+        XCTAssertNil(plugin.preview(context: Self.previewContext))
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
+    func testReenablingApprovalSneakPresentsExistingPendingApproval() {
+        let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
+        SettingsStore.shared.approvalSneakNotificationsEnabled = false
+        defer {
+            SettingsStore.shared.approvalSneakNotificationsEnabled = previousValue
+        }
+
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-req-reenable",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-reenable",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo reenable" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(recorder.events.isEmpty)
+
+        SettingsStore.shared.approvalSneakNotificationsEnabled = true
+
+        guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+            XCTFail("Expected sneak peek request after reenabling approval sneak")
+            bus.unsubscribe(token)
+            return
+        }
+
+        XCTAssertEqual(request.pluginID, "claude")
+        XCTAssertTrue(request.isInteractive)
+        XCTAssertNotNil(plugin.preview(context: Self.previewContext))
+
+        bus.unsubscribe(token)
+    }
+
     func testCodexHookFramesAreIgnored() async {
         let plugin = await MainActor.run { ClaudePlugin() }
         let bus = await MainActor.run { EventBus() }

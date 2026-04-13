@@ -7,7 +7,7 @@ struct NotchPilotXcodeApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(selectedPane: .pluginsOverview)
+            SettingsView(selectedPane: .general)
         }
     }
 }

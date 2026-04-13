@@ -215,6 +215,19 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertTrue(receivedEvents.isEmpty)
     }
 
+    func testPreviewReturnsNilWhenSneakPreviewSettingIsDisabled() {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = false
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store
+        )
+
+        let preview = plugin.preview(context: Self.context)
+
+        XCTAssertNil(preview)
+    }
+
     func testPluginUsesSettingsStoreSneakConfiguration() {
         let store = makeSettingsStore()
         store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(

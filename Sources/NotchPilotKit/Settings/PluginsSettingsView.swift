@@ -29,209 +29,76 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         }
     }
 
-    var accentColor: Color {
-        NotchPilotTheme.brand(for: self)
+    var sidebarSubtitle: String {
+        switch self {
+        case .claude:
+            return "Claude 集成"
+        case .codex:
+            return "连接状态"
+        case .systemMonitor:
+            return "系统监控"
+        }
+    }
+}
+
+struct ClaudeSettingsStatusText: Equatable {
+    let value: String
+
+    init(detected: Bool, installed: Bool, needsUpdate: Bool) {
+        if detected == false {
+            value = "未检测到"
+        } else if installed == false {
+            value = "未安装"
+        } else if needsUpdate {
+            value = "可更新"
+        } else {
+            value = "已连接"
+        }
+    }
+}
+
+struct CodexSettingsStatusText: Equatable {
+    let value: String
+
+    init(detected: Bool, connection: CodexDesktopConnectionState) {
+        if detected == false || connection.status == .notFound {
+            value = "未检测到"
+            return
+        }
+
+        switch connection.status {
+        case .disconnected:
+            value = "未连接"
+        case .connecting:
+            value = "连接中"
+        case .connected:
+            value = "已连接"
+        case .error:
+            value = "错误"
+        case .notFound:
+            value = "未检测到"
+        }
     }
 }
 
 public enum SettingsPane: Hashable, Sendable {
     case general
-    case pluginsOverview
     case plugin(SettingsPluginID)
 }
 
 struct SettingsSidebarState: Equatable {
     var selectedPane: SettingsPane
-    var isPluginsExpanded: Bool
 
-    init(selectedPane: SettingsPane = .pluginsOverview) {
+    init(selectedPane: SettingsPane = .general) {
         self.selectedPane = selectedPane
-        self.isPluginsExpanded = selectedPane.isPluginPane
     }
 
     mutating func selectGeneral() {
         selectedPane = .general
     }
 
-    mutating func selectPluginsOverview() {
-        isPluginsExpanded = true
-        selectedPane = .pluginsOverview
-    }
-
     mutating func selectPlugin(_ plugin: SettingsPluginID) {
-        isPluginsExpanded = true
         selectedPane = .plugin(plugin)
-    }
-
-    mutating func togglePluginsExpanded() {
-        isPluginsExpanded.toggle()
-    }
-}
-
-private extension SettingsPane {
-    var isPluginPane: Bool {
-        switch self {
-        case .general:
-            return false
-        case .pluginsOverview, .plugin(_):
-            return true
-        }
-    }
-}
-
-struct PluginsOverviewSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
-
-    let onSelectPlugin: (SettingsPluginID) -> Void
-
-    var body: some View {
-        SettingsDetailScrollView(title: "插件", subtitle: "统一管理 NotchPilot 插件。选择左侧插件查看单独配置。") {
-            SettingsSectionCard(
-                title: "共享基础设施",
-                description: "Claude 和 Codex 共用同一个 bridge/socket 基础设施。",
-                accent: NotchPilotTheme.codex
-            ) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(store.autoStartSocket ? NotchPilotTheme.success : Color.secondary.opacity(0.45))
-                        .frame(width: 8, height: 8)
-
-                    Text("Bridge socket")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-
-                    Spacer()
-
-                    Text("/tmp/notchpilot.sock")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                HStack {
-                    Text("自动启动 bridge")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-
-                    Spacer()
-
-                    Toggle("", isOn: $store.autoStartSocket)
-                        .labelsHidden()
-                }
-            }
-
-            SettingsSectionCard(
-                title: "已注册插件",
-                description: "插件属于同一个一级导航，具体配置在子项详情里管理。",
-                accent: NotchPilotTheme.codex
-            ) {
-                Button {
-                    onSelectPlugin(.claude)
-                } label: {
-                    PluginOverviewRow(
-                        plugin: .claude,
-                        statusText: claudeStatusText,
-                        statusColor: claudeStatusColor,
-                        summary: "Hook bridge, approvals, session tracking"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Divider()
-
-                Button {
-                    onSelectPlugin(.codex)
-                } label: {
-                    PluginOverviewRow(
-                        plugin: .codex,
-                        statusText: codexStatusText,
-                        statusColor: codexStatusColor,
-                        summary: "Desktop IPC context, approvals, session activity"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Divider()
-
-                Button {
-                    onSelectPlugin(.systemMonitor)
-                } label: {
-                    PluginOverviewRow(
-                        plugin: .systemMonitor,
-                        statusText: "Enabled",
-                        statusColor: NotchPilotTheme.success,
-                        summary: "CPU, memory, network, disk, thermal, battery"
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .onAppear {
-            store.synchronizeInstallationState()
-        }
-    }
-
-    private var claudeStatusText: String {
-        if store.claudeCodeDetected == false {
-            return "Not found"
-        }
-        if store.claudeHookInstalled == false {
-            return "Not configured"
-        }
-        if store.claudeHooksNeedUpdate {
-            return "Update available"
-        }
-        return "Connected"
-    }
-
-    private var claudeStatusColor: Color {
-        if store.claudeCodeDetected == false {
-            return .secondary
-        }
-        if store.claudeHookInstalled == false {
-            return NotchPilotTheme.warning
-        }
-        if store.claudeHooksNeedUpdate {
-            return NotchPilotTheme.warning
-        }
-        return NotchPilotTheme.success
-    }
-
-    private var codexStatusText: String {
-        if store.codexDetected == false || store.codexDesktopConnection.status == .notFound {
-            return "Not found"
-        }
-
-        switch store.codexDesktopConnection.status {
-        case .disconnected:
-            return "Disconnected"
-        case .connecting:
-            return "Connecting"
-        case .connected:
-            return "Connected"
-        case .error:
-            return "Error"
-        case .notFound:
-            return "Not found"
-        }
-    }
-
-    private var codexStatusColor: Color {
-        if store.codexDetected == false || store.codexDesktopConnection.status == .notFound {
-            return .secondary
-        }
-
-        switch store.codexDesktopConnection.status {
-        case .disconnected:
-            return NotchPilotTheme.warning
-        case .connecting:
-            return NotchPilotTheme.warning
-        case .connected:
-            return NotchPilotTheme.success
-        case .error:
-            return NotchPilotTheme.danger
-        case .notFound:
-            return .secondary
-        }
     }
 }
 
@@ -242,35 +109,70 @@ struct ClaudePluginSettingsView: View {
     @State private var isWorking = false
 
     var body: some View {
-        SettingsDetailScrollView(title: "Claude", subtitle: "通过 hook 集成 Claude Code 的审批、会话和 token 数据。") {
-            SettingsSectionCard(
-                title: "集成状态",
-                description: "Claude 插件使用 PermissionRequest、PreToolUse、PostToolUse、Session 和 Prompt hooks。",
-                accent: NotchPilotTheme.claude
-            ) {
-                ClaudeSettingsStatusCard(
-                    detected: store.claudeCodeDetected,
-                    installed: store.claudeHookInstalled,
-                    needsUpdate: store.claudeHooksNeedUpdate,
-                    error: claudeError,
-                    isWorking: isWorking,
-                    installAction: installClaude,
-                    uninstallAction: uninstallClaude
+        SettingsPage(title: "Claude") {
+            SettingsGroupSection(title: "Claude Code") {
+                SettingsStatusRow(
+                    title: "集成状态",
+                    value: claudeStatusText.value,
+                    valueColor: claudeStatusColor
                 )
+
+                SettingsRowDivider()
+
+                SettingsActionRow(
+                    title: "操作",
+                    detail: claudeActionDetail,
+                    buttonTitle: claudeActionTitle,
+                    isEnabled: store.claudeCodeDetected && isWorking == false
+                ) {
+                    claudeAction()
+                }
             }
 
-            SettingsSectionCard(
-                title: "能力",
-                description: "这里展示当前 Claude 插件已经接入的运行能力。",
-                accent: NotchPilotTheme.claude
-            ) {
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Allow / Deny / Always Allow", isEnabled: true)
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Session monitoring", isEnabled: true)
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Token usage tracking", isEnabled: true)
+            if let claudeError, claudeError.isEmpty == false {
+                SettingsInlineMessage(text: claudeError, color: .red)
             }
         }
         .onAppear {
             refreshInstallationState()
+        }
+    }
+
+    private var claudeStatusText: ClaudeSettingsStatusText {
+        ClaudeSettingsStatusText(
+            detected: store.claudeCodeDetected,
+            installed: store.claudeHookInstalled,
+            needsUpdate: store.claudeHooksNeedUpdate
+        )
+    }
+
+    private var claudeStatusColor: Color {
+        switch claudeStatusText.value {
+        case "已连接":
+            return .secondary
+        case "未检测到", "未安装", "可更新":
+            return .secondary
+        default:
+            return .secondary
+        }
+    }
+
+    private var claudeActionTitle: String {
+        if store.claudeHookInstalled {
+            return store.claudeHooksNeedUpdate ? "更新集成" : "移除集成"
+        }
+        return "安装集成"
+    }
+
+    private var claudeActionDetail: String? {
+        store.claudeCodeDetected ? nil : "请先安装 Claude Code。"
+    }
+
+    private func claudeAction() {
+        if store.claudeHookInstalled, store.claudeHooksNeedUpdate == false {
+            uninstallClaude()
+        } else {
+            installClaude()
         }
     }
 
@@ -320,7 +222,7 @@ struct ClaudePluginSettingsView: View {
             .appendingPathComponent(".notchpilot/notch-bridge.py")
             .path
         guard FileManager.default.fileExists(atPath: fallbackPath) else {
-            throw HookInstallError.writeError("Bridge script not found. Place notch-bridge.py in ~/.notchpilot/")
+            throw HookInstallError.writeError("未找到 Claude 集成所需脚本，无法完成安装。")
         }
 
         store.bridgeScriptPath = fallbackPath
@@ -336,37 +238,19 @@ struct CodexPluginSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
 
     var body: some View {
-        SettingsDetailScrollView(title: "Codex", subtitle: "通过 Desktop IPC 集成 Codex 的上下文、审批和会话活动。") {
-            SettingsSectionCard(
-                title: "集成状态",
-                description: "Codex 插件只使用 Desktop IPC，不再依赖 AX。",
-                accent: NotchPilotTheme.codex
-            ) {
-                CodexSettingsStatusCard(
-                    detected: store.codexDetected,
-                    connection: store.codexDesktopConnection
+        SettingsPage(title: "Codex") {
+            SettingsGroupSection(title: "Codex Desktop") {
+                SettingsStatusRow(
+                    title: "连接状态",
+                    value: codexStatusText.value,
+                    valueColor: codexStatusColor
                 )
             }
 
-            SettingsSectionCard(
-                title: "能力",
-                description: "这里展示当前 Codex 插件已经接入的运行能力。",
-                accent: NotchPilotTheme.codex
-            ) {
-                PluginCapabilityRow(
-                    icon: "checkmark.circle.fill",
-                    text: "Context monitoring via IPC",
-                    isEnabled: store.codexDesktopConnection.status == .connected
-                )
-                PluginCapabilityRow(
-                    icon: "checkmark.circle.fill",
-                    text: "Approval actions via IPC",
-                    isEnabled: store.codexDesktopConnection.status == .connected
-                )
-                PluginCapabilityRow(
-                    icon: "checkmark.circle.fill",
-                    text: "Session monitoring",
-                    isEnabled: true
+            if let message = store.codexDesktopConnection.message, message.isEmpty == false {
+                SettingsInlineMessage(
+                    text: message,
+                    color: store.codexDesktopConnection.status == .error ? .red : .secondary
                 )
             }
         }
@@ -374,62 +258,81 @@ struct CodexPluginSettingsView: View {
             store.synchronizeInstallationState()
         }
     }
+
+    private var codexStatusText: CodexSettingsStatusText {
+        CodexSettingsStatusText(
+            detected: store.codexDetected,
+            connection: store.codexDesktopConnection
+        )
+    }
+
+    private var codexStatusColor: Color {
+        store.codexDesktopConnection.status == .error ? .red : .secondary
+    }
 }
 
 struct SystemMonitorPluginSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
 
     var body: some View {
-        SettingsDetailScrollView(title: "System", subtitle: "展示 iStat 风格的系统监控 sneak 和展开仪表盘。") {
-            SettingsSectionCard(
-                title: "Sneak 预览",
-                description: "闭合态左右两侧各最多两个槽位；每个槽位都可以隐藏或自由选择指标。",
-                accent: NotchPilotTheme.systemMonitor
-            ) {
-                HStack {
-                    Text("启用系统监控 sneak")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+        SettingsPage(title: "System") {
+            SettingsGroupSection(title: "预览") {
+                SettingsToggleRow(
+                    title: "在 Notch 闭合态显示系统监控",
+                    isOn: $store.systemMonitorSneakPreviewEnabled
+                )
 
-                    Spacer()
+                SettingsRowDivider()
 
-                    Toggle("", isOn: $store.systemMonitorSneakPreviewEnabled)
-                        .labelsHidden()
+                SettingsPickerRow(
+                    title: "左侧槽位 1",
+                    selection: metricBinding(side: .left, index: 0),
+                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                ) {
+                    metricOptions
                 }
 
-                Divider()
+                SettingsRowDivider()
 
-                HStack(alignment: .top, spacing: 16) {
-                    SystemMonitorSneakSideSettings(
-                        title: "左侧",
-                        subtitle: "最多两个指标",
-                        firstMetric: metricBinding(side: .left, index: 0),
-                        secondMetric: metricBinding(side: .left, index: 1)
-                    )
-
-                    Divider()
-                        .frame(height: 112)
-
-                    SystemMonitorSneakSideSettings(
-                        title: "右侧",
-                        subtitle: "最多两个指标",
-                        firstMetric: metricBinding(side: .right, index: 0),
-                        secondMetric: metricBinding(side: .right, index: 1)
-                    )
+                SettingsPickerRow(
+                    title: "左侧槽位 2",
+                    selection: metricBinding(side: .left, index: 1),
+                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                ) {
+                    metricOptions
                 }
-                .disabled(store.systemMonitorSneakPreviewEnabled == false)
-                .opacity(store.systemMonitorSneakPreviewEnabled ? 1 : 0.45)
-            }
 
-            SettingsSectionCard(
-                title: "展示",
-                description: "闭合态使用纯文本槽位；展开态分为 CPU、内存、网络、硬盘状态四块。",
-                accent: NotchPilotTheme.systemMonitor
-            ) {
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Text-only sneak preview", isEnabled: true)
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Stable four-block expanded dashboard", isEnabled: true)
-                PluginCapabilityRow(icon: "checkmark.circle.fill", text: "Stats-style Mach/top/ps/nettop/IOKit/SMC data", isEnabled: true)
-                PluginCapabilityRow(icon: "thermometer.medium", text: "Temperature hidden when no real sensor is available", isEnabled: true)
+                SettingsRowDivider()
+
+                SettingsPickerRow(
+                    title: "右侧槽位 1",
+                    selection: metricBinding(side: .right, index: 0),
+                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                ) {
+                    metricOptions
+                }
+
+                SettingsRowDivider()
+
+                SettingsPickerRow(
+                    title: "右侧槽位 2",
+                    selection: metricBinding(side: .right, index: 1),
+                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                ) {
+                    metricOptions
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var metricOptions: some View {
+        Text("隐藏")
+            .tag(SystemMonitorMetric?.none)
+
+        ForEach(SystemMonitorMetric.allCases, id: \.self) { metric in
+            Text(metric.settingsTitle)
+                .tag(Optional(metric))
         }
     }
 
@@ -500,386 +403,21 @@ private enum SystemMonitorSneakSide {
     case right
 }
 
-private struct SystemMonitorSneakSideSettings: View {
-    let title: String
-    let subtitle: String
-    let firstMetric: Binding<SystemMonitorMetric?>
-    let secondMetric: Binding<SystemMonitorMetric?>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-
-                Text(subtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-
-            SystemMonitorSneakSlotPicker(title: "槽位 1", metric: firstMetric)
-            SystemMonitorSneakSlotPicker(title: "槽位 2", metric: secondMetric)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-}
-
-private struct SystemMonitorSneakSlotPicker: View {
-    let title: String
-    @Binding var metric: SystemMonitorMetric?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Picker("", selection: $metric) {
-                Label("隐藏", systemImage: "minus.circle")
-                    .tag(SystemMonitorMetric?.none)
-
-                ForEach(SystemMonitorMetric.allCases, id: \.self) { metric in
-                    Label(metric.settingsTitle, systemImage: metric.settingsIconSystemName)
-                        .tag(Optional(metric))
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: 150)
-        }
-    }
-}
-
 private extension SystemMonitorMetric {
     var settingsTitle: String {
         switch self {
         case .cpu:
             return "CPU"
         case .memory:
-            return "Memory"
+            return "内存"
         case .network:
-            return "Network"
+            return "网络"
         case .disk:
-            return "Disk free"
+            return "磁盘剩余"
         case .temperature:
-            return "Temperature"
+            return "温度"
         case .battery:
-            return "Battery"
+            return "电量"
         }
-    }
-
-    var settingsIconSystemName: String {
-        switch self {
-        case .cpu:
-            return "cpu"
-        case .memory:
-            return "memorychip"
-        case .network:
-            return "arrow.up.arrow.down"
-        case .disk:
-            return "internaldrive"
-        case .temperature:
-            return "thermometer.medium"
-        case .battery:
-            return "battery.75percent"
-        }
-    }
-}
-
-private struct SettingsDetailScrollView<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    let title: String
-    let subtitle: String
-    let content: Content
-
-    init(
-        title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.content = content()
-    }
-
-    var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-
-                    Text(subtitle)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(NotchPilotTheme.settingsTextSecondary(for: colorScheme))
-                }
-
-                content
-            }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(NotchPilotTheme.settingsCanvas(for: colorScheme))
-    }
-}
-
-private struct SettingsSectionCard<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    let title: String
-    let description: String
-    let accent: Color?
-    let content: Content
-
-    init(
-        title: String,
-        description: String,
-        accent: Color? = nil,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.description = description
-        self.accent = accent
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(NotchPilotTheme.settingsTextSecondary(for: colorScheme))
-
-                Text(description)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-
-                if let accent {
-                    RoundedRectangle(cornerRadius: 999, style: .continuous)
-                        .fill(accent.opacity(0.7))
-                        .frame(width: 44, height: 4)
-                }
-            }
-
-            NotchPilotToolPanel(accent: accent, cornerRadius: 24) {
-                VStack(alignment: .leading, spacing: 12) {
-                    content
-                }
-                .padding(20)
-            }
-        }
-    }
-}
-
-private struct PluginOverviewRow: View {
-    let plugin: SettingsPluginID
-    let statusText: String
-    let statusColor: Color
-    let summary: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            NotchPilotIconTile(systemName: plugin.iconSystemName, accent: plugin.accentColor, size: 34)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(plugin.title)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-
-                    NotchPilotStatusBadge(text: statusText, color: statusColor)
-                }
-
-                Text(summary)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
-}
-
-private struct ClaudeSettingsStatusCard: View {
-    let detected: Bool
-    let installed: Bool
-    let needsUpdate: Bool
-    let error: String?
-    let isWorking: Bool
-    let installAction: () -> Void
-    let uninstallAction: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                NotchPilotIconTile(systemName: "sparkles", accent: NotchPilotTheme.claude, size: 36)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("Claude Code")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-
-                        ClaudeStatusBadge(
-                            detected: detected,
-                            installed: installed,
-                            needsUpdate: needsUpdate
-                        )
-                    }
-
-                    Text("PermissionRequest + PreToolUse + PostToolUse + Session + Prompt hooks")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                if detected {
-                    if installed && needsUpdate {
-                        Button("更新 Hooks", action: installAction)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .tint(NotchPilotTheme.claude)
-                            .disabled(isWorking)
-                    } else if installed {
-                        Button("卸载", action: uninstallAction)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(isWorking)
-                    } else {
-                        Button("安装 Hooks", action: installAction)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .tint(NotchPilotTheme.claude)
-                            .disabled(isWorking)
-                    }
-                }
-            }
-
-            if let error, error.isEmpty == false {
-                Text(error)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.red)
-            }
-        }
-    }
-}
-
-private struct CodexSettingsStatusCard: View {
-    let detected: Bool
-    let connection: CodexDesktopConnectionState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                NotchPilotIconTile(systemName: "terminal", accent: NotchPilotTheme.codex, size: 36)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("OpenAI Codex")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-
-                        CodexStatusBadge(
-                            detected: detected,
-                            connection: connection
-                        )
-                    }
-
-                    Text("Desktop IPC context + approval actions")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            }
-
-            if let message = connection.message, message.isEmpty == false {
-                Text(message)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(connection.status == .error ? .red : .secondary)
-            }
-        }
-    }
-}
-
-private struct PluginCapabilityRow: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    let icon: String
-    let text: String
-    let isEnabled: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundStyle(isEnabled ? NotchPilotTheme.success : .secondary)
-
-            Text(text)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(isEnabled ? .primary : NotchPilotTheme.settingsTextSecondary(for: colorScheme))
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-private struct ClaudeStatusBadge: View {
-    let detected: Bool
-    let installed: Bool
-    let needsUpdate: Bool
-
-    var body: some View {
-        if detected == false {
-            SettingsBadge(text: "Not found", color: .secondary)
-        } else if installed == false {
-            SettingsBadge(text: "Not configured", color: NotchPilotTheme.warning)
-        } else if needsUpdate {
-            SettingsBadge(text: "Update available", color: NotchPilotTheme.warning)
-        } else {
-            SettingsBadge(text: "Connected", color: NotchPilotTheme.success)
-        }
-    }
-}
-
-private struct CodexStatusBadge: View {
-    let detected: Bool
-    let connection: CodexDesktopConnectionState
-
-    var body: some View {
-        if detected == false || connection.status == .notFound {
-            SettingsBadge(text: "Not found", color: .secondary)
-        } else {
-            switch connection.status {
-            case .disconnected:
-                SettingsBadge(text: "Disconnected", color: NotchPilotTheme.warning)
-            case .connecting:
-                SettingsBadge(text: "Connecting", color: NotchPilotTheme.warning)
-            case .connected:
-                SettingsBadge(text: "Connected", color: NotchPilotTheme.success)
-            case .error:
-                SettingsBadge(text: "Error", color: NotchPilotTheme.danger)
-            case .notFound:
-                SettingsBadge(text: "Not found", color: .secondary)
-            }
-        }
-    }
-}
-
-private struct SettingsBadge: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        NotchPilotStatusBadge(
-            text: text,
-            color: color
-        )
     }
 }

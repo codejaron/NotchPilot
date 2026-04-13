@@ -145,4 +145,20 @@ final class AIPluginSupportTests: XCTestCase {
         XCTAssertEqual(preview.lines.map(\.prefix), ["-", "+", " "])
         XCTAssertEqual(preview.lines.map(\.text), ["hi", "hello", "there"])
     }
+
+    func testCodexApprovalSneakNoticePrefersSurfaceSummaryOverCommandPreview() {
+        let notice = AIPluginApprovalSneakNotice(
+            pendingApprovals: [],
+            codexSurface: CodexActionableSurface(
+                id: "surface-1",
+                summary: "Run command?",
+                commandPreview: "/bin/zsh -lc \"echo test\"",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip"
+            )
+        )
+
+        XCTAssertEqual(notice?.count, 1)
+        XCTAssertEqual(notice?.text, "Run command?")
+    }
 }

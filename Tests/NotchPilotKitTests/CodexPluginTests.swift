@@ -2,6 +2,16 @@ import XCTest
 @testable import NotchPilotKit
 
 final class CodexPluginTests: XCTestCase {
+    private static let previewContext = NotchContext(
+        screenID: "test-screen",
+        notchState: .previewClosed,
+        notchGeometry: NotchGeometry(
+            compactSize: CGSize(width: 185, height: 32),
+            expandedSize: CGSize(width: 520, height: 320)
+        ),
+        isPrimaryScreen: true
+    )
+
     func testActionableSurfaceDrivesCompactActivityAndSessionSummary() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
@@ -39,10 +49,11 @@ final class CodexPluginTests: XCTestCase {
 
         XCTAssertEqual(activity?.host, .codex)
         XCTAssertEqual(activity?.label, "Action Needed")
-        XCTAssertEqual(activity?.approvalCount, 1)
+        XCTAssertEqual(activity?.approvalCount, 0)
         XCTAssertEqual(activity?.sessionTitle, "Write plan")
         XCTAssertEqual(summaries.first?.inputTokenCount, 120)
         XCTAssertEqual(summaries.first?.outputTokenCount, 45)
+        XCTAssertEqual(summaries.first?.approvalCount, 0)
         XCTAssertEqual(summaries.first?.codexSurfaceID, "surface-1")
         XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
     }
@@ -326,6 +337,95 @@ final class CodexPluginTests: XCTestCase {
         }
     }
 
+    func testActionableSurfaceDoesNotEmitSneakPeekWhenApprovalSneakSettingIsDisabled() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run { makeSettingsStore(approvalSneakNotificationsEnabled: false) }
+        let plugin = await MainActor.run {
+            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-disabled",
+                    summary: "Approval hidden",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }
+
+        XCTAssertTrue(receivedEvents.isEmpty)
+        XCTAssertFalse(hasPreview)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testReenablingApprovalSneakEmitsExistingCodexActionableSurface() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run { makeSettingsStore(approvalSneakNotificationsEnabled: false) }
+        let plugin = await MainActor.run {
+            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-reenable",
+                    summary: "Need approval",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let initialEvents = await MainActor.run { recorder.events }
+        XCTAssertTrue(initialEvents.isEmpty)
+
+        await MainActor.run {
+            settingsStore.approvalSneakNotificationsEnabled = true
+        }
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            XCTFail("expected a sneak peek request after reenabling codex approval sneak")
+            await MainActor.run {
+                bus.unsubscribe(token)
+            }
+            return
+        }
+
+        XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertTrue(request.isInteractive)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
     func testPerformingCodexPrimaryActionUsesIPCMonitor() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
@@ -361,4 +461,17 @@ private final class MutableDateProvider: @unchecked Sendable {
     init(_ value: Date) {
         self.value = value
     }
+}
+
+@MainActor
+private func makeSettingsStore(
+    approvalSneakNotificationsEnabled: Bool = true
+) -> SettingsStore {
+    let suiteName = "CodexPluginTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+
+    let store = SettingsStore(defaults: defaults)
+    store.approvalSneakNotificationsEnabled = approvalSneakNotificationsEnabled
+    return store
 }

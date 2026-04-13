@@ -95,6 +95,26 @@ enum NotchPilotTheme {
         colorScheme == .dark ? .white.opacity(0.62) : .secondary
     }
 
+    static func settingsWindowBackground(for colorScheme: ColorScheme) -> Color {
+        Color(nsColor: .windowBackgroundColor)
+    }
+
+    static func settingsGroupFill(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(nsColor: .controlBackgroundColor)
+            : Color(nsColor: .textBackgroundColor)
+    }
+
+    static func settingsGroupStroke(for colorScheme: ColorScheme) -> Color {
+        Color(nsColor: .separatorColor)
+            .opacity(colorScheme == .dark ? 0.55 : 0.45)
+    }
+
+    static func settingsDivider(for colorScheme: ColorScheme) -> Color {
+        Color(nsColor: .separatorColor)
+            .opacity(colorScheme == .dark ? 0.55 : 0.35)
+    }
+
     static func settingsSelectionFill(accent: Color, colorScheme: ColorScheme) -> Color {
         accent.opacity(colorScheme == .dark ? 0.22 : 0.16)
     }

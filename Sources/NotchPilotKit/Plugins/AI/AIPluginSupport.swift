@@ -8,6 +8,7 @@ protocol AIPluginRendering: NotchPlugin {
     var codexActionableSurface: CodexActionableSurface? { get }
     var currentCompactActivity: AIPluginCompactActivity? { get }
     var expandedSessionSummaries: [AIPluginExpandedSessionSummary] { get }
+    var approvalSneakNotificationsEnabled: Bool { get }
 
     func displayTitle(for session: AISession) -> String?
     func expandedSessionTitle(for session: AISession) -> String
@@ -48,8 +49,7 @@ extension AIPluginRendering {
     }
 
     var shouldRenderCompactPreview: Bool {
-        codexActionableSurface != nil
-            || pendingApprovals.isEmpty == false
+        (approvalSneakNotificationsEnabled && approvalDrivenCompactPreviewAvailable)
             || compactPreviewSession() != nil
     }
 
@@ -94,8 +94,12 @@ extension AIPluginRendering {
 
     func preferredCodexTitle(for surface: CodexActionableSurface?) -> String? { nil }
 
-    func approvalSneakNotice(isEnabled: Bool = SettingsStore.shared.approvalSneakNotificationsEnabled) -> AIPluginApprovalSneakNotice? {
-        guard isEnabled else {
+    var approvalSneakNotificationsEnabled: Bool {
+        SettingsStore.shared.approvalSneakNotificationsEnabled
+    }
+
+    func approvalSneakNotice() -> AIPluginApprovalSneakNotice? {
+        guard approvalSneakNotificationsEnabled else {
             return nil
         }
 
@@ -118,6 +122,10 @@ extension AIPluginRendering {
 
     func hostDisplayName(for host: AIHost) -> String {
         host == .claude ? "Claude Code" : "OpenAI Codex"
+    }
+
+    private var approvalDrivenCompactPreviewAvailable: Bool {
+        codexActionableSurface != nil || pendingApprovals.isEmpty == false
     }
 
     func formattedTokenCount(_ value: Int?) -> String {
@@ -190,6 +198,11 @@ struct AIPluginApprovalSneakNotice: Equatable {
     }
 
     private static func codexText(for surface: CodexActionableSurface) -> String {
+        let summary = surface.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if summary.isEmpty == false {
+            return summary
+        }
+
         if let commandPreview = surface.commandPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
            commandPreview.isEmpty == false {
             return commandPreview

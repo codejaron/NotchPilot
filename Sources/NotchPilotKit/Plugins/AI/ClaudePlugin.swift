@@ -20,12 +20,22 @@ public final class ClaudePlugin: AIPluginRendering {
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
     private let encoder = HookResponseEncoder()
+    private let settingsStore: SettingsStore
 
     private weak var bus: EventBus?
     private var responders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
+    private var settingsCancellables: Set<AnyCancellable> = []
 
-    public init() {}
+    public init(settingsStore: SettingsStore = .shared) {
+        self.settingsStore = settingsStore
+        settingsStore.$approvalSneakNotificationsEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                self?.handleApprovalSneakSettingChange(isEnabled: isEnabled)
+            }
+            .store(in: &settingsCancellables)
+    }
 
     public func activate(bus: EventBus) {
         self.bus = bus
@@ -57,7 +67,7 @@ public final class ClaudePlugin: AIPluginRendering {
                 respond(data)
             case let .awaitDecision(requestID):
                 responders[requestID] = respond
-                presentSneakPeek(for: requestID)
+                syncSneakPeek()
             }
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
@@ -73,7 +83,7 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         syncState()
-        dismissSneakPeek(for: requestID)
+        syncSneakPeek()
     }
 
     public func respond(to requestID: String, with decision: ApprovalDecision) {
@@ -124,11 +134,15 @@ public final class ClaudePlugin: AIPluginRendering {
 
         _ = runtime.resolvePendingApproval(requestID: requestID)
         syncState()
-        dismissSneakPeek(for: requestID)
+        syncSneakPeek()
+    }
+
+    var approvalSneakNotificationsEnabled: Bool {
+        settingsStore.approvalSneakNotificationsEnabled
     }
 
     var currentCompactActivity: AIPluginCompactActivity? {
-        if let approval = pendingApprovals.first {
+        if approvalSneakNotificationsEnabled, let approval = pendingApprovals.first {
             let matchingSession = sessions.first(where: { $0.id == approval.sessionID })
             return AIPluginCompactActivity(
                 host: approval.host,
@@ -213,6 +227,11 @@ public final class ClaudePlugin: AIPluginRendering {
         pendingApprovals = runtime.pendingApprovals
     }
 
+    private func handleApprovalSneakSettingChange(isEnabled: Bool) {
+        objectWillChange.send()
+        syncSneakPeek(approvalSneakNotificationsEnabled: isEnabled)
+    }
+
     private func presentSneakPeek(for requestID: String) {
         guard sneakPeekIDs[requestID] == nil else {
             return
@@ -235,6 +254,27 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         bus?.emit(.dismissSneakPeek(requestID: sneakPeekID, target: .allScreens))
+    }
+
+    private func syncSneakPeek() {
+        syncSneakPeek(approvalSneakNotificationsEnabled: approvalSneakNotificationsEnabled)
+    }
+
+    private func syncSneakPeek(approvalSneakNotificationsEnabled: Bool) {
+        let pendingRequestIDs = Set(pendingApprovals.map(\.requestID))
+
+        for requestID in Array(sneakPeekIDs.keys)
+        where approvalSneakNotificationsEnabled == false || pendingRequestIDs.contains(requestID) == false {
+            dismissSneakPeek(for: requestID)
+        }
+
+        guard approvalSneakNotificationsEnabled else {
+            return
+        }
+
+        for requestID in pendingApprovals.map(\.requestID) {
+            presentSneakPeek(for: requestID)
+        }
     }
 
     private func normalizedSessionTitle(_ rawTitle: String?) -> String? {

@@ -64,13 +64,17 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
         settingsStore.$systemMonitorSneakPreviewEnabled
             .removeDuplicates()
-            .sink { [weak self] _ in
-                self?.syncSneakPeekRequest()
+            .sink { [weak self] isEnabled in
+                self?.syncSneakPeekRequest(isEnabled: isEnabled)
             }
             .store(in: &settingsCancellables)
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
+        guard settingsStore.systemMonitorSneakPreviewEnabled else {
+            return nil
+        }
+
         let sideFrameWidth = SystemMonitorSneakPreviewLayout.sideFrameWidth(
             snapshot: snapshot,
             configuration: sneakConfiguration
@@ -102,7 +106,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
     public func activate(bus: EventBus) {
         self.bus = bus
         scheduleRefresh()
-        syncSneakPeekRequest()
+        syncSneakPeekRequest(isEnabled: settingsStore.systemMonitorSneakPreviewEnabled)
         refreshCancellable?.cancel()
         refreshCancellable = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
@@ -156,8 +160,8 @@ public final class SystemMonitorPlugin: NotchPlugin {
         snapshot = latestSnapshot
     }
 
-    private func syncSneakPeekRequest() {
-        guard settingsStore.systemMonitorSneakPreviewEnabled else {
+    private func syncSneakPeekRequest(isEnabled: Bool = SettingsStore.shared.systemMonitorSneakPreviewEnabled) {
+        guard isEnabled else {
             dismissSneakPeekRequest()
             return
         }
