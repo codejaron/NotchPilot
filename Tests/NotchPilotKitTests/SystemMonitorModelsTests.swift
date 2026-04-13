@@ -49,6 +49,24 @@ final class SystemMonitorModelsTests: XCTestCase {
         ])
     }
 
+    func testCPUBlockKeepsSixRowsToBalanceMemoryCardHeight() {
+        let block = SystemMonitorBlockFactory.cpuBlock(
+            usage: 0.22,
+            topItems: (1...8).map { index in
+                SystemMonitorTopItem(name: "Process \(index)", value: "\(index)%")
+            }
+        )
+
+        XCTAssertEqual(block.topItems.map(\.name), [
+            "Process 1",
+            "Process 2",
+            "Process 3",
+            "Process 4",
+            "Process 5",
+            "Process 6",
+        ])
+    }
+
     func testFormattersUseCompactMenuBarValues() {
         XCTAssertEqual(SystemMonitorFormat.percent(0.224), "22%")
         XCTAssertEqual(SystemMonitorFormat.percent(nil), "--")
@@ -57,10 +75,18 @@ final class SystemMonitorModelsTests: XCTestCase {
         XCTAssertEqual(SystemMonitorFormat.byteRate(0), "0 KB/s")
         XCTAssertEqual(SystemMonitorFormat.byteRate(2_000), "2 KB/s")
         XCTAssertEqual(SystemMonitorFormat.byteRate(12_400_000), "12.4 MB/s")
-        XCTAssertEqual(SystemMonitorFormat.compactByteRate(12_400_000), "12.4M")
+        XCTAssertEqual(SystemMonitorFormat.compactByteRate(2_000), "2 KB/s")
+        XCTAssertEqual(SystemMonitorFormat.compactByteRate(12_400_000), "12.4MB/s")
+        XCTAssertEqual(
+            SystemMonitorFormat.directionalRateText(
+                downloadBytesPerSecond: 2_000,
+                uploadBytesPerSecond: 1_000
+            ),
+            SystemMonitorDirectionalRateText(upload: "1 KB/s", download: "2 KB/s")
+        )
         XCTAssertEqual(
             SystemMonitorFormat.directionalByteRate(downloadBytesPerSecond: 2_000, uploadBytesPerSecond: 1_000),
-            "↓2 KB/s ↑1 KB/s"
+            "↑1 KB/s ↓2 KB/s"
         )
         XCTAssertEqual(SystemMonitorFormat.diskFree(49_000_000_000), "49.0 GB")
     }
@@ -97,9 +123,14 @@ final class SystemMonitorModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.blocks.map(\.kind), [.cpu, .memory, .network, .disk])
         XCTAssertEqual(snapshot.blocks.first(where: { $0.kind == .network })?.topItems.count, 3)
         XCTAssertEqual(snapshot.blocks.first(where: { $0.kind == .network })?.topItems.map(\.value), [
-            "↓0 KB/s ↑0 KB/s",
-            "↓0 KB/s ↑0 KB/s",
-            "↓0 KB/s ↑0 KB/s",
+            "0 KB/s",
+            "0 KB/s",
+            "0 KB/s",
+        ])
+        XCTAssertEqual(snapshot.blocks.first(where: { $0.kind == .network })?.topItems.map(\.secondaryValue), [
+            "0 KB/s",
+            "0 KB/s",
+            "0 KB/s",
         ])
         XCTAssertEqual(snapshot.cpuText, "--")
         XCTAssertEqual(snapshot.memoryText, "--")
@@ -113,15 +144,26 @@ final class SystemMonitorModelsTests: XCTestCase {
             downloadBytesPerSecond: 0,
             uploadBytesPerSecond: 1_000,
             topItems: [
-                SystemMonitorTopItem(id: "spotify-network", name: "Spotify", value: "↓1 KB/s ↑0 KB/s"),
+                SystemMonitorTopItem(
+                    id: "spotify-network",
+                    name: "Spotify",
+                    value: "0 KB/s",
+                    secondaryValue: "1 KB/s"
+                ),
             ]
         )
 
+        XCTAssertEqual(block.summary, "↑1 KB/s ↓0 KB/s")
         XCTAssertEqual(block.topItems.map(\.name), ["Spotify", "—", "—"])
         XCTAssertEqual(block.topItems.map(\.value), [
-            "↓1 KB/s ↑0 KB/s",
-            "↓0 KB/s ↑0 KB/s",
-            "↓0 KB/s ↑0 KB/s",
+            "0 KB/s",
+            "0 KB/s",
+            "0 KB/s",
+        ])
+        XCTAssertEqual(block.topItems.map(\.secondaryValue), [
+            "1 KB/s",
+            "0 KB/s",
+            "0 KB/s",
         ])
     }
 
@@ -133,11 +175,31 @@ final class SystemMonitorModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(block.title, "SYSTEM")
-        XCTAssertEqual(block.summary, "48.6 GB")
+        XCTAssertEqual(block.summary, "")
         XCTAssertEqual(block.detail, "")
         XCTAssertEqual(block.topItems, [
+            SystemMonitorTopItem(id: "system-disk-free", name: "Disk Free", value: "48.6 GB"),
             SystemMonitorTopItem(id: "system-temperature", name: "Temperature", value: "42°"),
             SystemMonitorTopItem(id: "system-battery", name: "Battery", value: "67%"),
         ])
+    }
+
+    func testDashboardLayoutInlinesSystemBlockWithNetworkColumn() {
+        let layout = SystemMonitorDashboardLayout(snapshot: SystemMonitorSnapshot.unavailable)
+
+        XCTAssertEqual(layout.primaryBlocks.map(\.kind), [.cpu, .memory, .network])
+        XCTAssertEqual(layout.inlineSystemBlock?.kind, .disk)
+    }
+
+    func testDashboardLayoutAllocatesMoreWidthToNetworkThanCPU() {
+        let layout = SystemMonitorDashboardLayout(snapshot: SystemMonitorSnapshot.unavailable)
+        let cpuWidth = layout.primaryBlockWidth(for: .cpu, availableWidth: 720, spacing: 8)
+        let memoryWidth = layout.primaryBlockWidth(for: .memory, availableWidth: 720, spacing: 8)
+        let networkWidth = layout.primaryBlockWidth(for: .network, availableWidth: 720, spacing: 8)
+
+        XCTAssertGreaterThan(networkWidth, cpuWidth)
+        XCTAssertGreaterThan(networkWidth, memoryWidth)
+        XCTAssertGreaterThan(layout.primaryBlockWidthWeight(for: .network), layout.primaryBlockWidthWeight(for: .cpu))
+        XCTAssertGreaterThan(layout.primaryBlockWidthWeight(for: .network), layout.primaryBlockWidthWeight(for: .memory))
     }
 }

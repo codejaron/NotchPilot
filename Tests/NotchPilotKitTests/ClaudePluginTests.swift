@@ -201,4 +201,38 @@ final class ClaudePluginTests: XCTestCase {
 
         XCTAssertFalse(hasPreview)
     }
+
+    func testVeryLongPermissionRequestPreviewCanGrowBeyondTwoLines() async {
+        let plugin = await MainActor.run { ClaudePlugin() }
+        let bus = await MainActor.run { EventBus() }
+        let longCommand = String(
+            repeating: "echo approval-preview-visibility-check ",
+            count: 12
+        )
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            plugin.handle(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "claude-long-preview",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "PermissionRequest",
+                      "session_id": "claude-session-long-preview",
+                      "tool_name": "Bash",
+                      "tool_input": { "command": "\(longCommand)" }
+                    }
+                    """
+                ),
+                respond: { _ in }
+            )
+        }
+
+        let previewHeight = await MainActor.run {
+            plugin.preview(context: Self.previewContext)?.height
+        }
+
+        XCTAssertGreaterThan(try XCTUnwrap(previewHeight), Self.previewContext.notchGeometry.compactSize.height + 44)
+    }
 }

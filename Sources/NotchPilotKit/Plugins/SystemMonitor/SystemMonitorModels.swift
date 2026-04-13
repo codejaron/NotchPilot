@@ -50,12 +50,20 @@ struct SystemMonitorTopItem: Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let value: String
+    let secondaryValue: String?
 
-    init(id: String? = nil, name: String, value: String) {
+    init(id: String? = nil, name: String, value: String, secondaryValue: String? = nil) {
         self.name = name
         self.value = value
-        self.id = id ?? "\(name)-\(value)"
+        self.secondaryValue = secondaryValue
+        let identityValue = secondaryValue.map { "\(value)-\($0)" } ?? value
+        self.id = id ?? "\(name)-\(identityValue)"
     }
+}
+
+struct SystemMonitorDirectionalRateText: Equatable, Sendable {
+    let upload: String
+    let download: String
 }
 
 struct SystemMonitorSneakNetworkRow: Equatable, Sendable {
@@ -64,7 +72,7 @@ struct SystemMonitorSneakNetworkRow: Equatable, Sendable {
 }
 
 struct SystemMonitorBlockSnapshot: Equatable, Identifiable, Sendable {
-    static let topItemLimit = 5
+    static let defaultTopItemLimit = 5
 
     let kind: SystemMonitorMetric
     let title: String
@@ -79,13 +87,14 @@ struct SystemMonitorBlockSnapshot: Equatable, Identifiable, Sendable {
         title: String,
         summary: String,
         detail: String,
-        topItems: [SystemMonitorTopItem]
+        topItems: [SystemMonitorTopItem],
+        topItemLimit: Int = Self.defaultTopItemLimit
     ) {
         self.kind = kind
         self.title = title
         self.summary = summary
         self.detail = detail
-        self.topItems = Array(topItems.prefix(Self.topItemLimit))
+        self.topItems = Array(topItems.prefix(topItemLimit))
     }
 }
 
@@ -128,6 +137,12 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
     var memoryUsageText: String { SystemMonitorFormat.percent(memoryUsage) }
     var downloadText: String { SystemMonitorFormat.compactByteRate(downloadBytesPerSecond) }
     var uploadText: String { SystemMonitorFormat.compactByteRate(uploadBytesPerSecond) }
+    var directionalRateText: SystemMonitorDirectionalRateText {
+        SystemMonitorFormat.directionalRateText(
+            downloadBytesPerSecond: downloadBytesPerSecond,
+            uploadBytesPerSecond: uploadBytesPerSecond
+        )
+    }
     var temperatureText: String { SystemMonitorFormat.temperature(temperatureCelsius) }
     var batteryText: String { SystemMonitorFormat.percent(batteryPercent) }
     var compactNetworkRows: [SystemMonitorSneakNetworkRow] {
@@ -147,7 +162,7 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
         diskFreeBytes: nil,
         batteryPercent: nil,
         blocks: [
-            SystemMonitorBlockSnapshot(kind: .cpu, title: "CPU", summary: "--", detail: "", topItems: []),
+            SystemMonitorBlockFactory.cpuBlock(usage: nil, topItems: []),
             SystemMonitorBlockFactory.memoryBlock(
                 memoryPressure: nil,
                 memoryUsage: nil,
@@ -168,7 +183,22 @@ struct SystemMonitorSnapshot: Equatable, Sendable {
 }
 
 enum SystemMonitorBlockFactory {
+    static let cpuTopItemCount = 6
     static let networkTopItemCount = 3
+
+    static func cpuBlock(
+        usage: Double?,
+        topItems: [SystemMonitorTopItem]
+    ) -> SystemMonitorBlockSnapshot {
+        SystemMonitorBlockSnapshot(
+            kind: .cpu,
+            title: "CPU",
+            summary: SystemMonitorFormat.percent(usage),
+            detail: "",
+            topItems: topItems,
+            topItemLimit: cpuTopItemCount
+        )
+    }
 
     static func memoryBlock(
         memoryPressure: Double?,
@@ -212,9 +242,14 @@ enum SystemMonitorBlockFactory {
         SystemMonitorBlockSnapshot(
             kind: .disk,
             title: "SYSTEM",
-            summary: SystemMonitorFormat.diskFree(diskFreeBytes),
+            summary: "",
             detail: "",
             topItems: [
+                SystemMonitorTopItem(
+                    id: "system-disk-free",
+                    name: "Disk Free",
+                    value: SystemMonitorFormat.diskFree(diskFreeBytes)
+                ),
                 SystemMonitorTopItem(
                     id: "system-temperature",
                     name: "Temperature",
@@ -236,13 +271,15 @@ enum SystemMonitorBlockFactory {
         }
 
         let placeholders = (visibleItems.count..<networkTopItemCount).map { index in
-            SystemMonitorTopItem(
+            let directionalRate = SystemMonitorFormat.directionalRateText(
+                downloadBytesPerSecond: 0,
+                uploadBytesPerSecond: 0
+            )
+            return SystemMonitorTopItem(
                 id: "network-placeholder-\(index)",
                 name: "—",
-                value: SystemMonitorFormat.directionalByteRate(
-                    downloadBytesPerSecond: 0,
-                    uploadBytesPerSecond: 0
-                )
+                value: directionalRate.upload,
+                secondaryValue: directionalRate.download
             )
         }
         return visibleItems + placeholders
@@ -284,17 +321,31 @@ enum SystemMonitorFormat {
         }
 
         if value >= 1_000_000 {
-            return String(format: "%.1fM", value / 1_000_000)
+            return String(format: "%.1fMB/s", value / 1_000_000)
         }
 
         return String(format: "%.0f KB/s", value / 1_000)
+    }
+
+    static func directionalRateText(
+        downloadBytesPerSecond: Double?,
+        uploadBytesPerSecond: Double?
+    ) -> SystemMonitorDirectionalRateText {
+        SystemMonitorDirectionalRateText(
+            upload: byteRate(uploadBytesPerSecond),
+            download: byteRate(downloadBytesPerSecond)
+        )
     }
 
     static func directionalByteRate(
         downloadBytesPerSecond: Double?,
         uploadBytesPerSecond: Double?
     ) -> String {
-        "↓\(byteRate(downloadBytesPerSecond)) ↑\(byteRate(uploadBytesPerSecond))"
+        let directionalRate = directionalRateText(
+            downloadBytesPerSecond: downloadBytesPerSecond,
+            uploadBytesPerSecond: uploadBytesPerSecond
+        )
+        return "↑\(directionalRate.upload) ↓\(directionalRate.download)"
     }
 
     static func diskFree(_ value: Int64?) -> String {

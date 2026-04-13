@@ -210,23 +210,76 @@ struct SystemMonitorDashboardView: View {
     let snapshot: SystemMonitorSnapshot
     let accentColor: Color
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8),
-    ]
-
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 8) {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(snapshot.blocks) { block in
-                        SystemMonitorBlockView(block: block, accentColor: accentColor)
-                    }
+        let layout = SystemMonitorDashboardLayout(snapshot: snapshot)
+
+        return GeometryReader { geometry in
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(layout.primaryBlocks) { block in
+                    SystemMonitorBlockView(
+                        block: block,
+                        accentColor: accentColor,
+                        networkSummary: block.kind == .network ? snapshot.directionalRateText : nil,
+                        supplementaryBlock: block.kind == .network ? layout.inlineSystemBlock : nil
+                    )
+                    .frame(
+                        width: layout.primaryBlockWidth(
+                            for: block.kind,
+                            availableWidth: geometry.size.width,
+                            spacing: 8
+                        ),
+                        alignment: .topLeading
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+struct SystemMonitorDashboardLayout: Equatable {
+    private static let primaryBlockWidthWeights: [SystemMonitorMetric: CGFloat] = [
+        .cpu: 0.86,
+        .memory: 0.94,
+        .network: 1.20,
+    ]
+
+    let primaryBlocks: [SystemMonitorBlockSnapshot]
+    let inlineSystemBlock: SystemMonitorBlockSnapshot?
+
+    init(snapshot: SystemMonitorSnapshot) {
+        let cpuBlock = snapshot.blocks.first { $0.kind == .cpu }
+        let memoryBlock = snapshot.blocks.first { $0.kind == .memory }
+        let networkBlock = snapshot.blocks.first { $0.kind == .network }
+
+        self.primaryBlocks = [cpuBlock, memoryBlock, networkBlock].compactMap { $0 }
+        self.inlineSystemBlock = snapshot.blocks.first { $0.kind == .disk }
+    }
+
+    func primaryBlockWidth(
+        for metric: SystemMonitorMetric,
+        availableWidth: CGFloat,
+        spacing: CGFloat
+    ) -> CGFloat {
+        guard primaryBlocks.isEmpty == false else {
+            return 0
+        }
+
+        let totalSpacing = CGFloat(max(primaryBlocks.count - 1, 0)) * spacing
+        let usableWidth = max(0, availableWidth - totalSpacing)
+        let totalWeight = primaryBlocks.reduce(CGFloat(0)) { partialResult, block in
+            partialResult + primaryBlockWidthWeight(for: block.kind)
+        }
+        guard totalWeight > 0 else {
+            return usableWidth / CGFloat(primaryBlocks.count)
+        }
+
+        return usableWidth * primaryBlockWidthWeight(for: metric) / totalWeight
+    }
+
+    func primaryBlockWidthWeight(for metric: SystemMonitorMetric) -> CGFloat {
+        Self.primaryBlockWidthWeights[metric] ?? 1
     }
 }
 
@@ -244,8 +297,111 @@ enum SystemMonitorDashboardTypography {
 private struct SystemMonitorBlockView: View {
     let block: SystemMonitorBlockSnapshot
     let accentColor: Color
+    var networkSummary: SystemMonitorDirectionalRateText? = nil
+    var supplementaryBlock: SystemMonitorBlockSnapshot? = nil
 
     var body: some View {
+        VStack(alignment: .leading, spacing: supplementaryBlock == nil ? 0 : 9) {
+            Group {
+                if block.kind == .disk {
+                    systemStatusBody
+                } else if block.kind == .network {
+                    networkBody
+                } else {
+                    standardBody
+                }
+            }
+
+            if let supplementaryBlock {
+                inlineSystemBody(supplementaryBlock)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(minHeight: blockMinHeight, alignment: .topLeading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                }
+        }
+    }
+
+    private var networkBody: some View {
+        let summary = networkSummary ?? SystemMonitorDirectionalRateText(upload: "--", download: "--")
+        let valueLayout = SystemMonitorNetworkValueLayout(
+            summary: summary,
+            topItems: block.topItems
+        )
+
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(block.title)
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundStyle(accentColor)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 6) {
+                    networkMetricValue(
+                        symbolSystemName: "arrow.up.right",
+                        value: summary.upload,
+                        fontSize: SystemMonitorDashboardTypography.networkSummaryFontSize,
+                        width: valueLayout.summaryUploadWidth
+                    )
+                    networkMetricValue(
+                        symbolSystemName: "arrow.down.left",
+                        value: summary.download,
+                        fontSize: SystemMonitorDashboardTypography.networkSummaryFontSize,
+                        width: valueLayout.summaryDownloadWidth
+                    )
+                }
+                .layoutPriority(1)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(block.topItems) { item in
+                    HStack(spacing: 5) {
+                        Text(item.name)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer(minLength: 4)
+
+                        HStack(spacing: 6) {
+                            networkMetricValue(
+                                symbolSystemName: "arrow.up.right",
+                                value: item.value,
+                                fontSize: SystemMonitorDashboardTypography.networkRowValueFontSize,
+                                width: valueLayout.uploadWidth
+                            )
+                            networkMetricValue(
+                                symbolSystemName: "arrow.down.left",
+                                value: item.secondaryValue ?? "--",
+                                fontSize: SystemMonitorDashboardTypography.networkRowValueFontSize,
+                                width: valueLayout.downloadWidth
+                            )
+                        }
+                        .layoutPriority(1)
+                    }
+                    .font(
+                        .system(
+                            size: SystemMonitorDashboardTypography.rowNameFontSize,
+                            weight: .semibold,
+                            design: .rounded
+                        )
+                    )
+                    .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                }
+            }
+        }
+    }
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(block.title)
@@ -295,16 +451,79 @@ private struct SystemMonitorBlockView: View {
                 }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(minHeight: 88, alignment: .topLeading)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+    }
+
+    private func networkMetricValue(
+        symbolSystemName: String,
+        value: String,
+        fontSize: CGFloat,
+        width: CGFloat?
+    ) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbolSystemName)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                .frame(width: SystemMonitorNetworkValueLayout.arrowWidth, alignment: .center)
+
+            Text(value)
+                .font(.system(size: fontSize, weight: .bold, design: .monospaced))
+                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .monospacedDigit()
+        }
+        .frame(width: width, alignment: .trailing)
+    }
+
+    private var systemStatusBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(block.title)
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(accentColor)
+
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(block.topItems) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.9))
+                            .lineLimit(1)
+
+                        Text(item.value)
+                            .font(.system(size: 15, weight: .bold, design: .monospaced))
+                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+        }
+    }
+
+    private func inlineSystemBody(_ systemBlock: SystemMonitorBlockSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(systemBlock.title)
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(accentColor)
+
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(systemBlock.topItems) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.system(size: 8, weight: .semibold, design: .rounded))
+                            .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.88))
+                            .lineLimit(1)
+
+                        Text(item.value)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 
@@ -331,5 +550,61 @@ private struct SystemMonitorBlockView: View {
 
     private var rowValueDesign: Font.Design {
         block.kind == .disk ? .rounded : .monospaced
+    }
+
+    private var blockMinHeight: CGFloat {
+        block.kind == .disk ? 72 : 88
+    }
+}
+
+private struct SystemMonitorNetworkValueLayout {
+    static let arrowWidth: CGFloat = 10
+    private static let reservedRateSample = "99.9 MB/s"
+    private static let metricSpacing: CGFloat = 3
+
+    let summaryUploadWidth: CGFloat
+    let summaryDownloadWidth: CGFloat
+    let uploadWidth: CGFloat
+    let downloadWidth: CGFloat
+
+    init(summary: SystemMonitorDirectionalRateText, topItems: [SystemMonitorTopItem]) {
+        let summaryFont = NSFont.monospacedSystemFont(
+            ofSize: SystemMonitorDashboardTypography.networkSummaryFontSize,
+            weight: .bold
+        )
+        let rowFont = NSFont.monospacedSystemFont(
+            ofSize: SystemMonitorDashboardTypography.networkRowValueFontSize,
+            weight: .bold
+        )
+        self.summaryUploadWidth = Self.metricWidth(
+            for: [summary.upload],
+            font: summaryFont
+        )
+        self.summaryDownloadWidth = Self.metricWidth(
+            for: [summary.download],
+            font: summaryFont
+        )
+        self.uploadWidth = Self.metricWidth(for: topItems.map(\.value), font: rowFont)
+        self.downloadWidth = Self.metricWidth(
+            for: topItems.map { $0.secondaryValue ?? "--" },
+            font: rowFont
+        )
+    }
+
+    private static func metricWidth(for values: [String], font: NSFont) -> CGFloat {
+        let largestValueWidth = max(
+            textWidth(reservedRateSample, font: font),
+            values.map { textWidth($0, font: font) }.max() ?? 0
+        )
+        return arrowWidth + metricSpacing + largestValueWidth
+    }
+
+    private static func textWidth(_ text: String, font: NSFont) -> CGFloat {
+        guard text.isEmpty == false else {
+            return 0
+        }
+
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        return ceil((text as NSString).size(withAttributes: attributes).width)
     }
 }

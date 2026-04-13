@@ -10,7 +10,7 @@ public final class ScreenSessionModel: ObservableObject {
         case programmatic
     }
 
-    private static let fallbackExpandedSize = CGSize(width: 520, height: 320)
+    private static let fallbackExpandedSize = CGSize(width: 720, height: 240)
     private static let hoverOpenDelay: Duration = .milliseconds(300)
     private static let hoverCloseDelay: Duration = .milliseconds(100)
     private static let horizontalHoverPadding: CGFloat = 30
@@ -50,7 +50,7 @@ public final class ScreenSessionModel: ObservableObject {
     public var geometry: NotchGeometry {
         let compactSize = descriptor.closedNotchSize ?? NotchSizing.fallbackCompactSize
         let expandedSize = CGSize(
-            width: max(Self.fallbackExpandedSize.width, compactSize.width + 220),
+            width: max(Self.fallbackExpandedSize.width, compactSize.width + 300),
             height: Self.fallbackExpandedSize.height
         )
 

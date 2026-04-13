@@ -24,16 +24,16 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         let metrics = NotchLayoutMetrics.resolve(session: session, plugins: [LayoutTestPlugin()])
 
-        XCTAssertEqual(metrics.displaySize.width, 520, accuracy: 0.1)
-        XCTAssertEqual(metrics.displaySize.height, 320, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.width, 520, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.height, 320, accuracy: 0.1)
+        XCTAssertEqual(metrics.displaySize.width, 720, accuracy: 0.1)
+        XCTAssertEqual(metrics.displaySize.height, 240, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.width, 720, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.height, 240, accuracy: 0.1)
     }
 
     func testExpandedPluginViewportIsOwnedByShellChrome() {
-        let viewportHeight = NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: 320)
+        let viewportHeight = NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: 240)
 
-        XCTAssertEqual(viewportHeight, 253, accuracy: 0.1)
+        XCTAssertEqual(viewportHeight, 186, accuracy: 0.1)
         XCTAssertEqual(NotchExpandedLayout.safeHorizontalPadding, 27, accuracy: 0.1)
     }
 

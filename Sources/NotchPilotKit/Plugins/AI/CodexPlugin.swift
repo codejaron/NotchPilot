@@ -100,12 +100,15 @@ public final class CodexPlugin: AIPluginRendering {
             compactPreviewLeftWidth(approvalCount: activity.approvalCount),
             compactPreviewTextWidth(durationText)
         )
-        let totalHeight = context.notchGeometry.compactSize.height
-            + (approvalNotice == nil ? 0 : CodexCompactPreviewLayout.approvalNoticeHeight)
-        let totalWidth =
-            10 * 2
-            + context.notchGeometry.compactSize.width
-            + sideFrameWidth * 2
+        let noticeLayout = AIPluginCompactApprovalNoticeLayout(
+            notice: approvalNotice,
+            baseTotalWidth:
+                10 * 2
+                + context.notchGeometry.compactSize.width
+                + sideFrameWidth * 2
+        )
+        let totalHeight = context.notchGeometry.compactSize.height + noticeLayout.height
+        let totalWidth = noticeLayout.totalWidth
 
         return NotchPluginPreview(
             width: totalWidth,
@@ -121,7 +124,8 @@ public final class CodexPlugin: AIPluginRendering {
                     totalWidth: totalWidth,
                     totalHeight: totalHeight,
                     notchWidth: context.notchGeometry.compactSize.width,
-                    notchHeight: context.notchGeometry.compactSize.height
+                    notchHeight: context.notchGeometry.compactSize.height,
+                    noticeLayout: noticeLayout
                 )
             )
         )
@@ -414,10 +418,6 @@ public final class CodexPlugin: AIPluginRendering {
     }
 }
 
-private enum CodexCompactPreviewLayout {
-    static let approvalNoticeHeight: CGFloat = 32
-}
-
 private struct CodexCompactPreviewView: View {
     let iconSystemName: String
     let accentColor: Color
@@ -429,6 +429,7 @@ private struct CodexCompactPreviewView: View {
     let totalHeight: CGFloat
     let notchWidth: CGFloat
     let notchHeight: CGFloat
+    let noticeLayout: AIPluginCompactApprovalNoticeLayout
 
     var body: some View {
         VStack(spacing: 0) {
@@ -483,10 +484,11 @@ private struct CodexCompactPreviewView: View {
         Text(notice.text)
             .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .lineLimit(1)
+            .lineLimit(noticeLayout.lineLimit)
             .truncationMode(.tail)
+            .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 6)
-            .frame(height: CodexCompactPreviewLayout.approvalNoticeHeight, alignment: .center)
+            .frame(height: noticeLayout.height, alignment: noticeLayout.isSingleLine ? .center : .top)
     }
 }

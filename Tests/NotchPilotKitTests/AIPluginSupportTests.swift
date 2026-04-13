@@ -161,4 +161,88 @@ final class AIPluginSupportTests: XCTestCase {
         XCTAssertEqual(notice?.count, 1)
         XCTAssertEqual(notice?.text, "Run command?")
     }
+
+    func testCodexApprovalDetailPresentationShowsSummaryAboveCommandPreview() {
+        let presentation = CodexApprovalDetailPresentation(
+            surface: CodexActionableSurface(
+                id: "surface-1",
+                summary: "Do you want me to run the broader notch tests?",
+                commandPreview: "/bin/zsh -lc 'swift test --filter \"NotchLayoutMetricsTests\"'",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip"
+            )
+        )
+
+        XCTAssertEqual(presentation.summaryText, "Do you want me to run the broader notch tests?")
+        XCTAssertEqual(presentation.commandText, "/bin/zsh -lc 'swift test --filter \"NotchLayoutMetricsTests\"'")
+    }
+
+    func testStandaloneCodexTextInputPresentationPlacesIndexInsideField() {
+        let presentation = CodexApprovalTextInputPresentation.standalone(
+            textInput: CodexSurfaceTextInput(
+                title: nil,
+                text: "",
+                isEditable: true
+            ),
+            index: 3
+        )
+
+        XCTAssertEqual(presentation.indexText, "3.")
+        XCTAssertEqual(presentation.indexPlacement, .insideFieldLeading)
+    }
+
+    func testFeedbackCodexTextInputPresentationPlacesOptionIndexInsideField() {
+        let presentation = CodexApprovalTextInputPresentation.feedback(
+            textInput: CodexSurfaceTextInput(
+                title: "Explain what to change",
+                text: "",
+                isEditable: true,
+                attachedOptionID: "feedback"
+            ),
+            option: CodexSurfaceOption(
+                id: "feedback",
+                index: 3,
+                title: "No, tell Codex how to adjust",
+                isSelected: true
+            )
+        )
+
+        XCTAssertEqual(presentation.indexText, "3.")
+        XCTAssertEqual(presentation.indexPlacement, .insideFieldLeading)
+        XCTAssertEqual(presentation.placeholder, "Explain what to change")
+    }
+
+    func testCompactApprovalNoticeLayoutUsesZeroHeightWithoutNotice() {
+        let layout = AIPluginCompactApprovalNoticeLayout(
+            notice: nil,
+            baseTotalWidth: 280
+        )
+
+        XCTAssertEqual(layout.totalWidth, 280, accuracy: 0.1)
+        XCTAssertEqual(layout.height, 0, accuracy: 0.1)
+        XCTAssertEqual(layout.lineLimit, 1)
+    }
+
+    func testCompactApprovalNoticeLayoutCanGrowBeyondTwoLines() {
+        let layout = AIPluginCompactApprovalNoticeLayout(
+            notice: AIPluginApprovalSneakNotice(
+                pendingApprovals: [],
+                codexSurface: CodexActionableSurface(
+                    id: "surface-long",
+                    summary: String(
+                        repeating: "Do you want me to run the broader notch verification command with the full approval preview visible? ",
+                        count: 4
+                    ),
+                    commandPreview: "/bin/zsh -lc 'swift test'",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            ),
+            baseTotalWidth: 280
+        )
+
+        XCTAssertGreaterThan(layout.totalWidth, 280)
+        XCTAssertGreaterThan(layout.height, 44)
+        XCTAssertNil(layout.lineLimit)
+    }
 }

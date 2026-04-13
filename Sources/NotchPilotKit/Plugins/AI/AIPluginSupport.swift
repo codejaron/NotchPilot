@@ -34,12 +34,21 @@ extension AIPluginRendering {
             return nil
         }
         let approvalNotice = approvalSneakNotice()
+        let noticeLayout = AIPluginCompactApprovalNoticeLayout(
+            notice: approvalNotice,
+            baseTotalWidth: metrics.totalWidth
+        )
 
         return NotchPluginPreview(
-            width: metrics.totalWidth,
-            height: context.notchGeometry.compactSize.height + (approvalNotice == nil ? 0 : AIPluginCompactLayout.approvalNoticeHeight),
+            width: noticeLayout.totalWidth,
+            height: context.notchGeometry.compactSize.height + noticeLayout.height,
             view: AnyView(
-                AIPluginCompactView(plugin: self, context: context, approvalNotice: approvalNotice)
+                AIPluginCompactView(
+                    plugin: self,
+                    context: context,
+                    approvalNotice: approvalNotice,
+                    noticeLayout: noticeLayout
+                )
             )
         )
     }
@@ -252,6 +261,61 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
 
     var hasTokenUsage: Bool {
         inputTokenCount != nil || outputTokenCount != nil
+    }
+}
+
+struct CodexApprovalDetailPresentation: Equatable {
+    let summaryText: String?
+    let commandText: String
+
+    init(surface: CodexActionableSurface) {
+        let trimmedSummary = surface.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCommand = surface.commandPreview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if trimmedCommand.isEmpty == false {
+            self.summaryText = trimmedSummary.isEmpty ? nil : trimmedSummary
+            self.commandText = trimmedCommand
+        } else {
+            self.summaryText = nil
+            self.commandText = trimmedSummary
+        }
+    }
+}
+
+enum CodexApprovalTextInputIndexPlacement: Equatable {
+    case outsideField
+    case insideFieldLeading
+}
+
+struct CodexApprovalTextInputPresentation: Equatable {
+    let indexText: String
+    let indexPlacement: CodexApprovalTextInputIndexPlacement
+    let placeholder: String
+
+    static func standalone(
+        textInput: CodexSurfaceTextInput,
+        index: Int
+    ) -> CodexApprovalTextInputPresentation {
+        CodexApprovalTextInputPresentation(
+            indexText: "\(index).",
+            indexPlacement: .insideFieldLeading,
+            placeholder: textInput.title?.isEmpty == false
+                ? (textInput.title ?? "")
+                : "否，请告知 Codex 如何调整"
+        )
+    }
+
+    static func feedback(
+        textInput: CodexSurfaceTextInput,
+        option: CodexSurfaceOption
+    ) -> CodexApprovalTextInputPresentation {
+        CodexApprovalTextInputPresentation(
+            indexText: "\(option.index).",
+            indexPlacement: .insideFieldLeading,
+            placeholder: textInput.title?.isEmpty == false
+                ? (textInput.title ?? option.title)
+                : option.title
+        )
     }
 }
 
@@ -574,7 +638,6 @@ struct AIPluginCompactMetrics {
 
 private enum AIPluginCompactLayout {
     static let outerPadding: CGFloat = 10
-    static let approvalNoticeHeight: CGFloat = 32
 }
 
 private enum AICompactTextMeasurer {
@@ -586,12 +649,72 @@ private enum AICompactTextMeasurer {
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         return ceil((text as NSString).size(withAttributes: attributes).width)
     }
+
+    static func height(_ text: String, font: NSFont, constrainedTo width: CGFloat) -> CGFloat {
+        guard text.isEmpty == false, width > 0 else {
+            return 0
+        }
+
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let bounds = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes
+        )
+        return ceil(bounds.height)
+    }
+}
+
+struct AIPluginCompactApprovalNoticeLayout: Equatable {
+    static let singleLineHeight: CGFloat = 32
+    static let horizontalInsets: CGFloat = 12
+    static let verticalInsets: CGFloat = 10
+    static let maxTextWidth: CGFloat = 520
+
+    let totalWidth: CGFloat
+    let height: CGFloat
+    let lineLimit: Int?
+
+    init(
+        notice: AIPluginApprovalSneakNotice?,
+        baseTotalWidth: CGFloat,
+        outerPadding: CGFloat = AIPluginCompactLayout.outerPadding
+    ) {
+        guard let text = notice?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+              text.isEmpty == false
+        else {
+            self.totalWidth = baseTotalWidth
+            self.height = 0
+            self.lineLimit = 1
+            return
+        }
+
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        let measuredTextWidth = AICompactTextMeasurer.width(text, font: font)
+        let baseTextWidth = max(1, baseTotalWidth - (outerPadding * 2) - Self.horizontalInsets)
+        let targetTextWidth = min(Self.maxTextWidth, max(baseTextWidth, measuredTextWidth))
+        let additionalWidth = max(0, targetTextWidth - baseTextWidth)
+        let measuredTextHeight = AICompactTextMeasurer.height(
+            text,
+            font: font,
+            constrainedTo: targetTextWidth
+        )
+
+        self.totalWidth = baseTotalWidth + additionalWidth
+        self.height = max(Self.singleLineHeight, measuredTextHeight + Self.verticalInsets)
+        self.lineLimit = nil
+    }
+
+    var isSingleLine: Bool {
+        height <= Self.singleLineHeight
+    }
 }
 
 private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     @ObservedObject var plugin: Plugin
     let context: NotchContext
     let approvalNotice: AIPluginApprovalSneakNotice?
+    let noticeLayout: AIPluginCompactApprovalNoticeLayout
 
     var body: some View {
         if let activity = plugin.currentCompactActivity,
@@ -617,8 +740,8 @@ private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
             }
             .padding(.horizontal, AIPluginCompactLayout.outerPadding)
             .frame(
-                width: metrics.totalWidth,
-                height: context.notchGeometry.compactSize.height + (approvalNotice == nil ? 0 : AIPluginCompactLayout.approvalNoticeHeight),
+                width: noticeLayout.totalWidth,
+                height: context.notchGeometry.compactSize.height + noticeLayout.height,
                 alignment: .top
             )
         } else {
@@ -660,11 +783,12 @@ private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
         Text(notice.text)
             .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .lineLimit(1)
+            .lineLimit(noticeLayout.lineLimit)
             .truncationMode(.tail)
+            .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 6)
-            .frame(height: AIPluginCompactLayout.approvalNoticeHeight, alignment: .center)
+            .frame(height: noticeLayout.height, alignment: noticeLayout.isSingleLine ? .center : .top)
     }
 
     private func tokenChip(symbol: String, value: Int?) -> some View {
@@ -1023,6 +1147,14 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         codexApprovalPrimaryColumn(surface)
     }
 
+    private func codexApprovalSummary(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func codexApprovalCommand(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -1039,14 +1171,14 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     }
 
     private func codexApprovalPrimaryColumn(_ surface: CodexActionableSurface) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let previewText = surface.commandPreview,
-               previewText.isEmpty == false {
-                codexApprovalCommand(previewText)
-            } else {
-                codexApprovalCommand(surface.summary)
+        let presentation = CodexApprovalDetailPresentation(surface: surface)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            if let summaryText = presentation.summaryText {
+                codexApprovalSummary(summaryText)
             }
 
+            codexApprovalCommand(presentation.commandText)
             codexSurfaceControls(surface)
             codexSurfaceButtons(surface)
         }
@@ -1217,17 +1349,22 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     ) -> some View {
         let focusTarget = CodexApprovalFocusTarget.textInput(optionID: option.id)
         let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
-        let placeholder = textInput.title?.isEmpty == false ? (textInput.title ?? option.title) : option.title
+        let presentation = CodexApprovalTextInputPresentation.feedback(textInput: textInput, option: option)
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
             verticalPadding: 12
         )
+        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading ? 28 : 0
 
-        return HStack(alignment: .top, spacing: 10) {
-            Text("\(option.index).")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
-                .frame(width: 20, alignment: .leading)
+        return ZStack(alignment: .topLeading) {
+            if presentation.indexPlacement == .insideFieldLeading {
+                Text(presentation.indexText)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.leading, 10)
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+            }
 
             ZStack(alignment: .topLeading) {
                 CodexApprovalTextEditor(
@@ -1251,6 +1388,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                         codexTextInputContentHeight = contentHeight
                     }
                 )
+                .padding(.leading, leadingInset)
                 .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1267,20 +1405,21 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
                 if isFocused == false,
                    currentCodexTextDraft(for: surface).isEmpty,
-                   placeholder.isEmpty == false {
-                    Text(placeholder)
+                   presentation.placeholder.isEmpty == false {
+                    Text(presentation.placeholder)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.3))
-                        .padding(.horizontal, 10)
+                        .padding(.leading, 10 + leadingInset)
+                        .padding(.trailing, 10)
                         .padding(.vertical, 10)
                         .allowsHitTesting(false)
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                focusCodexApproval(focusTarget, surface: surface)
-            }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            focusCodexApproval(focusTarget, surface: surface)
         }
     }
 
@@ -1291,17 +1430,22 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     ) -> some View {
         let focusTarget = CodexApprovalFocusTarget.textInput(optionID: nil)
         let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
-        let placeholder = textInput.title?.isEmpty == false ? (textInput.title ?? "") : "否，请告知 Codex 如何调整"
+        let presentation = CodexApprovalTextInputPresentation.standalone(textInput: textInput, index: index)
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
             verticalPadding: 12
         )
+        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading ? 28 : 0
 
-        return HStack(alignment: .top, spacing: 10) {
-            Text("\(index).")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
-                .frame(width: 20, alignment: .leading)
+        return ZStack(alignment: .topLeading) {
+            if presentation.indexPlacement == .insideFieldLeading {
+                Text(presentation.indexText)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.leading, 10)
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+            }
 
             ZStack(alignment: .topLeading) {
                 CodexApprovalTextEditor(
@@ -1325,6 +1469,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                         codexTextInputContentHeight = contentHeight
                     }
                 )
+                .padding(.leading, leadingInset)
                 .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1340,20 +1485,22 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
                 if isFocused == false,
                    currentCodexTextDraft(for: surface).isEmpty,
-                   placeholder.isEmpty == false {
-                    Text(placeholder)
+                   presentation.placeholder.isEmpty == false {
+                    Text(presentation.placeholder)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.3))
-                        .padding(.horizontal, 10)
+                        .padding(.leading, 10 + leadingInset)
+                        .padding(.trailing, 10)
                         .padding(.vertical, 10)
                         .allowsHitTesting(false)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                focusCodexApproval(focusTarget, surface: surface)
-            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            focusCodexApproval(focusTarget, surface: surface)
         }
     }
 

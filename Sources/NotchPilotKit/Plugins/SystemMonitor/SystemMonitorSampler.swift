@@ -550,7 +550,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 (name: name, cpuPercent: rows.reduce(0) { $0 + $1.cpuPercent })
             }
             .sorted { lhs, rhs in lhs.cpuPercent > rhs.cpuPercent }
-            .prefix(SystemMonitorBlockSnapshot.topItemLimit)
+            .prefix(SystemMonitorBlockFactory.cpuTopItemCount)
             .map { row in
                 SystemMonitorTopItem(
                     id: "\(row.name)-stats-cpu",
@@ -578,7 +578,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 (name: name, memoryBytes: rows.reduce(0) { total, row in Self.addClamped(total, row.memoryBytes) })
             }
             .sorted { lhs, rhs in lhs.memoryBytes > rhs.memoryBytes }
-            .prefix(SystemMonitorBlockSnapshot.topItemLimit)
+            .prefix(SystemMonitorBlockSnapshot.defaultTopItemLimit)
             .map { row in
                 SystemMonitorTopItem(
                     id: "\(row.name)-stats-memory",
@@ -1085,7 +1085,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 return (activity, cpuPercent)
             }
             .sorted { lhs, rhs in lhs.1 > rhs.1 }
-            .prefix(SystemMonitorBlockSnapshot.topItemLimit)
+            .prefix(SystemMonitorBlockFactory.cpuTopItemCount)
             .map { activity, cpuPercent in
                 SystemMonitorTopItem(
                     id: "\(activity.id)-cpu",
@@ -1098,7 +1098,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         let fallbackTopMemory = processActivities
             .filter { $0.memoryBytes > 0 }
             .sorted { lhs, rhs in lhs.memoryBytes > rhs.memoryBytes }
-            .prefix(SystemMonitorBlockSnapshot.topItemLimit)
+            .prefix(SystemMonitorBlockSnapshot.defaultTopItemLimit)
             .map { activity in
                 SystemMonitorTopItem(
                     id: "\(activity.id)-memory",
@@ -1112,22 +1112,21 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             .sorted { lhs, rhs in lhs.totalBytesPerSecond > rhs.totalBytesPerSecond }
             .prefix(SystemMonitorBlockFactory.networkTopItemCount)
             .map { activity in
-                SystemMonitorTopItem(
+                let directionalRate = SystemMonitorFormat.directionalRateText(
+                    downloadBytesPerSecond: activity.downloadBytesPerSecond,
+                    uploadBytesPerSecond: activity.uploadBytesPerSecond
+                )
+                return SystemMonitorTopItem(
                     id: "\(activity.key)-network",
                     name: activity.name,
-                    value: SystemMonitorFormat.directionalByteRate(
-                        downloadBytesPerSecond: activity.downloadBytesPerSecond,
-                        uploadBytesPerSecond: activity.uploadBytesPerSecond
-                    )
+                    value: directionalRate.upload,
+                    secondaryValue: directionalRate.download
                 )
             }
 
         return [
-            SystemMonitorBlockSnapshot(
-                kind: .cpu,
-                title: "CPU",
-                summary: SystemMonitorFormat.percent(cpuUsage),
-                detail: "",
+            SystemMonitorBlockFactory.cpuBlock(
+                usage: cpuUsage,
                 topItems: topCPU
             ),
             SystemMonitorBlockFactory.memoryBlock(

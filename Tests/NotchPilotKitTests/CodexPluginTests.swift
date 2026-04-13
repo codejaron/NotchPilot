@@ -375,6 +375,86 @@ final class CodexPluginTests: XCTestCase {
         }
     }
 
+    func testLongApprovalNoticeExpandsCompactPreviewWidthAndHeight() async {
+        let shortMonitor = SplitFakeCodexContextMonitor()
+        let longMonitor = SplitFakeCodexContextMonitor()
+        let shortPlugin = await MainActor.run {
+            CodexPlugin(codexMonitor: shortMonitor)
+        }
+        let longPlugin = await MainActor.run {
+            CodexPlugin(codexMonitor: longMonitor)
+        }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            shortPlugin.activate(bus: bus)
+            longPlugin.activate(bus: bus)
+
+            shortMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-short",
+                    summary: "Run test?",
+                    commandPreview: "/bin/zsh -lc 'swift test'",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+            longMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-long",
+                    summary: "Do you want me to run the broader notch and system-monitor test subset outside the sandbox to verify the tighter, higher shell layout end to end?",
+                    commandPreview: "/bin/zsh -lc 'swift test --filter \"SystemMonitorPluginTests|SystemMonitorModelsTests|NotchLayoutMetricsTests|ScreenSessionModelTests\"'",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let shortPreview = await MainActor.run {
+            let preview = shortPlugin.preview(context: Self.previewContext)
+            return (preview?.width, preview?.height)
+        }
+        let longPreview = await MainActor.run {
+            let preview = longPlugin.preview(context: Self.previewContext)
+            return (preview?.width, preview?.height)
+        }
+
+        XCTAssertNotNil(shortPreview.0)
+        XCTAssertNotNil(longPreview.0)
+        XCTAssertGreaterThan(try XCTUnwrap(longPreview.0), try XCTUnwrap(shortPreview.0))
+        XCTAssertGreaterThan(try XCTUnwrap(longPreview.1), try XCTUnwrap(shortPreview.1))
+    }
+
+    func testVeryLongApprovalNoticeCanGrowBeyondTwoLines() async {
+        let monitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(codexMonitor: monitor)
+        }
+        let bus = await MainActor.run { EventBus() }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            monitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-very-long",
+                    summary: String(
+                        repeating: "Do you want me to run the broader notch and approval verification workflow with the full sneak summary visible? ",
+                        count: 5
+                    ),
+                    commandPreview: "/bin/zsh -lc 'swift test'",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let previewHeight = await MainActor.run {
+            plugin.preview(context: Self.previewContext)?.height
+        }
+
+        XCTAssertGreaterThan(try XCTUnwrap(previewHeight), Self.previewContext.notchGeometry.compactSize.height + 44)
+    }
+
     func testReenablingApprovalSneakEmitsExistingCodexActionableSurface() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

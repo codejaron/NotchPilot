@@ -1,10 +1,10 @@
 import CoreGraphics
 
 enum NotchExpandedLayout {
-    static let topPadding: CGFloat = 7
-    static let bottomPadding: CGFloat = 16
+    static let topPadding: CGFloat = 4
+    static let bottomPadding: CGFloat = 10
     static let headerHeight: CGFloat = 32
-    static let headerContentSpacing: CGFloat = 12
+    static let headerContentSpacing: CGFloat = 8
     static let safeHorizontalPadding: CGFloat = 27
     static let pluginTabSize = CGSize(width: 34, height: 24)
     static let pluginTabIconSize: CGFloat = 13
