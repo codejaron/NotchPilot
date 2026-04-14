@@ -4,11 +4,14 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     case systemMonitor = "system-monitor"
     case claude
     case codex
+    case media = "media-playback"
 
     public var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .media:
+            return "Media"
         case .claude:
             return "Claude"
         case .codex:
@@ -20,6 +23,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
 
     var iconSystemName: String {
         switch self {
+        case .media:
+            return "play.circle.fill"
         case .claude:
             return "sparkles"
         case .codex:
@@ -31,6 +36,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
 
     var sidebarSubtitle: String {
         switch self {
+        case .media:
+            return "媒体播放"
         case .claude:
             return "Claude 集成"
         case .codex:
@@ -53,6 +60,30 @@ struct ClaudeSettingsStatusText: Equatable {
             value = "可更新"
         } else {
             value = "已连接"
+        }
+    }
+}
+
+struct MediaPluginSettingsView: View {
+    @ObservedObject private var store = SettingsStore.shared
+
+    var body: some View {
+        SettingsPage(title: "Media") {
+            SettingsGroupSection(title: "播放") {
+                SettingsToggleRow(
+                    title: "启用媒体插件",
+                    detail: "跟随当前 macOS Now Playing 播放会话。",
+                    isOn: $store.mediaPlaybackEnabled
+                )
+
+                SettingsRowDivider()
+
+                SettingsToggleRow(
+                    title: "播放变化时显示预览",
+                    detail: "在 Notch 闭合态显示当前播放信息。",
+                    isOn: $store.mediaPlaybackSneakPreviewEnabled
+                )
+            }
         }
     }
 }

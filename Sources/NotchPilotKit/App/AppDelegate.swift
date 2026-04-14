@@ -5,6 +5,7 @@ import Foundation
 public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let bus = EventBus()
     private let pluginManager = PluginManager()
+    private let mediaPlaybackPlugin = MediaPlaybackPlugin()
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
     private let systemMonitorPlugin = SystemMonitorPlugin()
@@ -138,7 +139,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func initialPlugins() -> [any NotchPlugin] {
-        [systemMonitorPlugin, claudePlugin, codexPlugin]
+        [systemMonitorPlugin, claudePlugin, codexPlugin, mediaPlaybackPlugin]
     }
 
     var registeredPluginIDsForTesting: [String] {

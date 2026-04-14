@@ -148,4 +148,28 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.leftMetrics, [])
         XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.rightMetrics, [])
     }
+
+    @MainActor
+    func testMediaPlaybackSettingsDefaultToEnabledAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.mediaPlaybackEnabled)
+        XCTAssertTrue(store.mediaPlaybackSneakPreviewEnabled)
+
+        store.mediaPlaybackEnabled = false
+        store.mediaPlaybackSneakPreviewEnabled = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(reloadedStore.mediaPlaybackEnabled)
+        XCTAssertFalse(reloadedStore.mediaPlaybackSneakPreviewEnabled)
+    }
 }

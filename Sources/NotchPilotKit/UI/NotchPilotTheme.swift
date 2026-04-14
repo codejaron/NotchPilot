@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 enum NotchPilotTheme {
+    static let mediaPlayback = Color(red: 0.24, green: 0.84, blue: 0.47)
     static let claude = Color(red: 0.80, green: 0.51, blue: 0.38)
     static let codex = Color(red: 0.37, green: 0.53, blue: 0.86)
     static let systemMonitor = Color(red: 0.36, green: 0.82, blue: 1.0)
@@ -25,6 +26,8 @@ enum NotchPilotTheme {
 
     static func brand(for plugin: SettingsPluginID) -> Color {
         switch plugin {
+        case .media:
+            return mediaPlayback
         case .claude:
             return claude
         case .codex:
@@ -35,6 +38,9 @@ enum NotchPilotTheme {
     }
 
     static func brand(for pluginID: String?) -> Color {
+        if pluginID == "media-playback" {
+            return mediaPlayback
+        }
         if pluginID == "system-monitor" {
             return systemMonitor
         }

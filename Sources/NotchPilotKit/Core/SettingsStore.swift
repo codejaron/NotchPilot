@@ -10,6 +10,8 @@ public final class SettingsStore: ObservableObject {
         static let autoStartSocket = "bridge.autoStartSocket"
         static let bridgeScriptPath = "bridge.scriptPath"
         static let approvalSneakNotificationsEnabled = "approval.sneakNotificationsEnabled"
+        static let mediaPlaybackEnabled = "media.enabled"
+        static let mediaPlaybackSneakPreviewEnabled = "media.sneakPreviewEnabled"
         static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
         static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
         static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
@@ -41,6 +43,18 @@ public final class SettingsStore: ObservableObject {
     @Published public var approvalSneakNotificationsEnabled: Bool {
         didSet {
             defaults.set(approvalSneakNotificationsEnabled, forKey: Key.approvalSneakNotificationsEnabled)
+        }
+    }
+
+    @Published var mediaPlaybackEnabled: Bool {
+        didSet {
+            defaults.set(mediaPlaybackEnabled, forKey: Key.mediaPlaybackEnabled)
+        }
+    }
+
+    @Published var mediaPlaybackSneakPreviewEnabled: Bool {
+        didSet {
+            defaults.set(mediaPlaybackSneakPreviewEnabled, forKey: Key.mediaPlaybackSneakPreviewEnabled)
         }
     }
 
@@ -87,6 +101,10 @@ public final class SettingsStore: ObservableObject {
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
         self.approvalSneakNotificationsEnabled =
             defaults.object(forKey: Key.approvalSneakNotificationsEnabled) as? Bool ?? true
+        self.mediaPlaybackEnabled =
+            defaults.object(forKey: Key.mediaPlaybackEnabled) as? Bool ?? true
+        self.mediaPlaybackSneakPreviewEnabled =
+            defaults.object(forKey: Key.mediaPlaybackSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakPreviewEnabled =
             defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)

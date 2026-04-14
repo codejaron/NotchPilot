@@ -84,6 +84,8 @@ public struct SettingsView: View {
                 GeneralSettingsTab()
             case let .plugin(plugin):
                 switch plugin {
+                case .media:
+                    MediaPluginSettingsView()
                 case .claude:
                     ClaudePluginSettingsView()
                 case .codex:

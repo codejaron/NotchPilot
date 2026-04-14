@@ -17,6 +17,7 @@ let package = Package(
             name: "NotchPilotKit",
             resources: [
                 .copy("Resources/notch-bridge.py"),
+                .copy("Resources/MediaRemoteAdapter"),
                 .process("Resources/Icons"),
             ]
         ),
