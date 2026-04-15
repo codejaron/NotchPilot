@@ -17,6 +17,20 @@ public struct MediaPlaybackSource: Equatable, Sendable {
             return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "Spotify")
         case "com.apple.Music":
             return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "Apple Music")
+        case "com.apple.iTunes":
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "iTunes")
+        case "com.tencent.qqmusic":
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "QQ Music")
+        case "com.netease.163music", "com.netease.cloudmusic":
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "NetEase Music")
+        case "com.kugou.music", "com.kugou.client":
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "Kugou")
+        case let bundleIdentifier? where bundleIdentifier.lowercased().contains("tidal"):
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "TIDAL")
+        case let bundleIdentifier? where bundleIdentifier.lowercased().contains("deezer"):
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "Deezer")
+        case let bundleIdentifier? where bundleIdentifier.lowercased().contains("cider"):
+            return MediaPlaybackSource(bundleIdentifier: bundleIdentifier, displayName: "Cider")
         case let bundleIdentifier? where bundleIdentifier.isEmpty == false:
             let fallbackName = bundleIdentifier
                 .split(separator: ".")

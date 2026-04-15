@@ -5,13 +5,15 @@ import Foundation
 public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let bus = EventBus()
     private let pluginManager = PluginManager()
-    private let mediaPlaybackPlugin = MediaPlaybackPlugin()
+    private let nowPlayingController = SharedNowPlayingController()
+    private lazy var mediaPlaybackPlugin = MediaPlaybackPlugin(monitor: nowPlayingController)
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
     private let systemMonitorPlugin = SystemMonitorPlugin()
     private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
+    private var desktopLyricsManager: DesktopLyricsManager?
     private var statusItemController: StatusItemController?
     private var socketServer: UnixDomainSocketServer?
     private var settingsObserver: NSObjectProtocol?
@@ -33,6 +35,22 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         self.multiScreenManager = multiScreenManager
         pluginManager.activateAll(using: bus)
 
+        let lyricsCache = LyricsCache(homeDirectoryURL: SettingsStore.shared.homeDirectoryURL)
+        let lyricsRemoteProvider = LyricsKitProvider()
+        let desktopLyricsManager = DesktopLyricsManager(
+            nowPlayingController: nowPlayingController,
+            settingsStore: .shared,
+            provider: CachedLyricsProvider(
+                cache: lyricsCache,
+                remoteProvider: lyricsRemoteProvider
+            ),
+            searchProvider: lyricsRemoteProvider,
+            cache: lyricsCache,
+            ignoredTrackStore: IgnoredLyricsTrackStore()
+        )
+        desktopLyricsManager.start()
+        self.desktopLyricsManager = desktopLyricsManager
+
         statusItemController = StatusItemController(
             openHandler: { [weak self] in
                 guard let self else { return }
@@ -46,6 +64,24 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             },
             closeHandler: { [weak self] in
                 self?.bus.emit(.closeRequested(target: .allScreens))
+            },
+            searchLyricsHandler: { [weak self] in
+                self?.desktopLyricsManager?.showLyricsSearchWindow()
+            },
+            ignoreCurrentTrackLyricsHandler: { [weak self] in
+                self?.desktopLyricsManager?.ignoreCurrentTrackLyrics()
+            },
+            revealCurrentLyricsInFinderHandler: { [weak self] in
+                self?.desktopLyricsManager?.revealCurrentLyricsInFinder()
+            },
+            canSearchCurrentTrackLyrics: { [weak self] in
+                self?.desktopLyricsManager?.canSearchCurrentTrackLyrics ?? false
+            },
+            canIgnoreCurrentTrackLyrics: { [weak self] in
+                self?.desktopLyricsManager?.canIgnoreCurrentTrackLyrics ?? false
+            },
+            canRevealCurrentLyricsInFinder: { [weak self] in
+                self?.desktopLyricsManager?.canRevealCurrentLyricsInFinder ?? false
             },
             settingsHandler: { [weak self] in
                 self?.settingsController.showSettings()
@@ -92,6 +128,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(socketPreferenceObserver)
         }
         socketServer?.stop()
+        desktopLyricsManager?.stop()
         multiScreenManager?.stop()
         pluginManager.deactivateAll()
     }

@@ -83,6 +83,14 @@ struct MediaPluginSettingsView: View {
                     detail: "在 Notch 闭合态显示当前播放信息。",
                     isOn: $store.mediaPlaybackSneakPreviewEnabled
                 )
+
+                SettingsRowDivider()
+
+                SettingsToggleRow(
+                    title: "桌面底部歌词卡片",
+                    detail: "在当前活跃屏幕底部显示当前歌词与下一句。",
+                    isOn: $store.desktopLyricsEnabled
+                )
             }
         }
     }

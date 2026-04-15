@@ -172,4 +172,25 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloadedStore.mediaPlaybackEnabled)
         XCTAssertFalse(reloadedStore.mediaPlaybackSneakPreviewEnabled)
     }
+
+    @MainActor
+    func testDesktopLyricsSettingDefaultsToDisabledAndPersistsChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(store.desktopLyricsEnabled)
+
+        store.desktopLyricsEnabled = true
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(reloadedStore.desktopLyricsEnabled)
+    }
 }
