@@ -89,16 +89,23 @@ extension LyricsTrackKey: Hashable {
 }
 
 struct TimedLyricLine: Equatable, Codable, Sendable {
+    struct InlineTag: Equatable, Codable, Sendable {
+        let index: Int
+        let timeOffset: TimeInterval
+    }
+
     let timestamp: TimeInterval
     let text: String
     let translation: String?
+    let inlineTags: [InlineTag]?
 
-    init(timestamp: TimeInterval, text: String, translation: String? = nil) {
+    init(timestamp: TimeInterval, text: String, translation: String? = nil, inlineTags: [InlineTag]? = nil) {
         self.timestamp = timestamp
         self.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         self.translation = translation?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
+        self.inlineTags = inlineTags
     }
 }
 
@@ -169,6 +176,10 @@ struct TimedLyrics: Equatable, Codable, Sendable {
     let service: String
     let lines: [TimedLyricLine]
 
+    var hasInlineTags: Bool {
+        lines.contains { ($0.inlineTags?.count ?? 0) >= 2 }
+    }
+
     init(
         title: String,
         artist: String,
@@ -201,11 +212,17 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             album: lyrics.idTags[.album]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             duration: lyrics.length,
             service: service,
-            lines: lyrics.lines.map {
-                TimedLyricLine(
-                    timestamp: $0.position,
-                    text: $0.content,
-                    translation: $0.attachments.translation()
+            lines: lyrics.lines.map { line in
+                let inlineTags: [TimedLyricLine.InlineTag]? = line.attachments.timetag.map { timetag in
+                    timetag.tags.map { tag in
+                        TimedLyricLine.InlineTag(index: tag.index, timeOffset: tag.time)
+                    }
+                }
+                return TimedLyricLine(
+                    timestamp: line.position,
+                    text: line.content,
+                    translation: line.attachments.translation(),
+                    inlineTags: inlineTags
                 )
             }
         )
@@ -218,6 +235,8 @@ struct TimedLyrics: Equatable, Codable, Sendable {
     struct LinePair: Equatable, Sendable {
         let current: TimedLyricLine
         let next: TimedLyricLine?
+        let lineTimeOffset: TimeInterval
+        let lineDuration: TimeInterval
     }
 
     func linePair(at time: TimeInterval) -> LinePair? {
@@ -228,7 +247,23 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         let currentIndex = lines.lastIndex(where: { $0.timestamp <= time }) ?? 0
         let currentLine = lines[currentIndex]
         let nextLine = lines[(currentIndex + 1)...].first
-        return LinePair(current: currentLine, next: nextLine)
+
+        let lineTimeOffset = max(0, time - currentLine.timestamp)
+        let lineDuration: TimeInterval
+        if let nextLine {
+            lineDuration = nextLine.timestamp - currentLine.timestamp
+        } else if let trackDuration = duration {
+            lineDuration = max(0, trackDuration - currentLine.timestamp)
+        } else {
+            lineDuration = 10.0
+        }
+
+        return LinePair(
+            current: currentLine,
+            next: nextLine,
+            lineTimeOffset: lineTimeOffset,
+            lineDuration: lineDuration
+        )
     }
 }
 
@@ -236,11 +271,13 @@ struct DesktopLyricsPresentation: Equatable, Sendable {
     let isVisible: Bool
     let currentLine: String?
     let nextLine: String?
+    let karaokeFraction: Double
 
     static let hidden = DesktopLyricsPresentation(
         isVisible: false,
         currentLine: nil,
-        nextLine: nil
+        nextLine: nil,
+        karaokeFraction: 1.0
     )
 }
 
@@ -248,19 +285,96 @@ enum DesktopLyricsPresentationResolver {
     static func resolve(
         playbackState: MediaPlaybackState,
         lyrics: TimedLyrics?,
+        offsetMilliseconds: Int = 0,
         at date: Date = Date()
     ) -> DesktopLyricsPresentation {
         guard case let .active(snapshot) = playbackState,
               snapshot.isPlaying,
-              let lyrics,
-              let pair = lyrics.linePair(at: snapshot.estimatedCurrentTime(at: date)) else {
+              let lyrics else {
             return .hidden
         }
+
+        let adjustedTime = snapshot.estimatedCurrentTime(at: date) + TimeInterval(offsetMilliseconds) / 1000.0
+        guard let pair = lyrics.linePair(at: adjustedTime) else {
+            return .hidden
+        }
+
+        let fraction = computeKaraokeFraction(
+            inlineTags: pair.current.inlineTags,
+            lineTimeOffset: pair.lineTimeOffset,
+            lineDuration: pair.lineDuration,
+            characterCount: pair.current.text.count
+        )
 
         return DesktopLyricsPresentation(
             isVisible: true,
             currentLine: pair.current.text,
-            nextLine: pair.current.translation ?? pair.next?.text
+            nextLine: pair.current.translation ?? pair.next?.text,
+            karaokeFraction: fraction
         )
+    }
+
+    private static func computeKaraokeFraction(
+        inlineTags: [TimedLyricLine.InlineTag]?,
+        lineTimeOffset: TimeInterval,
+        lineDuration: TimeInterval,
+        characterCount: Int
+    ) -> Double {
+        guard characterCount > 0 else { return 1.0 }
+
+        if let tags = inlineTags, tags.count >= 2 {
+            return interpolateCharacterProgress(
+                tags: tags,
+                timeOffset: lineTimeOffset,
+                totalCharacters: characterCount
+            )
+        }
+
+        guard lineDuration > 0 else { return 1.0 }
+        let charBasedDuration = Double(characterCount) * 0.3
+        let effectiveDuration = max(1.0, min(charBasedDuration, lineDuration))
+        return min(1.0, max(0.0, lineTimeOffset / effectiveDuration))
+    }
+
+    private static func interpolateCharacterProgress(
+        tags: [TimedLyricLine.InlineTag],
+        timeOffset: TimeInterval,
+        totalCharacters: Int
+    ) -> Double {
+        guard totalCharacters > 0, let first = tags.first, let last = tags.last else { return 1.0 }
+
+        if timeOffset <= first.timeOffset {
+            return Double(first.index) / Double(totalCharacters)
+        }
+
+        if timeOffset >= last.timeOffset {
+            let lastFraction = Double(last.index) / Double(totalCharacters)
+            let remainingChars = totalCharacters - last.index
+            guard remainingChars > 0 else { return 1.0 }
+
+            let avgDuration: TimeInterval
+            if last.index > first.index, last.timeOffset > first.timeOffset {
+                avgDuration = (last.timeOffset - first.timeOffset) / Double(last.index - first.index)
+            } else {
+                avgDuration = 0.15
+            }
+
+            let remainingDuration = avgDuration * Double(remainingChars)
+            let elapsed = timeOffset - last.timeOffset
+            let progress = min(1.0, elapsed / max(0.001, remainingDuration))
+            return lastFraction + (1.0 - lastFraction) * progress
+        }
+
+        for i in 0 ..< (tags.count - 1) {
+            let current = tags[i]
+            let next = tags[i + 1]
+            if timeOffset >= current.timeOffset && timeOffset < next.timeOffset {
+                let timeFraction = (timeOffset - current.timeOffset) / (next.timeOffset - current.timeOffset)
+                let charProgress = Double(current.index) + timeFraction * Double(next.index - current.index)
+                return min(1.0, max(0.0, charProgress / Double(totalCharacters)))
+            }
+        }
+
+        return 1.0
     }
 }

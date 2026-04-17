@@ -9,10 +9,12 @@ final class DesktopLyricsController: ObservableObject {
     private let provider: LyricsProviding
     private let cache: LyricsCaching
     private let ignoredTrackStore: LyricsTrackIgnoring
+    private let offsetStore: LyricsOffsetStoring
 
     private var currentPlaybackState: MediaPlaybackState = .idle
-    private var currentTrackKey: LyricsTrackKey?
+    private(set) var currentTrackKey: LyricsTrackKey?
     private var currentLyrics: TimedLyrics?
+    private(set) var currentOffsetMilliseconds: Int = 0
     private var loadTask: Task<Void, Never>?
     private var settingsCancellables: Set<AnyCancellable> = []
 
@@ -20,12 +22,14 @@ final class DesktopLyricsController: ObservableObject {
         settingsStore: SettingsStore = .shared,
         provider: LyricsProviding,
         cache: LyricsCaching,
-        ignoredTrackStore: LyricsTrackIgnoring
+        ignoredTrackStore: LyricsTrackIgnoring,
+        offsetStore: LyricsOffsetStoring = LyricsOffsetStore()
     ) {
         self.settingsStore = settingsStore
         self.provider = provider
         self.cache = cache
         self.ignoredTrackStore = ignoredTrackStore
+        self.offsetStore = offsetStore
 
         settingsStore.$desktopLyricsEnabled
             .combineLatest(settingsStore.$mediaPlaybackEnabled)
@@ -48,8 +52,20 @@ final class DesktopLyricsController: ObservableObject {
         presentation = DesktopLyricsPresentationResolver.resolve(
             playbackState: currentPlaybackState,
             lyrics: currentLyrics,
+            offsetMilliseconds: currentOffsetMilliseconds,
             at: date
         )
+    }
+
+    var canAdjustLyricsOffset: Bool {
+        currentTrackKey != nil && currentLyrics != nil
+    }
+
+    func setLyricsOffset(_ milliseconds: Int) {
+        guard let currentTrackKey else { return }
+        currentOffsetMilliseconds = milliseconds
+        offsetStore.setOffset(milliseconds, for: currentTrackKey)
+        refreshPresentation()
     }
 
     var currentLyricsFileURL: URL? {
@@ -132,6 +148,7 @@ final class DesktopLyricsController: ObservableObject {
         if currentTrackKey != trackKey {
             currentTrackKey = trackKey
             currentLyrics = nil
+            currentOffsetMilliseconds = offsetStore.offset(for: trackKey)
             presentation = .hidden
             loadTask?.cancel()
             loadTask = Task { @MainActor [weak self] in
@@ -147,7 +164,7 @@ final class DesktopLyricsController: ObservableObject {
         refreshPresentation()
     }
 
-    private func completeLyricsLoad(_ lyrics: TimedLyrics?, for trackKey: LyricsTrackKey) {
+    func completeLyricsLoad(_ lyrics: TimedLyrics?, for trackKey: LyricsTrackKey) {
         guard currentTrackKey == trackKey else {
             return
         }

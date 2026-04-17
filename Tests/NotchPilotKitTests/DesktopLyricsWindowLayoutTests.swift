@@ -5,12 +5,10 @@ import XCTest
 final class DesktopLyricsWindowLayoutTests: XCTestCase {
     func testWindowFrameIsPinnedToVisibleFrameBottomCenter() {
         let visibleFrame = CGRect(x: 0, y: 0, width: 1512, height: 944)
-        let cardSize = CGSize(width: 420, height: 88)
 
-        let frame = DesktopLyricsWindowLayout.frame(for: cardSize, in: visibleFrame)
+        let frame = DesktopLyricsWindowLayout.frame(in: visibleFrame, cardWidth: 420)
 
         XCTAssertEqual(frame.width, 420, accuracy: 0.1)
-        XCTAssertEqual(frame.height, 88, accuracy: 0.1)
         XCTAssertEqual(frame.midX, visibleFrame.midX, accuracy: 0.1)
         XCTAssertGreaterThan(frame.minY, visibleFrame.minY)
         XCTAssertLessThan(frame.maxY, visibleFrame.maxY)

@@ -1,5 +1,24 @@
 # Third-Party Notices
 
+## LyricsKit
+
+- Project: `MxIris-LyricsX-Project/LyricsKit`
+- Upstream: <https://github.com/MxIris-LyricsX-Project/LyricsKit>
+- Used revision: `9e52e0986b89df6d8815c823fac23b6a775c3b49`
+- Related project: `MxIris-LyricsX-Project/LyricsX`
+- Related upstream: <https://github.com/MxIris-LyricsX-Project/LyricsX>
+- License: `MPL-2.0`
+
+NotchPilot consumes LyricsKit as a Swift Package dependency. The NotchPilot
+sources in this repository do not include copied LyricsX source files; the
+dependency supplies lyrics search and parsing types used by the desktop lyrics
+feature.
+
+LyricsKit states that it is part of LyricsX and licensed under MPL 2.0. The
+MPL text is available from the upstream `LICENSE` file and
+<https://mozilla.org/MPL/2.0/>. Source for the exact dependency revision can be
+obtained from the upstream repository using the revision above.
+
 ## MediaRemoteAdapter
 
 - Project: `ungive/mediaremote-adapter`

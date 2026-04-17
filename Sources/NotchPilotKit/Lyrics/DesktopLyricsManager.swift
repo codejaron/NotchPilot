@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 final class DesktopLyricsManager {
@@ -15,12 +16,13 @@ final class DesktopLyricsManager {
     private var playbackCancellable: AnyCancellable?
     private var presentationCancellable: AnyCancellable?
     private var displayTimer: Timer?
+    private var isHighRefreshActive = false
     private var screenObserver: NSObjectProtocol?
 
     init(
         nowPlayingController: SharedNowPlayingController,
         settingsStore: SettingsStore = .shared,
-        provider: LyricsProviding,
+        provider: CachedLyricsProvider,
         searchProvider: LyricsSearching,
         cache: LyricsCaching,
         ignoredTrackStore: LyricsTrackIgnoring,
@@ -38,6 +40,12 @@ final class DesktopLyricsManager {
         )
         self.fileManager = fileManager
         self.lyricsSearchWindowController = lyricsSearchWindowController
+
+        provider.onUpgrade = { [weak self] lyrics, trackKey in
+            guard let self else { return }
+            self.controller.completeLyricsLoad(lyrics, for: trackKey)
+            self.refreshWindows()
+        }
     }
 
     func start() {
@@ -54,12 +62,7 @@ final class DesktopLyricsManager {
             self?.refreshWindows()
         }
 
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.controller.refreshPresentation()
-                self?.refreshWindows()
-            }
-        }
+        startSlowTimer()
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -78,6 +81,7 @@ final class DesktopLyricsManager {
     func stop() {
         displayTimer?.invalidate()
         displayTimer = nil
+        isHighRefreshActive = false
         playbackCancellable = nil
         presentationCancellable = nil
         if let screenObserver {
@@ -105,8 +109,9 @@ final class DesktopLyricsManager {
     }
 
     private func refreshWindows() {
+        let mouseLocation = NSEvent.mouseLocation
         let activeScreenID = ActiveDesktopLyricsScreenResolver.resolve(
-            mouseLocation: NSEvent.mouseLocation,
+            mouseLocation: mouseLocation,
             descriptors: NSScreen.screens.compactMap(screenDescriptor(for:))
         )
 
@@ -122,12 +127,51 @@ final class DesktopLyricsManager {
                 screenID == activeScreenID
 
             if shouldShow {
-                window.update(presentation: controller.presentation, visibleFrame: screen.visibleFrame)
+                let fontSize = CGFloat(settingsStore.desktopLyricsFontSize)
+                let highlightColor = Color(hex: settingsStore.desktopLyricsHighlightColorHex) ?? .green
+                let windowFrame = DesktopLyricsWindowLayout.frame(
+                    in: screen.visibleFrame,
+                    fontSize: fontSize
+                )
+                let isMouseHovering = windowFrame.contains(mouseLocation)
+                window.update(
+                    presentation: controller.presentation,
+                    visibleFrame: screen.visibleFrame,
+                    isMouseHovering: isMouseHovering,
+                    highlightColor: highlightColor,
+                    fontSize: fontSize
+                )
                 window.orderFrontRegardless()
             } else {
                 window.orderOut(nil)
             }
         }
+
+        updateRefreshRate()
+    }
+
+    private func updateRefreshRate() {
+        let needsHighRefresh = controller.presentation.isVisible
+        guard needsHighRefresh != isHighRefreshActive else { return }
+        isHighRefreshActive = needsHighRefresh
+        let interval: TimeInterval = needsHighRefresh ? 1.0 / 60.0 : 0.25
+        scheduleTimer(interval: interval)
+    }
+
+    private func startSlowTimer() {
+        scheduleTimer(interval: 0.25)
+    }
+
+    private func scheduleTimer(interval: TimeInterval) {
+        displayTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.controller.refreshPresentation()
+                self?.refreshWindows()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        displayTimer = timer
     }
 
     private func screenDescriptor(for screen: NSScreen) -> ScreenDescriptor? {
@@ -161,6 +205,19 @@ final class DesktopLyricsManager {
 
     var canRevealCurrentLyricsInFinder: Bool {
         controller.currentLyricsFileURL != nil
+    }
+
+    var canAdjustLyricsOffset: Bool {
+        controller.canAdjustLyricsOffset
+    }
+
+    var currentLyricsOffset: Int {
+        controller.currentOffsetMilliseconds
+    }
+
+    func setLyricsOffset(_ milliseconds: Int) {
+        controller.setLyricsOffset(milliseconds)
+        refreshWindows()
     }
 
     func showLyricsSearchWindow() {

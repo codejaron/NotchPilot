@@ -83,6 +83,15 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             canRevealCurrentLyricsInFinder: { [weak self] in
                 self?.desktopLyricsManager?.canRevealCurrentLyricsInFinder ?? false
             },
+            canAdjustLyricsOffset: { [weak self] in
+                self?.desktopLyricsManager?.canAdjustLyricsOffset ?? false
+            },
+            getLyricsOffset: { [weak self] in
+                self?.desktopLyricsManager?.currentLyricsOffset ?? 0
+            },
+            setLyricsOffset: { [weak self] value in
+                self?.desktopLyricsManager?.setLyricsOffset(value)
+            },
             settingsHandler: { [weak self] in
                 self?.settingsController.showSettings()
             },

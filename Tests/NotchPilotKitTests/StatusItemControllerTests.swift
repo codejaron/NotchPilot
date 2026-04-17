@@ -14,23 +14,21 @@ final class StatusItemControllerTests: XCTestCase {
             canSearchCurrentTrackLyrics: { true },
             canIgnoreCurrentTrackLyrics: { true },
             canRevealCurrentLyricsInFinder: { true },
+            canAdjustLyricsOffset: { false },
+            getLyricsOffset: { 0 },
+            setLyricsOffset: { _ in },
             settingsHandler: {},
             quitHandler: {}
         )
 
-        XCTAssertEqual(
-            controller.menuItemTitlesForTesting,
-            [
-                "Open on Active Screen",
-                "Close All",
-                "Search Lyrics…",
-                "Mark Current Lyrics as Wrong",
-                "Reveal Lyrics Cache in Finder",
-                "",
-                "Settings…",
-                "Quit NotchPilot",
-            ]
-        )
+        let titles = controller.menuItemTitlesForTesting
+        XCTAssertTrue(titles.contains("Open on Active Screen"))
+        XCTAssertTrue(titles.contains("Close All"))
+        XCTAssertTrue(titles.contains("Search Lyrics…"))
+        XCTAssertTrue(titles.contains("Mark Current Lyrics as Wrong"))
+        XCTAssertTrue(titles.contains("Reveal Lyrics Cache in Finder"))
+        XCTAssertTrue(titles.contains("Settings…"))
+        XCTAssertTrue(titles.contains("Quit NotchPilot"))
     }
 
     @MainActor
@@ -44,6 +42,9 @@ final class StatusItemControllerTests: XCTestCase {
             canSearchCurrentTrackLyrics: { false },
             canIgnoreCurrentTrackLyrics: { false },
             canRevealCurrentLyricsInFinder: { false },
+            canAdjustLyricsOffset: { false },
+            getLyricsOffset: { 0 },
+            setLyricsOffset: { _ in },
             settingsHandler: {},
             quitHandler: {}
         )

@@ -13,6 +13,8 @@ public final class SettingsStore: ObservableObject {
         static let mediaPlaybackEnabled = "media.enabled"
         static let mediaPlaybackSneakPreviewEnabled = "media.sneakPreviewEnabled"
         static let desktopLyricsEnabled = "media.desktopLyricsEnabled"
+        static let desktopLyricsHighlightColorHex = "media.desktopLyricsHighlightColorHex"
+        static let desktopLyricsFontSize = "media.desktopLyricsFontSize"
         static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
         static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
         static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
@@ -65,6 +67,18 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var desktopLyricsHighlightColorHex: String {
+        didSet {
+            defaults.set(desktopLyricsHighlightColorHex, forKey: Key.desktopLyricsHighlightColorHex)
+        }
+    }
+
+    @Published var desktopLyricsFontSize: Double {
+        didSet {
+            defaults.set(desktopLyricsFontSize, forKey: Key.desktopLyricsFontSize)
+        }
+    }
+
     @Published var systemMonitorSneakPreviewEnabled: Bool {
         didSet {
             defaults.set(systemMonitorSneakPreviewEnabled, forKey: Key.systemMonitorSneakPreviewEnabled)
@@ -114,6 +128,10 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.mediaPlaybackSneakPreviewEnabled) as? Bool ?? true
         self.desktopLyricsEnabled =
             defaults.object(forKey: Key.desktopLyricsEnabled) as? Bool ?? false
+        self.desktopLyricsHighlightColorHex =
+            defaults.string(forKey: Key.desktopLyricsHighlightColorHex) ?? "#4ADE80"
+        self.desktopLyricsFontSize =
+            defaults.object(forKey: Key.desktopLyricsFontSize) as? Double ?? 28
         self.systemMonitorSneakPreviewEnabled =
             defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)

@@ -92,6 +92,37 @@ struct MediaPluginSettingsView: View {
                     isOn: $store.desktopLyricsEnabled
                 )
             }
+
+            SettingsGroupSection(title: "歌词样式") {
+                SettingsRow(
+                    title: "高亮颜色",
+                    detail: "歌词 KTV 进度填充颜色。",
+                    isEnabled: store.desktopLyricsEnabled
+                ) {
+                    ColorPicker(
+                        "",
+                        selection: Binding(
+                            get: { Color(hex: store.desktopLyricsHighlightColorHex) ?? .green },
+                            set: { store.desktopLyricsHighlightColorHex = $0.hexString }
+                        ),
+                        supportsOpacity: false
+                    )
+                    .labelsHidden()
+                    .disabled(!store.desktopLyricsEnabled)
+                }
+
+                SettingsRowDivider()
+
+                SettingsRow(
+                    title: "字体大小",
+                    detail: "当前歌词行文字大小（\(Int(store.desktopLyricsFontSize))pt）。",
+                    isEnabled: store.desktopLyricsEnabled
+                ) {
+                    Slider(value: $store.desktopLyricsFontSize, in: 18...42, step: 2)
+                        .frame(width: 170)
+                        .disabled(!store.desktopLyricsEnabled)
+                }
+            }
         }
     }
 }
