@@ -49,8 +49,17 @@ final class DesktopLyricsController: ObservableObject {
     }
 
     func refreshPresentation(at date: Date = Date()) {
+        guard settingsStore.mediaPlaybackEnabled,
+              settingsStore.desktopLyricsEnabled,
+              case let .active(snapshot) = currentPlaybackState,
+              snapshot.isPlaying,
+              DesktopLyricsPlaybackFilter.isEligible(snapshot) else {
+            presentation = .hidden
+            return
+        }
+
         presentation = DesktopLyricsPresentationResolver.resolve(
-            playbackState: currentPlaybackState,
+            playbackState: .active(snapshot),
             lyrics: currentLyrics,
             offsetMilliseconds: currentOffsetMilliseconds,
             at: date
@@ -128,10 +137,18 @@ final class DesktopLyricsController: ObservableObject {
             return
         }
 
-        guard case let .active(snapshot) = currentPlaybackState,
-              snapshot.isPlaying,
-              DesktopLyricsPlaybackFilter.isEligible(snapshot) else {
+        guard case let .active(snapshot) = currentPlaybackState else {
+            resetPresentation(clearLyrics: true)
+            return
+        }
+
+        guard snapshot.isPlaying else {
             resetPresentation(clearLyrics: false)
+            return
+        }
+
+        guard DesktopLyricsPlaybackFilter.isEligible(snapshot) else {
+            resetPresentation(clearLyrics: true)
             return
         }
 

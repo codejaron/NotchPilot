@@ -807,8 +807,12 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     @State private var codexTextDraftSurfaceID: String?
     @State private var codexTextDraft = ""
     @State private var codexTextInputContentHeight: CGFloat = 0
+    @State private var claudeFeedbackRequestID: String?
+    @State private var claudeFeedbackText = ""
+    @State private var claudeFeedbackContentHeight: CGFloat = 0
 
     private let codexTextInputFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private let claudeFeedbackFont = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -829,6 +833,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         }
         .onChange(of: plugin.pendingApprovals.map(\.requestID)) { _, requestIDs in
             approvalReviewState.syncPendingRequestIDs(requestIDs)
+            if let claudeFeedbackRequestID, requestIDs.contains(claudeFeedbackRequestID) == false {
+                resetClaudeFeedback()
+            }
         }
         .onChange(of: plugin.codexActionableSurface?.id) { _, surfaceID in
             if surfaceID == nil {
@@ -1520,6 +1527,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         VStack(alignment: .leading, spacing: 10) {
             codexApprovalCommand(approvalCommandText(for: approval))
             approvalButtons(approval)
+            if claudeFeedbackRequestID == approval.requestID {
+                approvalFeedbackInput(approval)
+            }
         }
     }
 
@@ -1553,7 +1563,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         return LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
             ForEach(approval.availableActions) { action in
                 Button {
-                    plugin.respond(to: approval.requestID, with: action)
+                    handleApprovalAction(action, approval: approval)
                 } label: {
                     Text(action.title)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -1577,6 +1587,120 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func approvalFeedbackInput(_ approval: PendingApproval) -> some View {
+        let sizing = CodexApprovalTextInputSizing(
+            lineHeight: claudeFeedbackFont.lineHeight,
+            verticalPadding: 12
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                CodexApprovalTextEditor(
+                    text: claudeFeedbackBinding(),
+                    isEditable: true,
+                    isFocused: claudeFeedbackRequestID == approval.requestID,
+                    font: claudeFeedbackFont,
+                    onFocus: {
+                        claudeFeedbackRequestID = approval.requestID
+                    },
+                    onSubmit: {
+                        submitClaudeFeedback(for: approval)
+                    },
+                    onMoveUpBoundary: {},
+                    onMoveDownBoundary: {},
+                    onContentHeightChange: { contentHeight in
+                        claudeFeedbackContentHeight = contentHeight
+                    }
+                )
+                .frame(height: sizing.height(forContentHeight: claudeFeedbackContentHeight))
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(NotchPilotTheme.claude.opacity(0.42), lineWidth: 1)
+                )
+
+                if claudeFeedbackText.isEmpty {
+                    Text("Tell Claude what to change")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 10)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button {
+                    submitClaudeFeedback(for: approval)
+                } label: {
+                    Text("Send")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(NotchPilotTheme.danger.opacity(0.5))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func handleApprovalAction(_ action: ApprovalAction, approval: PendingApproval) {
+        switch action.payload {
+        case .claudeDenyWithFeedback:
+            claudeFeedbackRequestID = approval.requestID
+            claudeFeedbackText = ""
+            claudeFeedbackContentHeight = 0
+        case .claude:
+            resetClaudeFeedback()
+            plugin.respond(to: approval.requestID, with: action)
+        }
+    }
+
+    private func submitClaudeFeedback(for approval: PendingApproval) {
+        let action = ApprovalAction(
+            id: "claude-deny-feedback-submit",
+            title: "No, tell Claude why",
+            style: .destructive,
+            payload: .claude(
+                ApprovalDecision(
+                    behavior: .deny,
+                    feedbackText: claudeFeedbackText
+                )
+            )
+        )
+        resetClaudeFeedback()
+        plugin.respond(to: approval.requestID, with: action)
+    }
+
+    private func claudeFeedbackBinding() -> Binding<String> {
+        Binding(
+            get: {
+                claudeFeedbackText
+            },
+            set: { newValue in
+                claudeFeedbackText = newValue
+            }
+        )
+    }
+
+    private func resetClaudeFeedback() {
+        claudeFeedbackRequestID = nil
+        claudeFeedbackText = ""
+        claudeFeedbackContentHeight = 0
     }
 
     private func networkApprovalSummary(_ context: NetworkApprovalContext) -> String {

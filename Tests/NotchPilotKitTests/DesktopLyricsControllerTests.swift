@@ -92,6 +92,55 @@ final class DesktopLyricsControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testControllerKeepsLyricsHiddenWhenPlaybackSwitchesToIneligibleSource() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = DesktopLyricsControllerTestProvider(
+            result: TimedLyrics(
+                title: "Song",
+                artist: "Artist",
+                album: "Album",
+                duration: 200,
+                service: "cache",
+                lines: [
+                    TimedLyricLine(timestamp: 0, text: "line 1"),
+                    TimedLyricLine(timestamp: 15, text: "line 2"),
+                ]
+            )
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore
+        )
+
+        controller.handlePlaybackState(Self.snapshot(currentTime: 16, isPlaying: true))
+        await Task.yield()
+        XCTAssertTrue(controller.presentation.isVisible)
+
+        controller.handlePlaybackState(
+            Self.snapshot(
+                bundleIdentifier: "com.google.Chrome",
+                title: "Video Title",
+                artist: "Chrome",
+                currentTime: 20,
+                isPlaying: true
+            )
+        )
+        XCTAssertFalse(controller.presentation.isVisible)
+
+        controller.refreshPresentation(at: Date(timeIntervalSince1970: 120))
+
+        XCTAssertFalse(controller.presentation.isVisible)
+        XCTAssertNil(controller.presentation.currentLine)
+        XCTAssertEqual(provider.requestedSnapshots.count, 1)
+    }
+
+    @MainActor
     func testControllerSkipsLookupWhenDesktopLyricsDisabled() async {
         let store = makeSettingsStore()
         store.mediaPlaybackEnabled = true
@@ -233,11 +282,35 @@ final class DesktopLyricsControllerTests: XCTestCase {
         .active(activeSnapshot(currentTime: currentTime, isPlaying: isPlaying))
     }
 
-    private static func activeSnapshot(currentTime: TimeInterval, isPlaying: Bool) -> MediaPlaybackSnapshot {
+    private static func snapshot(
+        bundleIdentifier: String,
+        title: String,
+        artist: String,
+        currentTime: TimeInterval,
+        isPlaying: Bool
+    ) -> MediaPlaybackState {
+        .active(
+            activeSnapshot(
+                bundleIdentifier: bundleIdentifier,
+                title: title,
+                artist: artist,
+                currentTime: currentTime,
+                isPlaying: isPlaying
+            )
+        )
+    }
+
+    private static func activeSnapshot(
+        bundleIdentifier: String = "com.spotify.client",
+        title: String = "Song",
+        artist: String = "Artist",
+        currentTime: TimeInterval,
+        isPlaying: Bool
+    ) -> MediaPlaybackSnapshot {
         MediaPlaybackSnapshot(
-            source: .fromBundleIdentifier("com.spotify.client"),
-            title: "Song",
-            artist: "Artist",
+            source: .fromBundleIdentifier(bundleIdentifier),
+            title: title,
+            artist: artist,
             album: "Album",
             artworkData: nil,
             currentTime: currentTime,

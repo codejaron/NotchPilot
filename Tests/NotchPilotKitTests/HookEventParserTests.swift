@@ -122,4 +122,149 @@ final class HookEventParserTests: XCTestCase {
 
         XCTAssertThrowsError(try HookEventParser().parse(frame: frame))
     }
+
+    func testPreToolUseReadToolDoesNotRequireResponse() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-read",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Read",
+              "tool_input": { "file_path": "/tmp/demo.txt" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.eventType, .preToolUse)
+        XCTAssertFalse(envelope.needsResponse)
+    }
+
+    func testPreToolUseWebFetchRequiresResponseAndExtractsDomain() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-web-fetch",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "WebFetch",
+              "tool_input": { "url": "https://docs.anthropic.com/en/docs/claude-code/hooks" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertTrue(envelope.needsResponse)
+
+        guard case let .permissionRequest(payload) = envelope.payload else {
+            return XCTFail("expected permission request payload")
+        }
+
+        XCTAssertEqual(payload.toolKind, .webFetch)
+        XCTAssertEqual(payload.webFetchURL, "https://docs.anthropic.com/en/docs/claude-code/hooks")
+        XCTAssertEqual(payload.webFetchDomain, "docs.anthropic.com")
+    }
+
+    func testPreToolUseEditToolRequiresResponseInDefaultMode() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-edit",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Edit",
+              "tool_input": { "file_path": "/tmp/demo.txt", "new_string": "hi" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertTrue(envelope.needsResponse)
+    }
+
+    func testPreToolUseEditToolSkipsResponseInAcceptEditsMode() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-accept-edits",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Edit",
+              "permission_mode": "acceptEdits",
+              "tool_input": { "file_path": "/tmp/demo.txt", "new_string": "hi" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertFalse(envelope.needsResponse)
+    }
+
+    func testPreToolUseBashSkipsResponseInBypassMode() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-bypass",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Bash",
+              "permission_mode": "bypassPermissions",
+              "tool_input": { "command": "ls" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertFalse(envelope.needsResponse)
+    }
+
+    func testPreToolUseBashInPlanModeSkipsResponse() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-plan",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Bash",
+              "permission_mode": "plan",
+              "tool_input": { "command": "ls" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertFalse(envelope.needsResponse)
+    }
+
+    func testPermissionRequestAlwaysRequiresResponseEvenForReadOnlyTools() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-perm-read",
+            rawJSON: """
+            {
+              "hook_event_name": "PermissionRequest",
+              "session_id": "claude-session",
+              "tool_name": "Read",
+              "tool_input": { "file_path": "/tmp/demo.txt" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertTrue(envelope.needsResponse)
+    }
 }

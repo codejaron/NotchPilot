@@ -19,7 +19,8 @@ public final class ClaudePlugin: AIPluginRendering {
 
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
-    private let encoder = HookResponseEncoder()
+    private let encoder: HookResponseEncoder
+    private let sessionScopedApprovalStore: SessionScopedRuleStoring
     private let settingsStore: SettingsStore
 
     private weak var bus: EventBus?
@@ -27,8 +28,14 @@ public final class ClaudePlugin: AIPluginRendering {
     private var sneakPeekIDs: [String: UUID] = [:]
     private var settingsCancellables: Set<AnyCancellable> = []
 
-    public init(settingsStore: SettingsStore = .shared) {
+    public init(
+        settingsStore: SettingsStore = .shared,
+        permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
+        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore()
+    ) {
         self.settingsStore = settingsStore
+        self.encoder = HookResponseEncoder(permissionRuleStore: permissionRuleStore)
+        self.sessionScopedApprovalStore = sessionScopedApprovalStore
         settingsStore.$approvalSneakNotificationsEnabled
             .removeDuplicates()
             .sink { [weak self] isEnabled in
@@ -59,6 +66,29 @@ public final class ClaudePlugin: AIPluginRendering {
 
         do {
             let envelope = try parser.parse(frame: frame)
+
+            if envelope.eventType == .stop {
+                sessionScopedApprovalStore.clearSession(envelope.sessionID)
+            }
+
+            if envelope.needsResponse,
+               case let .permissionRequest(payload) = envelope.payload,
+               sessionScopedApprovalStore.matches(sessionID: envelope.sessionID, payload: payload) {
+                _ = runtime.handle(envelope: bypass(envelope: envelope))
+                syncState()
+                do {
+                    let data = try encoder.encode(
+                        decision: .allowOnce,
+                        for: envelope.host,
+                        eventType: envelope.eventType
+                    )
+                    respond(data)
+                } catch {
+                    respond(Data("{}".utf8))
+                }
+                return
+            }
+
             let result = runtime.handle(envelope: envelope)
             syncState()
 
@@ -75,6 +105,18 @@ public final class ClaudePlugin: AIPluginRendering {
         }
     }
 
+    private func bypass(envelope: AIBridgeEnvelope) -> AIBridgeEnvelope {
+        AIBridgeEnvelope(
+            host: envelope.host,
+            requestID: envelope.requestID,
+            sessionID: envelope.sessionID,
+            eventType: envelope.eventType,
+            capabilities: envelope.capabilities,
+            needsResponse: false,
+            payload: envelope.payload
+        )
+    }
+
     public func handleDisconnect(requestID: String) {
         responders.removeValue(forKey: requestID)
 
@@ -86,21 +128,6 @@ public final class ClaudePlugin: AIPluginRendering {
         syncSneakPeek()
     }
 
-    public func respond(to requestID: String, with decision: ApprovalDecision) {
-        guard let approval = pendingApprovals.first(where: { $0.requestID == requestID }) else {
-            return
-        }
-
-        let action = approval.availableActions.first(where: { $0.legacyClaudeDecision == decision })
-            ?? ApprovalAction(
-                id: "claude-fallback-\(decision)",
-                title: "",
-                style: .primary,
-                payload: .claude(decision)
-            )
-        respond(to: requestID, with: action)
-    }
-
     public func respond(to requestID: String, with action: ApprovalAction) {
         guard
             let approval = pendingApprovals.first(where: { $0.requestID == requestID }),
@@ -109,21 +136,21 @@ public final class ClaudePlugin: AIPluginRendering {
             return
         }
 
-        guard case let .claude(decision) = action.payload else {
-            responder(Data("{}".utf8))
-            return
+        let decision: ApprovalDecision
+        switch action.payload {
+        case let .claude(actionDecision):
+            decision = actionDecision
+        case .claudeDenyWithFeedback:
+            decision = .denyOnce
         }
 
-        let effectiveDecision: ApprovalDecision
-        if decision == .persistAllowRule && !approval.capabilities.supportsPersistentRules {
-            effectiveDecision = .allowOnce
-        } else {
-            effectiveDecision = decision
+        if let sessionRule = decision.sessionRule {
+            sessionScopedApprovalStore.addRule(sessionRule, sessionID: approval.sessionID)
         }
 
         do {
             let data = try encoder.encode(
-                decision: effectiveDecision,
+                decision: decision,
                 for: approval.host,
                 eventType: approval.eventType ?? .permissionRequest
             )

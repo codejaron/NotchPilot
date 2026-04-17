@@ -39,8 +39,20 @@ public struct HookInstaller {
         var root = try loadJSONObjectIfPresent(at: settingsURL)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         let command = "\"\(bridgeScript)\" --host claude"
+        let configuration = claudeHookConfiguration(command: command)
+        let managedEventNames = Set(configuration.keys)
 
-        for (eventName, managedEntries) in claudeHookConfiguration(command: command) {
+        for eventName in Array(hooks.keys) where managedEventNames.contains(eventName) == false {
+            guard let entries = hooks[eventName] as? [[String: Any]] else { continue }
+            let filtered = removingManagedEntries(from: entries, bridgeScript: bridgeScript)
+            if filtered.isEmpty {
+                hooks.removeValue(forKey: eventName)
+            } else {
+                hooks[eventName] = filtered
+            }
+        }
+
+        for (eventName, managedEntries) in configuration {
             var eventEntries = hooks[eventName] as? [[String: Any]] ?? []
             eventEntries = removingManagedEntries(from: eventEntries, bridgeScript: bridgeScript)
             eventEntries.append(contentsOf: managedEntries)
@@ -127,29 +139,29 @@ public struct HookInstaller {
 
         let settingsURL = homeDirectoryURL.appendingPathComponent(".claude/settings.json")
         guard let root = try? loadJSONObject(at: settingsURL),
-              let hooks = root["hooks"] as? [String: Any],
-              let entries = hooks["UserPromptSubmit"] as? [[String: Any]]
+              let hooks = root["hooks"] as? [String: Any]
         else {
             return true
         }
 
-        return entries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
+        let managedEventNames = Set(claudeHookConfiguration(command: "").keys)
+
+        for (eventName, value) in hooks {
+            guard let entries = value as? [[String: Any]] else { continue }
+            let hasManaged = entries.contains { isManagedEntry($0, bridgeScript: bridgeScript) }
+            if hasManaged, managedEventNames.contains(eventName) == false {
+                return true
+            }
+        }
+
+        guard let promptEntries = hooks["UserPromptSubmit"] as? [[String: Any]] else {
+            return true
+        }
+        return promptEntries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
     }
 
     private func claudeHookConfiguration(command: String) -> [String: [[String: Any]]] {
         [
-            "PermissionRequest": [
-                [
-                    "matcher": "*",
-                    "hooks": [
-                        [
-                            "type": "command",
-                            "command": command,
-                            "timeout": 300,
-                        ],
-                    ],
-                ],
-            ],
             "PreToolUse": [
                 [
                     "matcher": "*",

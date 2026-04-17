@@ -68,6 +68,16 @@ public struct AIBridgeCapabilities: OptionSet, Equatable, Sendable {
     }
 }
 
+public enum ClaudeToolKind: Equatable, Sendable {
+    case edit
+    case bash
+    case webFetch
+    case webSearch
+    case mcp
+    case readOnly
+    case other
+}
+
 public struct ApprovalPayload: Equatable, Sendable {
     public let title: String
     public let toolName: String
@@ -76,6 +86,13 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let command: String?
     public let diffContent: String?
     public let originalContent: String?
+    public let toolKind: ClaudeToolKind
+    public let bashCommandPrefix: String?
+    public let webFetchURL: String?
+    public let webFetchDomain: String?
+    public let mcpServer: String?
+    public let mcpTool: String?
+    public let permissionMode: String?
 
     public init(
         title: String,
@@ -84,7 +101,14 @@ public struct ApprovalPayload: Equatable, Sendable {
         filePath: String? = nil,
         command: String? = nil,
         diffContent: String? = nil,
-        originalContent: String? = nil
+        originalContent: String? = nil,
+        toolKind: ClaudeToolKind = .other,
+        bashCommandPrefix: String? = nil,
+        webFetchURL: String? = nil,
+        webFetchDomain: String? = nil,
+        mcpServer: String? = nil,
+        mcpTool: String? = nil,
+        permissionMode: String? = nil
     ) {
         self.title = title
         self.toolName = toolName
@@ -93,6 +117,13 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.command = command
         self.diffContent = diffContent
         self.originalContent = originalContent
+        self.toolKind = toolKind
+        self.bashCommandPrefix = bashCommandPrefix
+        self.webFetchURL = webFetchURL
+        self.webFetchDomain = webFetchDomain
+        self.mcpServer = mcpServer
+        self.mcpTool = mcpTool
+        self.permissionMode = permissionMode
     }
 }
 
@@ -129,14 +160,56 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
     }
 }
 
-public enum ApprovalDecision: Equatable, Sendable {
-    case allowOnce
-    case denyOnce
-    case persistAllowRule
+public enum ClaudePermissionRule: Equatable, Sendable, Hashable {
+    case tool(String)
+    case bashPrefix(String)
+    case webFetchDomain(String)
+    case mcp(server: String, tool: String)
+
+    public var ruleString: String {
+        switch self {
+        case let .tool(name):
+            return name
+        case let .bashPrefix(prefix):
+            return "Bash(\(prefix):*)"
+        case let .webFetchDomain(domain):
+            return "WebFetch(domain:\(domain))"
+        case let .mcp(server, tool):
+            return "mcp__\(server)__\(tool)"
+        }
+    }
+}
+
+public struct ApprovalDecision: Equatable, Sendable {
+    public enum Behavior: Equatable, Sendable {
+        case allow
+        case deny
+    }
+
+    public var behavior: Behavior
+    public var feedbackText: String?
+    public var persistRule: ClaudePermissionRule?
+    public var sessionRule: ClaudePermissionRule?
+
+    public init(
+        behavior: Behavior,
+        feedbackText: String? = nil,
+        persistRule: ClaudePermissionRule? = nil,
+        sessionRule: ClaudePermissionRule? = nil
+    ) {
+        self.behavior = behavior
+        self.feedbackText = feedbackText
+        self.persistRule = persistRule
+        self.sessionRule = sessionRule
+    }
+
+    public static let allowOnce = ApprovalDecision(behavior: .allow)
+    public static let denyOnce = ApprovalDecision(behavior: .deny)
 }
 
 public enum ApprovalActionPayload: Equatable, Sendable {
     case claude(ApprovalDecision)
+    case claudeDenyWithFeedback
 }
 
 public struct ApprovalAction: Equatable, Sendable, Identifiable {
@@ -152,72 +225,106 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         self.payload = payload
     }
 
-    public var legacyClaudeDecision: ApprovalDecision? {
-        guard case let .claude(decision) = payload else {
-            return nil
-        }
-        return decision
-    }
-
     public static func claudeActions(
-        eventType: AIBridgeEventType,
-        supportsPersistentRules: Bool
+        toolKind: ClaudeToolKind,
+        toolName: String,
+        bashCommandPrefix: String?,
+        webFetchDomain: String?,
+        mcpServer: String?,
+        mcpTool: String?
     ) -> [ApprovalAction] {
-        switch eventType {
-        case .permissionRequest:
-            var actions: [ApprovalAction] = [
-                ApprovalAction(
-                    id: "claude-deny",
-                    title: "Deny",
-                    style: .destructive,
-                    payload: .claude(.denyOnce)
-                ),
-                ApprovalAction(
-                    id: "claude-allow",
-                    title: "Allow",
-                    style: .primary,
-                    payload: .claude(.allowOnce)
-                ),
-            ]
-            if supportsPersistentRules {
-                actions.append(
-                    ApprovalAction(
-                        id: "claude-always-allow",
-                        title: "Always Allow",
-                        style: .outline,
-                        payload: .claude(.persistAllowRule)
+        let (secondaryTitle, secondaryDecision): (String, ApprovalDecision) = {
+            switch toolKind {
+            case .edit:
+                return (
+                    "Yes, allow edits for this session",
+                    ApprovalDecision(
+                        behavior: .allow,
+                        sessionRule: .tool("Edit")
+                    )
+                )
+            case .bash:
+                if let prefix = bashCommandPrefix, prefix.isEmpty == false {
+                    return (
+                        "Yes, don't ask for `\(prefix)` again",
+                        ApprovalDecision(
+                            behavior: .allow,
+                            persistRule: .bashPrefix(prefix)
+                        )
+                    )
+                }
+                return (
+                    "Yes, always allow \(toolName)",
+                    ApprovalDecision(
+                        behavior: .allow,
+                        persistRule: .tool(toolName)
+                    )
+                )
+            case .webFetch:
+                if let domain = webFetchDomain, domain.isEmpty == false {
+                    return (
+                        "Yes, don't ask for `\(domain)` again",
+                        ApprovalDecision(
+                            behavior: .allow,
+                            persistRule: .webFetchDomain(domain)
+                        )
+                    )
+                }
+                return (
+                    "Yes, always allow WebFetch",
+                    ApprovalDecision(
+                        behavior: .allow,
+                        persistRule: .tool("WebFetch")
+                    )
+                )
+            case .mcp:
+                if let server = mcpServer, let tool = mcpTool,
+                   server.isEmpty == false, tool.isEmpty == false {
+                    return (
+                        "Yes, always allow `\(tool)`",
+                        ApprovalDecision(
+                            behavior: .allow,
+                            persistRule: .mcp(server: server, tool: tool)
+                        )
+                    )
+                }
+                return (
+                    "Yes, always allow \(toolName)",
+                    ApprovalDecision(
+                        behavior: .allow,
+                        persistRule: .tool(toolName)
+                    )
+                )
+            case .webSearch, .readOnly, .other:
+                return (
+                    "Yes, always allow \(toolName)",
+                    ApprovalDecision(
+                        behavior: .allow,
+                        persistRule: .tool(toolName)
                     )
                 )
             }
-            return actions
-        case .preToolUse:
-            var actions: [ApprovalAction] = [
-                ApprovalAction(
-                    id: "claude-deny",
-                    title: "Deny",
-                    style: .destructive,
-                    payload: .claude(.denyOnce)
-                ),
-                ApprovalAction(
-                    id: "claude-allow",
-                    title: "Allow",
-                    style: .primary,
-                    payload: .claude(.allowOnce)
-                ),
-            ]
-            if supportsPersistentRules {
-                actions.append(
-                    ApprovalAction(
-                        id: "claude-always-allow",
-                        title: "Always Allow",
-                        style: .outline,
-                        payload: .claude(.persistAllowRule)
-                    )
-                )
-            }
-            return actions
-        default:
-            return []
-        }
+        }()
+
+        return [
+            ApprovalAction(
+                id: "claude-allow",
+                title: "Yes",
+                style: .primary,
+                payload: .claude(.allowOnce)
+            ),
+            ApprovalAction(
+                id: "claude-allow-persist",
+                title: secondaryTitle,
+                style: .outline,
+                payload: .claude(secondaryDecision)
+            ),
+            ApprovalAction(
+                id: "claude-deny-feedback",
+                title: "No, and tell Claude what to do differently",
+                style: .destructive,
+                payload: .claudeDenyWithFeedback
+            ),
+        ]
     }
 }

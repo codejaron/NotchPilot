@@ -33,8 +33,21 @@ public struct HookEventParser {
         let eventType = resolveEventType(from: dictionary)
         let sessionID = resolveSessionID(from: dictionary, fallback: frame.requestID)
         let capabilities = resolveCapabilities(from: dictionary)
-        let needsResponse = eventType == .permissionRequest || eventType == .preToolUse
-        let payload = resolvePayload(from: dictionary, eventType: eventType)
+        let toolName = findString(in: dictionary, paths: [
+            ["tool_name"],
+            ["tool", "name"],
+            ["request", "tool"],
+        ])
+        let permissionMode = findString(in: dictionary, paths: [
+            ["permission_mode"],
+            ["permissionMode"],
+        ])
+        let needsResponse = Self.shouldRequestDecision(
+            eventType: eventType,
+            toolName: toolName,
+            permissionMode: permissionMode
+        )
+        let payload = resolvePayload(from: dictionary, eventType: eventType, permissionMode: permissionMode)
 
         return AIBridgeEnvelope(
             host: frame.host,
@@ -45,6 +58,124 @@ public struct HookEventParser {
             needsResponse: needsResponse,
             payload: payload
         )
+    }
+
+    static let readOnlyToolNames: Set<String> = [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "TodoWrite",
+        "ExitPlanMode",
+        "NotebookRead",
+        "Task",
+    ]
+
+    static let editToolNames: Set<String> = [
+        "Edit",
+        "Write",
+        "MultiEdit",
+        "NotebookEdit",
+    ]
+
+    static func resolveToolKind(toolName: String) -> ClaudeToolKind {
+        if toolName.hasPrefix("mcp__") {
+            return .mcp
+        }
+        switch toolName {
+        case "Bash":
+            return .bash
+        case "WebFetch":
+            return .webFetch
+        case "WebSearch":
+            return .webSearch
+        default:
+            if editToolNames.contains(toolName) {
+                return .edit
+            }
+            if readOnlyToolNames.contains(toolName) {
+                return .readOnly
+            }
+            return .other
+        }
+    }
+
+    static func extractBashCommandPrefix(from command: String?) -> String? {
+        guard let command = command?.trimmingCharacters(in: .whitespaces), command.isEmpty == false else {
+            return nil
+        }
+        let firstClause = command
+            .split(whereSeparator: { $0 == "|" || $0 == ";" || $0 == "&" })
+            .first
+            .map(String.init) ?? command
+        let tokens = firstClause
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { $0.contains("=") == false || $0.hasPrefix("-") }
+        guard let head = tokens.first else {
+            return nil
+        }
+        let base = (head as NSString).lastPathComponent
+        let twoTokenCommands: Set<String> = ["git", "npm", "yarn", "pnpm", "bun", "cargo", "go", "kubectl", "docker", "brew", "gh", "pip"]
+        if twoTokenCommands.contains(base), tokens.count >= 2 {
+            let second = tokens[1]
+            if second.hasPrefix("-") == false {
+                return "\(base) \(second)"
+            }
+        }
+        return base
+    }
+
+    static func extractDomain(from urlString: String?) -> String? {
+        guard let urlString, let url = URL(string: urlString), let host = url.host else {
+            return nil
+        }
+        return host
+    }
+
+    static func extractMCP(from toolName: String) -> (server: String?, tool: String?) {
+        guard toolName.hasPrefix("mcp__") else {
+            return (nil, nil)
+        }
+        let stripped = String(toolName.dropFirst("mcp__".count))
+        let parts = stripped.components(separatedBy: "__")
+        guard parts.count >= 2 else {
+            return (nil, nil)
+        }
+        return (parts[0], parts.dropFirst().joined(separator: "__"))
+    }
+
+    static func shouldRequestDecision(
+        eventType: AIBridgeEventType,
+        toolName: String?,
+        permissionMode: String?
+    ) -> Bool {
+        switch eventType {
+        case .permissionRequest:
+            return true
+        case .preToolUse:
+            break
+        default:
+            return false
+        }
+
+        if permissionMode == "bypassPermissions" {
+            return false
+        }
+
+        if let toolName, readOnlyToolNames.contains(toolName) {
+            return false
+        }
+
+        if permissionMode == "plan" {
+            return false
+        }
+
+        if permissionMode == "acceptEdits", let toolName, editToolNames.contains(toolName) {
+            return false
+        }
+
+        return true
     }
 
     private func resolveEventType(from dictionary: [String: Any]) -> AIBridgeEventType {
@@ -96,7 +227,11 @@ public struct HookEventParser {
         return capabilities
     }
 
-    private func resolvePayload(from dictionary: [String: Any], eventType: AIBridgeEventType) -> AIBridgePayload {
+    private func resolvePayload(
+        from dictionary: [String: Any],
+        eventType: AIBridgeEventType,
+        permissionMode: String?
+    ) -> AIBridgePayload {
         switch eventType {
         case .permissionRequest, .preToolUse:
             let toolName = findString(in: dictionary, paths: [
@@ -136,8 +271,19 @@ public struct HookEventParser {
                 ["tool", "input", "old_content"],
             ]) ?? fallbackOriginalContent(filePath: filePath, newContent: diffContent)
 
+            let webFetchURL = findString(in: dictionary, paths: [
+                ["tool_input", "url"],
+                ["tool", "input", "url"],
+            ])
+
+            let toolKind = Self.resolveToolKind(toolName: toolName)
+            let bashPrefix = toolKind == .bash ? Self.extractBashCommandPrefix(from: command) : nil
+            let domain = toolKind == .webFetch ? Self.extractDomain(from: webFetchURL) : nil
+            let (mcpServer, mcpTool) = toolKind == .mcp ? Self.extractMCP(from: toolName) : (nil, nil)
+
             let previewText = command
                 ?? filePath
+                ?? webFetchURL
                 ?? findString(in: dictionary, paths: [["prompt"]])
                 ?? "Review the requested action."
 
@@ -149,7 +295,14 @@ public struct HookEventParser {
                     filePath: filePath,
                     command: command,
                     diffContent: diffContent,
-                    originalContent: originalContent
+                    originalContent: originalContent,
+                    toolKind: toolKind,
+                    bashCommandPrefix: bashPrefix,
+                    webFetchURL: webFetchURL,
+                    webFetchDomain: domain,
+                    mcpServer: mcpServer,
+                    mcpTool: mcpTool,
+                    permissionMode: permissionMode
                 )
             )
         case .userPromptSubmit:

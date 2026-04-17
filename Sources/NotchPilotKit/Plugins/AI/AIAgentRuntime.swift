@@ -141,8 +141,12 @@ public final class AIAgentRuntime {
             payload: payload,
             capabilities: envelope.capabilities,
             availableActions: ApprovalAction.claudeActions(
-                eventType: envelope.eventType,
-                supportsPersistentRules: envelope.capabilities.supportsPersistentRules
+                toolKind: payload.toolKind,
+                toolName: payload.toolName,
+                bashCommandPrefix: payload.bashCommandPrefix,
+                webFetchDomain: payload.webFetchDomain,
+                mcpServer: payload.mcpServer,
+                mcpTool: payload.mcpTool
             ),
             status: .pending
         )

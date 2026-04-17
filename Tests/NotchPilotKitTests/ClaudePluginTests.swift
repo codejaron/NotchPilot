@@ -235,4 +235,38 @@ final class ClaudePluginTests: XCTestCase {
 
         XCTAssertGreaterThan(try XCTUnwrap(previewHeight), Self.previewContext.notchGeometry.compactSize.height + 44)
     }
+
+    @MainActor
+    func testDenyWithFeedbackPlaceholderReturnsDenyAndClearsPendingApproval() {
+        let plugin = ClaudePlugin()
+        let responseBox = SplitResponseBox()
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-deny-feedback",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-deny-feedback",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "rm -rf /tmp/demo" }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        let action = try! XCTUnwrap(
+            plugin.pendingApprovals.first?.availableActions.first(where: { $0.id == "claude-deny-feedback" })
+        )
+
+        plugin.respond(to: "claude-deny-feedback", with: action)
+
+        let response = String(data: responseBox.data ?? Data(), encoding: .utf8)
+        XCTAssertTrue(response?.contains(#""permissionDecision":"deny""#) == true)
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+    }
 }
