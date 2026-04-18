@@ -174,6 +174,43 @@ final class ClaudePluginTests: XCTestCase {
         XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
     }
 
+    @MainActor
+    func testPreToolUseDoesNotCreateApprovalOrSneakPeek() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+        let responseBox = SplitResponseBox()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-pretool-ls",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-pretool",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "ls -la" }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertTrue(recorder.events.isEmpty)
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+
+        bus.unsubscribe(token)
+    }
+
     func testStoppedSessionDoesNotRenderCompactPreviewWithoutApproval() async {
         let plugin = await MainActor.run { ClaudePlugin() }
         let bus = await MainActor.run { EventBus() }
@@ -270,7 +307,7 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
-    func testDenyWithFeedbackPlaceholderReturnsDenyAndClearsPendingApproval() {
+    func testDenyReturnsDenyAndClearsPendingApproval() {
         let plugin = ClaudePlugin()
         let responseBox = SplitResponseBox()
 
@@ -280,7 +317,7 @@ final class ClaudePluginTests: XCTestCase {
                 requestID: "claude-deny-feedback",
                 rawJSON: """
                 {
-                  "hook_event_name": "PreToolUse",
+                  "hook_event_name": "PermissionRequest",
                   "session_id": "claude-session-deny-feedback",
                   "tool_name": "Bash",
                   "tool_input": { "command": "rm -rf /tmp/demo" }
@@ -293,13 +330,13 @@ final class ClaudePluginTests: XCTestCase {
         )
 
         let action = try! XCTUnwrap(
-            plugin.pendingApprovals.first?.availableActions.first(where: { $0.id == "claude-deny-feedback" })
+            plugin.pendingApprovals.first?.availableActions.first(where: { $0.id == "claude-deny" })
         )
 
         plugin.respond(to: "claude-deny-feedback", with: action)
 
         let response = String(data: responseBox.data ?? Data(), encoding: .utf8)
-        XCTAssertTrue(response?.contains(#""permissionDecision":"deny""#) == true)
+        XCTAssertTrue(response?.contains(#""behavior":"deny""#) == true)
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
     }
 }

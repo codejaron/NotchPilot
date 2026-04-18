@@ -119,7 +119,7 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(promptEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
     }
 
-    func testInstallClaudeHooksDoesNotRegisterPermissionRequestEvent() throws {
+    func testInstallClaudeHooksRegistersPermissionRequestInsteadOfPreToolUse() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -128,10 +128,12 @@ final class HookInstallerTests: XCTestCase {
 
         let json = try loadJSONObject(at: claudeDirectory.appendingPathComponent("settings.json"))
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
-        XCTAssertNil(hooks["PermissionRequest"])
+        let permissionEntries = try XCTUnwrap(hooks["PermissionRequest"] as? [[String: Any]])
+        XCTAssertTrue(permissionEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
+        XCTAssertNil(hooks["PreToolUse"])
     }
 
-    func testInstallClaudeHooksRemovesStaleManagedPermissionRequestEntries() throws {
+    func testInstallClaudeHooksRemovesStaleManagedPreToolUseEntries() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -140,8 +142,9 @@ final class HookInstallerTests: XCTestCase {
             """
             {
               "hooks": {
-                "PermissionRequest": [
+                "PreToolUse": [
                   {
+                    "matcher": "*",
                     "hooks": [
                       {
                         "type": "command",
@@ -160,10 +163,11 @@ final class HookInstallerTests: XCTestCase {
 
         let json = try loadJSONObject(at: settingsURL)
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
-        XCTAssertNil(hooks["PermissionRequest"])
+        XCTAssertNil(hooks["PreToolUse"])
+        XCTAssertNotNil(hooks["PermissionRequest"])
     }
 
-    func testClaudeHooksNeedUpdateDetectsStalePermissionRequestEntry() throws {
+    func testClaudeHooksNeedUpdateDetectsStalePreToolUseEntry() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -172,8 +176,9 @@ final class HookInstallerTests: XCTestCase {
             """
             {
               "hooks": {
-                "PermissionRequest": [
+                "PreToolUse": [
                   {
+                    "matcher": "*",
                     "hooks": [
                       {
                         "type": "command",

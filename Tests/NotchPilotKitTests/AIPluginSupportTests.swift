@@ -144,7 +144,7 @@ final class AIPluginSupportTests: XCTestCase {
         XCTAssertTrue(completed.isDimmed)
     }
 
-    func testAttentionSessionRowsOpenReviewFromPrimaryAreaAndUseLargerJumpTarget() {
+    func testSessionRowsOnlyUsePrimaryAreaForAttentionAndAlwaysExposeJumpTarget() {
         let attention = AIPluginExpandedSessionSummary(
             id: "thread-attention",
             host: .claude,
@@ -174,8 +174,8 @@ final class AIPluginSupportTests: XCTestCase {
 
         XCTAssertEqual(attention.primaryRowAction, .reviewAttention)
         XCTAssertGreaterThanOrEqual(attention.jumpAccessoryHitWidth, 36)
-        XCTAssertEqual(ordinary.primaryRowAction, .activateSession)
-        XCTAssertEqual(ordinary.jumpAccessoryHitWidth, 0)
+        XCTAssertEqual(ordinary.primaryRowAction, .none)
+        XCTAssertGreaterThanOrEqual(ordinary.jumpAccessoryHitWidth, 36)
     }
 
     func testApprovalReviewStateAdvancesToNextPendingApprovalWhileReviewing() {
@@ -311,6 +311,38 @@ final class AIPluginSupportTests: XCTestCase {
 
         XCTAssertEqual(notice?.count, 1)
         XCTAssertEqual(notice?.text, "Run command?")
+    }
+
+    @MainActor
+    func testClaudeApprovalSneakNoticePrefersDescriptionOverCommand() {
+        let runtime = AIAgentRuntime()
+        _ = runtime.handle(
+            envelope: try! HookEventParser().parse(
+                frame: BridgeFrame(
+                    host: .claude,
+                    requestID: "claude-approval-description",
+                    rawJSON: """
+                    {
+                      "hook_event_name": "PermissionRequest",
+                      "session_id": "claude-session-description",
+                      "tool_name": "Bash",
+                      "tool_input": {
+                        "command": "swift build 2>&1 | tail -30",
+                        "description": "Build the Swift package"
+                      }
+                    }
+                    """
+                )
+            )
+        )
+
+        let notice = AIPluginApprovalSneakNotice(
+            pendingApprovals: runtime.pendingApprovals,
+            codexSurface: nil
+        )
+
+        XCTAssertEqual(notice?.count, 1)
+        XCTAssertEqual(notice?.text, "Build the Swift package")
     }
 
     func testCodexApprovalDetailPresentationShowsSummaryAboveCommandPreview() {

@@ -11,7 +11,18 @@ final class HookEventParserTests: XCTestCase {
               "hook_event_name": "PermissionRequest",
               "session_id": "claude-session",
               "tool_name": "Bash",
-              "tool_input": { "command": "rm -rf /tmp/demo" },
+              "tool_input": {
+                "command": "rm -rf /tmp/demo",
+                "description": "Remove the demo directory"
+              },
+              "permission_suggestions": [
+                {
+                  "type": "addRules",
+                  "rules": [{ "toolName": "Bash", "ruleContent": "rm -rf /tmp/demo" }],
+                  "behavior": "allow",
+                  "destination": "localSettings"
+                }
+              ],
               "capabilities": { "supports_persistent_rules": true }
             }
             """
@@ -31,7 +42,10 @@ final class HookEventParserTests: XCTestCase {
         }
 
         XCTAssertEqual(payload.toolName, "Bash")
+        XCTAssertEqual(payload.description, "Remove the demo directory")
+        XCTAssertEqual(payload.title, "Allow Claude to run Remove the demo directory?")
         XCTAssertEqual(payload.previewText, "rm -rf /tmp/demo")
+        XCTAssertEqual(payload.permissionSuggestions.count, 1)
     }
 
     func testNotificationEventReturnsNeedsResponseFalse() throws {
@@ -151,13 +165,13 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertFalse(envelope.needsResponse)
     }
 
-    func testPreToolUseWebFetchRequiresResponseAndExtractsDomain() throws {
+    func testPermissionRequestWebFetchRequiresResponseAndExtractsDomain() throws {
         let frame = BridgeFrame(
             host: .claude,
             requestID: "req-web-fetch",
             rawJSON: """
             {
-              "hook_event_name": "PreToolUse",
+              "hook_event_name": "PermissionRequest",
               "session_id": "claude-session",
               "tool_name": "WebFetch",
               "tool_input": { "url": "https://docs.anthropic.com/en/docs/claude-code/hooks" }
@@ -178,7 +192,30 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(payload.webFetchDomain, "docs.anthropic.com")
     }
 
-    func testPreToolUseEditToolRequiresResponseInDefaultMode() throws {
+    func testPreToolUseBashDoesNotRequireResponseOrApprovalPayload() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-pretool-bash",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Bash",
+              "tool_input": { "command": "ls -la" }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertFalse(envelope.needsResponse)
+        guard case let .generic(values) = envelope.payload else {
+            return XCTFail("expected PreToolUse to be a non-approval activity payload")
+        }
+        XCTAssertEqual(values["tool_name"], "Bash")
+    }
+
+    func testPreToolUseEditToolDoesNotRequireResponseInDefaultMode() throws {
         let frame = BridgeFrame(
             host: .claude,
             requestID: "req-edit",
@@ -187,26 +224,6 @@ final class HookEventParserTests: XCTestCase {
               "hook_event_name": "PreToolUse",
               "session_id": "claude-session",
               "tool_name": "Edit",
-              "tool_input": { "file_path": "/tmp/demo.txt", "new_string": "hi" }
-            }
-            """
-        )
-
-        let envelope = try HookEventParser().parse(frame: frame)
-
-        XCTAssertTrue(envelope.needsResponse)
-    }
-
-    func testPreToolUseEditToolSkipsResponseInAcceptEditsMode() throws {
-        let frame = BridgeFrame(
-            host: .claude,
-            requestID: "req-accept-edits",
-            rawJSON: """
-            {
-              "hook_event_name": "PreToolUse",
-              "session_id": "claude-session",
-              "tool_name": "Edit",
-              "permission_mode": "acceptEdits",
               "tool_input": { "file_path": "/tmp/demo.txt", "new_string": "hi" }
             }
             """

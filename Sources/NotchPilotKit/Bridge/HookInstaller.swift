@@ -160,10 +160,15 @@ public struct HookInstaller {
             }
         }
 
-        guard let promptEntries = hooks["UserPromptSubmit"] as? [[String: Any]] else {
-            return true
+        for eventName in managedEventNames {
+            guard let entries = hooks[eventName] as? [[String: Any]],
+                  entries.contains(where: { isManagedEntry($0, bridgeScript: bridgeScript) })
+            else {
+                return true
+            }
         }
-        return promptEntries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
+
+        return false
     }
 
     private func installedBridgeScriptNeedsUpdate(_ bridgeScript: String?) -> Bool {
@@ -180,7 +185,7 @@ public struct HookInstaller {
 
     private func claudeHookConfiguration(command: String) -> [String: [[String: Any]]] {
         [
-            "PreToolUse": [
+            "PermissionRequest": [
                 [
                     "matcher": "*",
                     "hooks": [

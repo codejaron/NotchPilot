@@ -269,6 +269,11 @@ struct AIPluginApprovalSneakNotice: Equatable {
     }
 
     private static func approvalText(for approval: PendingApproval) -> String {
+        if let description = approval.payload.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           description.isEmpty == false {
+            return description
+        }
+
         if let command = approval.payload.command?.trimmingCharacters(in: .whitespacesAndNewlines),
            command.isEmpty == false {
             return command
@@ -338,11 +343,11 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     }
 
     var primaryRowAction: AIPluginSessionRowPrimaryAction {
-        hasAttention ? .reviewAttention : .activateSession
+        hasAttention ? .reviewAttention : .none
     }
 
     var jumpAccessoryHitWidth: CGFloat {
-        hasAttention ? 38 : 0
+        38
     }
 
     var isDimmed: Bool {
@@ -364,7 +369,7 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
 }
 
 enum AIPluginSessionRowPrimaryAction: Equatable {
-    case activateSession
+    case none
     case reviewAttention
 }
 
@@ -1161,13 +1166,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 if let approvalRequestID = summary.approvalRequestID {
                     codexSurfaceReviewState.selectedSurfaceID = nil
                     approvalReviewState.beginReviewing(requestID: approvalRequestID)
-                } else {
-                    _ = plugin.activateSession(id: summary.id)
                 }
             },
-            onJump: summary.approvalRequestID.map { _ in
-                { _ = plugin.activateSession(id: summary.id) }
-            }
+            onJump: { _ = plugin.activateSession(id: summary.id) }
         )
     }
 
@@ -1182,13 +1183,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
                     codexApprovalInteractionState = nil
                     codexTextInputContentHeight = 0
-                } else {
-                    _ = plugin.activateSession(id: summary.id)
                 }
             },
-            onJump: summary.codexSurfaceID.map { _ in
-                { _ = plugin.activateSession(id: summary.id) }
-            }
+            onJump: { _ = plugin.activateSession(id: summary.id) }
         )
     }
 
@@ -1199,8 +1196,8 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             accent: hostColor(for: summary.host),
             onActivate: {
                 switch summary.primaryRowAction {
-                case .activateSession:
-                    _ = plugin.activateSession(id: summary.id)
+                case .none:
+                    break
                 case .reviewAttention:
                     if let approvalRequestID = summary.approvalRequestID {
                         codexSurfaceReviewState.selectedSurfaceID = nil
@@ -1213,9 +1210,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     }
                 }
             },
-            onJump: summary.hasAttention
-                ? { _ = plugin.activateSession(id: summary.id) }
-                : nil
+            onJump: { _ = plugin.activateSession(id: summary.id) }
         )
     }
 
@@ -1727,9 +1722,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         if approval.approvalKind == .networkAccess {
             return "Network access request"
         }
-        let toolName = approval.payload.toolName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if toolName.isEmpty == false {
-            return "\(toolName) wants to run"
+        let title = approval.payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty == false {
+            return title
         }
         return "Claude is waiting for approval"
     }
@@ -1756,12 +1751,8 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
     private func approvalButtons(_ approval: PendingApproval) -> some View {
         let accent = hostColor(for: approval.host)
-        let columns = [
-            GridItem(.flexible(minimum: 120), spacing: 10),
-            GridItem(.flexible(minimum: 120), spacing: 10),
-        ]
 
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+        return HStack(spacing: 8) {
             ForEach(approval.availableActions) { action in
                 Button {
                     handleApprovalAction(action, approval: approval)
@@ -1770,8 +1761,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(foregroundColor(for: action.style))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.7)
                         .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 9)
                         .background(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)

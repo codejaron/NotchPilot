@@ -151,32 +151,7 @@ public struct HookEventParser {
         toolName: String?,
         permissionMode: String?
     ) -> Bool {
-        switch eventType {
-        case .permissionRequest:
-            return true
-        case .preToolUse:
-            break
-        default:
-            return false
-        }
-
-        if permissionMode == "bypassPermissions" {
-            return false
-        }
-
-        if let toolName, readOnlyToolNames.contains(toolName) {
-            return false
-        }
-
-        if permissionMode == "plan" {
-            return false
-        }
-
-        if permissionMode == "acceptEdits", let toolName, editToolNames.contains(toolName) {
-            return false
-        }
-
-        return true
+        eventType == .permissionRequest
     }
 
     private func resolveEventType(from dictionary: [String: Any]) -> AIBridgeEventType {
@@ -234,7 +209,7 @@ public struct HookEventParser {
         permissionMode: String?
     ) -> AIBridgePayload {
         switch eventType {
-        case .permissionRequest, .preToolUse:
+        case .permissionRequest:
             let toolName = findString(in: dictionary, paths: [
                 ["tool_name"],
                 ["tool", "name"],
@@ -246,6 +221,13 @@ public struct HookEventParser {
                 ["tool", "input", "command"],
                 ["command"],
                 ["request", "command"],
+            ])
+
+            let description = findString(in: dictionary, paths: [
+                ["tool_input", "description"],
+                ["tool", "input", "description"],
+                ["description"],
+                ["request", "description"],
             ])
 
             let filePath = findString(in: dictionary, paths: [
@@ -290,8 +272,13 @@ public struct HookEventParser {
 
             return .permissionRequest(
                 ApprovalPayload(
-                    title: "\(toolName) wants approval",
+                    title: Self.permissionTitle(
+                        toolName: toolName,
+                        toolKind: toolKind,
+                        description: description
+                    ),
                     toolName: toolName,
+                    description: description,
                     previewText: previewText,
                     filePath: filePath,
                     command: command,
@@ -303,7 +290,8 @@ public struct HookEventParser {
                     webFetchDomain: domain,
                     mcpServer: mcpServer,
                     mcpTool: mcpTool,
-                    permissionMode: permissionMode
+                    permissionMode: permissionMode,
+                    permissionSuggestions: permissionSuggestions(from: dictionary)
                 )
             )
         case .userPromptSubmit:
@@ -318,6 +306,50 @@ public struct HookEventParser {
             return .generic(values)
         default:
             return .generic(flattenStrings(from: dictionary))
+        }
+    }
+
+    private func permissionSuggestions(from dictionary: [String: Any]) -> [JSONValue] {
+        for path in [
+            ["permission_suggestions"],
+            ["permissionSuggestions"],
+        ] {
+            guard let values = value(in: dictionary, for: path) as? [Any] else {
+                continue
+            }
+
+            return values.compactMap { try? JSONValue(jsonObject: $0) }
+        }
+
+        return []
+    }
+
+    private static func permissionTitle(
+        toolName: String,
+        toolKind: ClaudeToolKind,
+        description: String?
+    ) -> String {
+        if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           description.isEmpty == false {
+            switch toolKind {
+            case .bash:
+                return "Allow Claude to run \(description)?"
+            default:
+                return "Allow Claude to use \(description)?"
+            }
+        }
+
+        switch toolKind {
+        case .bash:
+            return "Allow Claude to run this command?"
+        case .edit:
+            return "Allow Claude to edit files?"
+        case .webFetch, .webSearch:
+            return "Allow Claude to access the web?"
+        case .mcp:
+            return "Allow Claude to use \(toolName)?"
+        case .readOnly, .other:
+            return "Allow Claude to use \(toolName)?"
         }
     }
 

@@ -155,7 +155,8 @@ public final class AIAgentRuntime {
                 bashCommandPrefix: payload.bashCommandPrefix,
                 webFetchDomain: payload.webFetchDomain,
                 mcpServer: payload.mcpServer,
-                mcpTool: payload.mcpTool
+                mcpTool: payload.mcpTool,
+                permissionSuggestions: payload.permissionSuggestions
             ),
             status: .pending
         )

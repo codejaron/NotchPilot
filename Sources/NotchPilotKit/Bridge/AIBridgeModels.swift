@@ -123,6 +123,7 @@ public enum ClaudeToolKind: Equatable, Sendable {
 public struct ApprovalPayload: Equatable, Sendable {
     public let title: String
     public let toolName: String
+    public let description: String?
     public let previewText: String
     public let filePath: String?
     public let command: String?
@@ -135,10 +136,12 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let mcpServer: String?
     public let mcpTool: String?
     public let permissionMode: String?
+    public let permissionSuggestions: [JSONValue]
 
     public init(
         title: String,
         toolName: String,
+        description: String? = nil,
         previewText: String,
         filePath: String? = nil,
         command: String? = nil,
@@ -150,10 +153,12 @@ public struct ApprovalPayload: Equatable, Sendable {
         webFetchDomain: String? = nil,
         mcpServer: String? = nil,
         mcpTool: String? = nil,
-        permissionMode: String? = nil
+        permissionMode: String? = nil,
+        permissionSuggestions: [JSONValue] = []
     ) {
         self.title = title
         self.toolName = toolName
+        self.description = description
         self.previewText = previewText
         self.filePath = filePath
         self.command = command
@@ -166,6 +171,7 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.mcpServer = mcpServer
         self.mcpTool = mcpTool
         self.permissionMode = permissionMode
+        self.permissionSuggestions = permissionSuggestions
     }
 }
 
@@ -235,17 +241,20 @@ public struct ApprovalDecision: Equatable, Sendable {
     public var feedbackText: String?
     public var persistRule: ClaudePermissionRule?
     public var sessionRule: ClaudePermissionRule?
+    public var permissionUpdates: [JSONValue]
 
     public init(
         behavior: Behavior,
         feedbackText: String? = nil,
         persistRule: ClaudePermissionRule? = nil,
-        sessionRule: ClaudePermissionRule? = nil
+        sessionRule: ClaudePermissionRule? = nil,
+        permissionUpdates: [JSONValue] = []
     ) {
         self.behavior = behavior
         self.feedbackText = feedbackText
         self.persistRule = persistRule
         self.sessionRule = sessionRule
+        self.permissionUpdates = permissionUpdates
     }
 
     public static let allowOnce = ApprovalDecision(behavior: .allow)
@@ -276,100 +285,68 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         bashCommandPrefix: String?,
         webFetchDomain: String?,
         mcpServer: String?,
-        mcpTool: String?
+        mcpTool: String?,
+        permissionSuggestions: [JSONValue] = []
     ) -> [ApprovalAction] {
-        let (secondaryTitle, secondaryDecision): (String, ApprovalDecision) = {
-            switch toolKind {
-            case .edit:
-                return (
-                    "Yes, allow edits for this session",
-                    ApprovalDecision(
-                        behavior: .allow,
-                        sessionRule: .tool("Edit")
-                    )
-                )
-            case .bash:
-                if let prefix = bashCommandPrefix, prefix.isEmpty == false {
-                    return (
-                        "Yes, don't ask for `\(prefix)` again",
-                        ApprovalDecision(
-                            behavior: .allow,
-                            persistRule: .bashPrefix(prefix)
-                        )
-                    )
-                }
-                return (
-                    "Yes, always allow \(toolName)",
-                    ApprovalDecision(
-                        behavior: .allow,
-                        persistRule: .tool(toolName)
-                    )
-                )
-            case .webFetch:
-                if let domain = webFetchDomain, domain.isEmpty == false {
-                    return (
-                        "Yes, don't ask for `\(domain)` again",
-                        ApprovalDecision(
-                            behavior: .allow,
-                            persistRule: .webFetchDomain(domain)
-                        )
-                    )
-                }
-                return (
-                    "Yes, always allow WebFetch",
-                    ApprovalDecision(
-                        behavior: .allow,
-                        persistRule: .tool("WebFetch")
-                    )
-                )
-            case .mcp:
-                if let server = mcpServer, let tool = mcpTool,
-                   server.isEmpty == false, tool.isEmpty == false {
-                    return (
-                        "Yes, always allow `\(tool)`",
-                        ApprovalDecision(
-                            behavior: .allow,
-                            persistRule: .mcp(server: server, tool: tool)
-                        )
-                    )
-                }
-                return (
-                    "Yes, always allow \(toolName)",
-                    ApprovalDecision(
-                        behavior: .allow,
-                        persistRule: .tool(toolName)
-                    )
-                )
-            case .webSearch, .readOnly, .other:
-                return (
-                    "Yes, always allow \(toolName)",
-                    ApprovalDecision(
-                        behavior: .allow,
-                        persistRule: .tool(toolName)
-                    )
-                )
-            }
-        }()
-
-        return [
+        let permissionSuggestion = bestAllowPermissionSuggestion(in: permissionSuggestions)
+        var actions = [
+            ApprovalAction(
+                id: "claude-deny",
+                title: "Deny",
+                style: .outline,
+                payload: .claude(.denyOnce)
+            ),
             ApprovalAction(
                 id: "claude-allow",
-                title: "Yes",
-                style: .primary,
+                title: "Allow once",
+                style: permissionSuggestion == nil ? .primary : .outline,
                 payload: .claude(.allowOnce)
-            ),
-            ApprovalAction(
-                id: "claude-allow-persist",
-                title: secondaryTitle,
-                style: .outline,
-                payload: .claude(secondaryDecision)
-            ),
-            ApprovalAction(
-                id: "claude-deny-feedback",
-                title: "No, and tell Claude what to do differently",
-                style: .destructive,
-                payload: .claudeDenyWithFeedback
-            ),
+            )
         ]
+
+        if let permissionSuggestion {
+            actions.append(
+                ApprovalAction(
+                    id: "claude-allow-persist",
+                    title: title(forPermissionSuggestion: permissionSuggestion),
+                    style: .primary,
+                    payload: .claude(
+                        ApprovalDecision(
+                            behavior: .allow,
+                            permissionUpdates: [permissionSuggestion]
+                        )
+                    )
+                )
+            )
+        }
+
+        return actions
+    }
+
+    private static func bestAllowPermissionSuggestion(in suggestions: [JSONValue]) -> JSONValue? {
+        suggestions.first { suggestion in
+            guard let object = suggestion.objectValue else {
+                return false
+            }
+
+            let type = object["type"]?.stringValue ?? ""
+            if type == "setMode" {
+                return true
+            }
+
+            return type == "addRules" && object["behavior"]?.stringValue == "allow"
+        }
+    }
+
+    private static func title(forPermissionSuggestion suggestion: JSONValue) -> String {
+        guard let object = suggestion.objectValue else {
+            return "Always allow"
+        }
+
+        if object["destination"]?.stringValue == "session" {
+            return "Allow for session"
+        }
+
+        return "Always allow"
     }
 }
