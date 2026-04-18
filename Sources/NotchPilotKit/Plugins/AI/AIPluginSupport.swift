@@ -78,10 +78,21 @@ extension AIPluginRendering {
             22
             + (activity.approvalCount > 0 ? 5 + approvalBadgeWidth(count: activity.approvalCount) : 0)
 
-        let rightWidth =
+        let tokensWidth =
             tokenWidth(symbol: "↑", value: activity.inputTokenCount)
             + 6
             + tokenWidth(symbol: "↓", value: activity.outputTokenCount)
+        let runtimeWidth: CGFloat = {
+            guard let runtime = activity.runtimeDurationText,
+                  runtime.isEmpty == false else {
+                return 0
+            }
+            return AICompactTextMeasurer.width(
+                runtime,
+                font: .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            )
+        }()
+        let rightWidth = max(tokensWidth, runtimeWidth)
 
         let sideFrameWidth = max(34, leftWidth, rightWidth)
         let totalWidth =
@@ -176,6 +187,23 @@ struct AIPluginCompactActivity: Equatable {
     let runtimeDurationText: String?
 }
 
+enum AIRuntimeDurationFormatter {
+    static func format(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration.rounded(.down))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return "\(hours)h\(String(format: "%02d", minutes))m"
+        }
+        if minutes > 0 {
+            return "\(minutes)m\(String(format: "%02d", seconds))s"
+        }
+        return "\(seconds)s"
+    }
+}
+
 private extension AISession {
     var isLiveCompactPreviewCandidate: Bool {
         switch lastEventType {
@@ -254,6 +282,33 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     let updatedAt: Date
     let inputTokenCount: Int?
     let outputTokenCount: Int?
+    let runtimeDurationText: String?
+
+    init(
+        id: String,
+        host: AIHost,
+        title: String,
+        subtitle: String,
+        approvalCount: Int,
+        approvalRequestID: String?,
+        codexSurfaceID: String?,
+        updatedAt: Date,
+        inputTokenCount: Int?,
+        outputTokenCount: Int?,
+        runtimeDurationText: String? = nil
+    ) {
+        self.id = id
+        self.host = host
+        self.title = title
+        self.subtitle = subtitle
+        self.approvalCount = approvalCount
+        self.approvalRequestID = approvalRequestID
+        self.codexSurfaceID = codexSurfaceID
+        self.updatedAt = updatedAt
+        self.inputTokenCount = inputTokenCount
+        self.outputTokenCount = outputTokenCount
+        self.runtimeDurationText = runtimeDurationText
+    }
 
     var hasAttention: Bool {
         approvalRequestID != nil || codexSurfaceID != nil
@@ -261,6 +316,15 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
 
     var hasTokenUsage: Bool {
         inputTokenCount != nil || outputTokenCount != nil
+    }
+
+    var hasRuntime: Bool {
+        guard let runtimeDurationText else { return false }
+        return runtimeDurationText.isEmpty == false
+    }
+
+    var hasMeta: Bool {
+        hasTokenUsage || hasRuntime
     }
 }
 
@@ -710,7 +774,7 @@ struct AIPluginCompactApprovalNoticeLayout: Equatable {
     }
 }
 
-private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
+struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     @ObservedObject var plugin: Plugin
     let context: NotchContext
     let approvalNotice: AIPluginApprovalSneakNotice?
@@ -726,11 +790,8 @@ private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
 
                     Spacer(minLength: context.notchGeometry.compactSize.width)
 
-                    HStack(spacing: 6) {
-                        tokenChip(symbol: "arrow.up", value: activity.inputTokenCount)
-                        tokenChip(symbol: "arrow.down", value: activity.outputTokenCount)
-                    }
-                    .frame(width: metrics.sideFrameWidth, alignment: .trailing)
+                    compactMetaCluster(activity)
+                        .frame(width: metrics.sideFrameWidth, alignment: .trailing)
                 }
                 .frame(height: context.notchGeometry.compactSize.height, alignment: .center)
 
@@ -779,10 +840,31 @@ private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
         }
     }
 
+    @ViewBuilder
+    private func compactMetaCluster(_ activity: AIPluginCompactActivity) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            if let runtime = activity.runtimeDurationText, runtime.isEmpty == false {
+                Text(runtime)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            if activity.inputTokenCount != nil || activity.outputTokenCount != nil {
+                HStack(spacing: 6) {
+                    tokenChip(symbol: "↑", value: activity.inputTokenCount)
+                    tokenChip(symbol: "↓", value: activity.outputTokenCount)
+                }
+            }
+        }
+    }
+
     private func approvalNoticeRow(_ notice: AIPluginApprovalSneakNotice) -> some View {
         Text(notice.text)
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.92))
             .lineLimit(noticeLayout.lineLimit)
             .truncationMode(.tail)
             .multilineTextAlignment(.leading)
@@ -792,10 +874,10 @@ private struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     }
 
     private func tokenChip(symbol: String, value: Int?) -> some View {
-        let marker = symbol == "arrow.up" ? "↑" : "↓"
-        return Text("\(marker)\(plugin.formattedTokenCount(value))")
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+        Text("\(symbol)\(plugin.formattedTokenCount(value))")
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.82))
     }
 }
 
@@ -990,113 +1072,69 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     }
 
     private func claudeSessionRow(_ summary: AIPluginExpandedSessionSummary) -> some View {
-        let isInteractive = summary.approvalRequestID != nil
-
-        return Button {
-            if let approvalRequestID = summary.approvalRequestID {
-                codexSurfaceReviewState.selectedSurfaceID = nil
-                approvalReviewState.beginReviewing(requestID: approvalRequestID)
-            }
-        } label: {
-            HStack(spacing: 10) {
-                NotchPilotBrandIcon(glyph: .claude, size: 20)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summary.title)
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    Text(summary.subtitle)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(
-                            summary.hasAttention
-                                ? NotchPilotTheme.claude
-                                : NotchPilotTheme.islandTextSecondary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+        aiSessionRow(
+            summary,
+            glyph: .claude,
+            accent: NotchPilotTheme.claude,
+            isInteractive: summary.approvalRequestID != nil,
+            onActivate: {
+                if let approvalRequestID = summary.approvalRequestID {
+                    codexSurfaceReviewState.selectedSurfaceID = nil
+                    approvalReviewState.beginReviewing(requestID: approvalRequestID)
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.2))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isInteractive == false)
-        .opacity(isInteractive ? 1 : 0.92)
+        )
     }
 
     private func codexSessionRow(_ summary: AIPluginExpandedSessionSummary) -> some View {
-        let isInteractive = summary.codexSurfaceID != nil
-
-        return Button {
-            if let codexSurfaceID = summary.codexSurfaceID {
-                approvalReviewState.exitReviewing()
-                codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
-                codexApprovalInteractionState = nil
-                codexTextInputContentHeight = 0
-            }
-        } label: {
-            HStack(spacing: 10) {
-                NotchPilotBrandIcon(glyph: .codex, size: 20)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summary.title)
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    Text(summary.subtitle)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(
-                            summary.hasAttention
-                                ? NotchPilotTheme.codex
-                                : NotchPilotTheme.islandTextSecondary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+        aiSessionRow(
+            summary,
+            glyph: .codex,
+            accent: NotchPilotTheme.codex,
+            isInteractive: summary.codexSurfaceID != nil,
+            onActivate: {
+                if let codexSurfaceID = summary.codexSurfaceID {
+                    approvalReviewState.exitReviewing()
+                    codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
+                    codexApprovalInteractionState = nil
+                    codexTextInputContentHeight = 0
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.2))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isInteractive == false)
-        .opacity(isInteractive ? 1 : 0.92)
+        )
     }
 
     private func sessionRow(_ summary: AIPluginExpandedSessionSummary) -> some View {
-        Button {
-            if let approvalRequestID = summary.approvalRequestID {
-                codexSurfaceReviewState.selectedSurfaceID = nil
-                approvalReviewState.beginReviewing(requestID: approvalRequestID)
-            } else if let codexSurfaceID = summary.codexSurfaceID {
-                approvalReviewState.exitReviewing()
-                codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
-                codexApprovalInteractionState = nil
-                codexTextInputContentHeight = 0
+        aiSessionRow(
+            summary,
+            glyph: NotchPilotBrandGlyph(host: summary.host),
+            accent: hostColor(for: summary.host),
+            isInteractive: summary.hasAttention,
+            onActivate: {
+                if let approvalRequestID = summary.approvalRequestID {
+                    codexSurfaceReviewState.selectedSurfaceID = nil
+                    approvalReviewState.beginReviewing(requestID: approvalRequestID)
+                } else if let codexSurfaceID = summary.codexSurfaceID {
+                    approvalReviewState.exitReviewing()
+                    codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
+                    codexApprovalInteractionState = nil
+                    codexTextInputContentHeight = 0
+                }
             }
-        } label: {
+        )
+    }
+
+    private func aiSessionRow(
+        _ summary: AIPluginExpandedSessionSummary,
+        glyph: NotchPilotBrandGlyph?,
+        accent: Color,
+        isInteractive: Bool,
+        onActivate: @escaping () -> Void
+    ) -> some View {
+        Button(action: onActivate) {
             HStack(spacing: 10) {
-                if let glyph = NotchPilotBrandGlyph(host: summary.host) {
+                attentionAccent(hasAttention: summary.hasAttention, accent: accent)
+
+                if let glyph {
                     NotchPilotBrandIcon(glyph: glyph, size: 20)
                 } else {
                     NotchPilotIconTile(
@@ -1107,29 +1145,33 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(summary.title)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(NotchPilotTheme.islandTextPrimary)
                         .lineLimit(1)
                         .truncationMode(.tail)
 
                     Text(summary.subtitle)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(
                             summary.hasAttention
-                                ? hostColor(for: summary.host).opacity(0.92)
+                                ? accent.opacity(0.92)
                                 : NotchPilotTheme.islandTextSecondary
                         )
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 6)
+
+                if summary.hasMeta {
+                    sessionMetaColumn(summary)
+                }
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.2))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.22))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
@@ -1137,8 +1179,40 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(summary.hasAttention == false)
-        .opacity(summary.hasAttention ? 1 : 0.88)
+        .disabled(isInteractive == false)
+        .opacity(isInteractive ? 1 : 0.9)
+    }
+
+    private func attentionAccent(hasAttention: Bool, accent: Color) -> some View {
+        Capsule()
+            .fill(hasAttention ? accent : Color.clear)
+            .frame(width: 2, height: 22)
+    }
+
+    @ViewBuilder
+    private func sessionMetaColumn(_ summary: AIPluginExpandedSessionSummary) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            if summary.hasTokenUsage {
+                HStack(spacing: 6) {
+                    Text("↑\(plugin.formattedTokenCount(summary.inputTokenCount))")
+                    Text("↓\(plugin.formattedTokenCount(summary.outputTokenCount))")
+                }
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.82))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            if let runtime = summary.runtimeDurationText, runtime.isEmpty == false {
+                Text(runtime)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchPilotTheme.islandTextMuted)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
     }
 
     private func exitDetail() {
@@ -1156,7 +1230,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
     private func codexApprovalSummary(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
             .foregroundStyle(NotchPilotTheme.islandTextPrimary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1164,16 +1238,20 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
     private func codexApprovalCommand(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13, weight: .bold, design: .monospaced))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+            .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.88))
             .lineLimit(4)
-            .truncationMode(.tail)
+            .truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.white.opacity(0.035))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
             )
     }
 
@@ -1525,12 +1603,24 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
     private func approvalCard(_ approval: PendingApproval) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            codexApprovalSummary(claudeApprovalSummary(for: approval))
             codexApprovalCommand(approvalCommandText(for: approval))
             approvalButtons(approval)
             if claudeFeedbackRequestID == approval.requestID {
                 approvalFeedbackInput(approval)
             }
         }
+    }
+
+    private func claudeApprovalSummary(for approval: PendingApproval) -> String {
+        if approval.approvalKind == .networkAccess {
+            return "Network access request"
+        }
+        let toolName = approval.payload.toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if toolName.isEmpty == false {
+            return "\(toolName) wants to run"
+        }
+        return "Claude is waiting for approval"
     }
 
     private func approvalCommandText(for approval: PendingApproval) -> String {

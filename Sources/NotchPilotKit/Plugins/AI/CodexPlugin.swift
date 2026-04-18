@@ -88,43 +88,23 @@ public final class CodexPlugin: AIPluginRendering {
         guard shouldRenderCompactPreview else {
             return nil
         }
-        guard let activity = currentCompactActivity else {
+        guard let metrics = compactMetrics(context: context) else {
             return nil
         }
-
-        let durationText = activity.runtimeDurationText ?? ""
-        let approvalNotice = approvalSneakNotificationsEnabled
-            ? AIPluginApprovalSneakNotice(pendingApprovals: pendingApprovals, codexSurface: codexActionableSurface)
-            : nil
-        let sideFrameWidth = max(
-            compactPreviewLeftWidth(approvalCount: activity.approvalCount),
-            compactPreviewTextWidth(durationText)
-        )
+        let approvalNotice = approvalSneakNotice()
         let noticeLayout = AIPluginCompactApprovalNoticeLayout(
             notice: approvalNotice,
-            baseTotalWidth:
-                10 * 2
-                + context.notchGeometry.compactSize.width
-                + sideFrameWidth * 2
+            baseTotalWidth: metrics.totalWidth
         )
-        let totalHeight = context.notchGeometry.compactSize.height + noticeLayout.height
-        let totalWidth = noticeLayout.totalWidth
 
         return NotchPluginPreview(
-            width: totalWidth,
-            height: totalHeight,
+            width: noticeLayout.totalWidth,
+            height: context.notchGeometry.compactSize.height + noticeLayout.height,
             view: AnyView(
-                CodexCompactPreviewView(
-                    iconSystemName: iconSystemName,
-                    accentColor: accentColor,
-                    durationText: durationText,
-                    approvalCount: activity.approvalCount,
+                AIPluginCompactView(
+                    plugin: self,
+                    context: context,
                     approvalNotice: approvalNotice,
-                    sideFrameWidth: sideFrameWidth,
-                    totalWidth: totalWidth,
-                    totalHeight: totalHeight,
-                    notchWidth: context.notchGeometry.compactSize.width,
-                    notchHeight: context.notchGeometry.compactSize.height,
                     noticeLayout: noticeLayout
                 )
             )
@@ -164,7 +144,8 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     var expandedSessionSummaries: [AIPluginExpandedSessionSummary] {
-        sessions
+        let now = nowProvider()
+        return sessions
             .map { session in
                 let codexSurface = codexSurfaceForSession(session)
                 return AIPluginExpandedSessionSummary(
@@ -177,7 +158,8 @@ public final class CodexPlugin: AIPluginRendering {
                     codexSurfaceID: codexSurface?.id,
                     updatedAt: session.updatedAt,
                     inputTokenCount: session.inputTokenCount,
-                    outputTokenCount: session.outputTokenCount
+                    outputTokenCount: session.outputTokenCount,
+                    runtimeDurationText: runtimeDurationText(forThreadID: session.id, now: now)
                 )
             }
             .sorted { lhs, rhs in
@@ -186,6 +168,14 @@ public final class CodexPlugin: AIPluginRendering {
                 }
                 return lhs.updatedAt > rhs.updatedAt
             }
+    }
+
+    private func runtimeDurationText(forThreadID threadID: String, now: Date) -> String? {
+        guard let duration = codexThreads.preferredActivityDuration(for: threadID, now: now) else {
+            return nil
+        }
+
+        return AIRuntimeDurationFormatter.format(duration)
     }
 
     public func displayTitle(for session: AISession) -> String? {
@@ -384,111 +374,6 @@ public final class CodexPlugin: AIPluginRendering {
             return nil
         }
 
-        return formatRuntimeDuration(duration)
-    }
-
-    private func formatRuntimeDuration(_ duration: TimeInterval) -> String {
-        let totalSeconds = Int(duration.rounded(.down))
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-
-        if hours > 0 {
-            return "\(hours)h\(String(format: "%02d", minutes))m"
-        }
-        if minutes > 0 {
-            return "\(minutes)m\(String(format: "%02d", seconds))s"
-        }
-        return "\(seconds)s"
-    }
-
-    private func compactPreviewTextWidth(_ text: String) -> CGFloat {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
-        ]
-        return ceil((text as NSString).size(withAttributes: attributes).width) + 2
-    }
-
-    private func compactPreviewLeftWidth(approvalCount: Int) -> CGFloat {
-        guard approvalCount > 0 else {
-            return 34
-        }
-
-        return 22 + 5 + compactPreviewTextWidth("\(approvalCount)") + 10
-    }
-}
-
-private struct CodexCompactPreviewView: View {
-    let iconSystemName: String
-    let accentColor: Color
-    let durationText: String
-    let approvalCount: Int
-    let approvalNotice: AIPluginApprovalSneakNotice?
-    let sideFrameWidth: CGFloat
-    let totalWidth: CGFloat
-    let totalHeight: CGFloat
-    let notchWidth: CGFloat
-    let notchHeight: CGFloat
-    let noticeLayout: AIPluginCompactApprovalNoticeLayout
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                brandCluster
-                    .frame(width: sideFrameWidth, alignment: .leading)
-
-                Spacer(minLength: notchWidth)
-
-                Text(durationText)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(NotchPilotTheme.islandTextSecondary)
-                    .lineLimit(1)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: sideFrameWidth, alignment: .trailing)
-            }
-            .frame(height: notchHeight, alignment: .center)
-
-            if let approvalNotice {
-                approvalNoticeRow(approvalNotice)
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(width: totalWidth, height: totalHeight, alignment: .top)
-    }
-
-    private var brandCluster: some View {
-        HStack(spacing: 5) {
-            if let glyph = NotchPilotBrandGlyph(systemName: iconSystemName) {
-                NotchPilotBrandIcon(glyph: glyph, size: 22)
-            } else {
-                NotchPilotIconTile(
-                    systemName: iconSystemName,
-                    accent: accentColor,
-                    size: 34,
-                    isActive: true
-                )
-            }
-
-            if approvalCount > 0 {
-                NotchPilotStatusBadge(
-                    text: "\(approvalCount)",
-                    color: accentColor,
-                    foreground: .white
-                )
-            }
-        }
-    }
-
-    private func approvalNoticeRow(_ notice: AIPluginApprovalSneakNotice) -> some View {
-        Text(notice.text)
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .lineLimit(noticeLayout.lineLimit)
-            .truncationMode(.tail)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)
-            .frame(height: noticeLayout.height, alignment: noticeLayout.isSingleLine ? .center : .top)
+        return AIRuntimeDurationFormatter.format(duration)
     }
 }

@@ -22,20 +22,24 @@ public final class ClaudePlugin: AIPluginRendering {
     private let encoder: HookResponseEncoder
     private let sessionScopedApprovalStore: SessionScopedRuleStoring
     private let settingsStore: SettingsStore
+    private let nowProvider: @Sendable () -> Date
 
     private weak var bus: EventBus?
     private var responders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
     private var settingsCancellables: Set<AnyCancellable> = []
+    private var activityTracker = ClaudeSessionActivityTracker()
 
     public init(
         settingsStore: SettingsStore = .shared,
         permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
-        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore()
+        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
+        nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
         self.encoder = HookResponseEncoder(permissionRuleStore: permissionRuleStore)
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
+        self.nowProvider = nowProvider
         settingsStore.$approvalSneakNotificationsEnabled
             .removeDuplicates()
             .sink { [weak self] isEnabled in
@@ -55,6 +59,7 @@ public final class ClaudePlugin: AIPluginRendering {
         pendingApprovals = []
         codexActionableSurface = nil
         lastErrorMessage = nil
+        activityTracker.reset()
         bus = nil
     }
 
@@ -66,6 +71,11 @@ public final class ClaudePlugin: AIPluginRendering {
 
         do {
             let envelope = try parser.parse(frame: frame)
+            activityTracker.observe(
+                sessionID: envelope.sessionID,
+                eventType: envelope.eventType,
+                at: nowProvider()
+            )
 
             if envelope.eventType == .stop {
                 sessionScopedApprovalStore.clearSession(envelope.sessionID)
@@ -178,7 +188,7 @@ public final class ClaudePlugin: AIPluginRendering {
                 outputTokenCount: matchingSession?.outputTokenCount,
                 approvalCount: pendingApprovals.count,
                 sessionTitle: matchingSession.flatMap(displayTitle(for:)),
-                runtimeDurationText: nil
+                runtimeDurationText: runtimeDurationText(forSessionID: approval.sessionID)
             )
         }
 
@@ -193,7 +203,7 @@ public final class ClaudePlugin: AIPluginRendering {
             outputTokenCount: session.outputTokenCount,
             approvalCount: 0,
             sessionTitle: displayTitle(for: session),
-            runtimeDurationText: nil
+            runtimeDurationText: runtimeDurationText(forSessionID: session.id)
         )
     }
 
@@ -214,7 +224,8 @@ public final class ClaudePlugin: AIPluginRendering {
                     codexSurfaceID: nil,
                     updatedAt: session.updatedAt,
                     inputTokenCount: session.inputTokenCount,
-                    outputTokenCount: session.outputTokenCount
+                    outputTokenCount: session.outputTokenCount,
+                    runtimeDurationText: runtimeDurationText(forSessionID: session.id)
                 )
             }
             .sorted { lhs, rhs in
@@ -223,6 +234,14 @@ public final class ClaudePlugin: AIPluginRendering {
                 }
                 return lhs.updatedAt > rhs.updatedAt
             }
+    }
+
+    private func runtimeDurationText(forSessionID sessionID: String) -> String? {
+        guard let duration = activityTracker.duration(forSessionID: sessionID, now: nowProvider()) else {
+            return nil
+        }
+
+        return AIRuntimeDurationFormatter.format(duration)
     }
 
     public func displayTitle(for session: AISession) -> String? {
@@ -312,5 +331,44 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         return title
+    }
+}
+
+struct ClaudeSessionActivityTracker {
+    private var firstActiveAt: [String: Date] = [:]
+    private var lastActiveAt: [String: Date] = [:]
+    private var lastEventType: [String: AIBridgeEventType] = [:]
+
+    mutating func reset() {
+        firstActiveAt.removeAll()
+        lastActiveAt.removeAll()
+        lastEventType.removeAll()
+    }
+
+    mutating func observe(sessionID: String, eventType: AIBridgeEventType, at date: Date) {
+        let previousWasTerminal = (lastEventType[sessionID] == .stop)
+        let nextIsActive = (eventType != .stop)
+
+        if firstActiveAt[sessionID] == nil || (previousWasTerminal && nextIsActive) {
+            firstActiveAt[sessionID] = date
+        }
+
+        if let existing = lastActiveAt[sessionID] {
+            lastActiveAt[sessionID] = max(existing, date)
+        } else {
+            lastActiveAt[sessionID] = date
+        }
+
+        lastEventType[sessionID] = eventType
+    }
+
+    func duration(forSessionID sessionID: String, now: Date) -> TimeInterval? {
+        guard let start = firstActiveAt[sessionID] else {
+            return nil
+        }
+
+        let isTerminal = (lastEventType[sessionID] == .stop)
+        let endedAt: Date = isTerminal ? (lastActiveAt[sessionID] ?? now) : now
+        return max(0, endedAt.timeIntervalSince(start))
     }
 }
