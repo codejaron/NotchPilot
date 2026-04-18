@@ -991,7 +991,10 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     @State private var claudeFeedbackText = ""
     @State private var claudeFeedbackContentHeight: CGFloat = 0
 
-    private let codexTextInputFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private let codexTextInputFont = NSFont.systemFont(
+        ofSize: CodexApprovalCompactLayout.textInputFontSize,
+        weight: .medium
+    )
     private let claudeFeedbackFont = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     var body: some View {
@@ -1125,9 +1128,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     }
 
     private func codexSurfaceDetailView(_ surface: CodexActionableSurface) -> some View {
-        return VStack(alignment: .leading, spacing: 10) {
-            minimalBackButton
-            codexSurfaceCard(surface)
+        let presentation = CodexApprovalDetailPresentation(surface: surface)
+
+        return VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.detailSpacing) {
+            codexSurfaceDetailHeader(surface, presentation: presentation)
+            codexSurfaceCard(surface, presentation: presentation)
         }
         .background(
             CodexApprovalKeyMonitor(
@@ -1153,6 +1158,34 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         }
     }
 
+    private func codexSurfaceDetailHeader(
+        _ surface: CodexActionableSurface,
+        presentation: CodexApprovalDetailPresentation
+    ) -> some View {
+        HStack(alignment: .center, spacing: CodexApprovalCompactLayout.headerSpacing) {
+            minimalBackButton
+
+            if let summaryText = presentation.summaryText {
+                Text(summaryText)
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.headerSummaryFontSize,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                    .lineLimit(CodexApprovalCompactLayout.headerSummaryLineLimit)
+                    .minimumScaleFactor(0.86)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
+            }
+
+            codexSurfaceActionButtons(surface)
+        }
+        .frame(maxWidth: .infinity, minHeight: CodexApprovalCompactLayout.headerButtonSize)
+    }
+
     private var minimalBackButton: some View {
         Button {
             exitDetail()
@@ -1160,7 +1193,10 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                .frame(width: 24, height: 24)
+                .frame(
+                    width: CodexApprovalCompactLayout.headerButtonSize,
+                    height: CodexApprovalCompactLayout.headerButtonSize
+                )
                 .background(
                     Circle()
                         .fill(Color.white.opacity(0.06))
@@ -1342,8 +1378,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         codexTextInputContentHeight = 0
     }
 
-    private func codexSurfaceCard(_ surface: CodexActionableSurface) -> some View {
-        codexApprovalPrimaryColumn(surface)
+    private func codexSurfaceCard(
+        _ surface: CodexActionableSurface,
+        presentation: CodexApprovalDetailPresentation
+    ) -> some View {
+        codexApprovalPrimaryColumn(surface, presentation: presentation)
     }
 
     private func codexApprovalSummary(_ text: String) -> some View {
@@ -1354,55 +1393,61 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func codexApprovalCommand(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
+    private func codexApprovalCommand(_ text: String, compact: Bool = false) -> some View {
+        let cornerRadius = compact ? CodexApprovalCompactLayout.commandCornerRadius : 12
+
+        return Text(text)
+            .font(.system(
+                size: compact ? CodexApprovalCompactLayout.commandFontSize : 12,
+                weight: .regular,
+                design: .monospaced
+            ))
             .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.88))
-            .lineLimit(4)
+            .lineLimit(compact ? CodexApprovalCompactLayout.commandLineLimit : 4)
             .truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, compact ? CodexApprovalCompactLayout.commandHorizontalPadding : 10)
+            .padding(.vertical, compact ? CodexApprovalCompactLayout.commandVerticalPadding : 8)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Color.white.opacity(0.035))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
             )
     }
 
-    private func codexApprovalPrimaryColumn(_ surface: CodexActionableSurface) -> some View {
-        let presentation = CodexApprovalDetailPresentation(surface: surface)
-
-        return VStack(alignment: .leading, spacing: 10) {
-            if let summaryText = presentation.summaryText {
-                codexApprovalSummary(summaryText)
-            }
-
-            codexApprovalCommand(presentation.commandText)
+    private func codexApprovalPrimaryColumn(
+        _ surface: CodexActionableSurface,
+        presentation: CodexApprovalDetailPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.primaryColumnSpacing) {
+            codexApprovalCommand(presentation.commandText, compact: true)
             codexSurfaceControls(surface)
-            codexSurfaceButtons(surface)
         }
     }
 
-    private func codexSurfaceButtons(_ surface: CodexActionableSurface) -> some View {
+    private func codexSurfaceActionButtons(_ surface: CodexActionableSurface) -> some View {
         let cancelFocused = codexApprovalInteractionState?.focusedTarget == .cancel
         let submitFocused = codexApprovalInteractionState?.focusedTarget == .submit
 
-        return HStack(spacing: 10) {
-            Spacer()
-
+        return HStack(spacing: CodexApprovalCompactLayout.actionSpacing) {
             Button {
                 focusCodexApproval(.cancel, surface: surface)
                 _ = plugin.performCodexAction(.cancel, surfaceID: surface.id)
             } label: {
                 Text(surface.cancelButtonTitle)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.actionFontSize,
+                        weight: .bold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, CodexApprovalCompactLayout.actionHorizontalPadding)
+                    .padding(.vertical, CodexApprovalCompactLayout.actionVerticalPadding)
                     .background(
                         Capsule(style: .continuous)
                             .fill(cancelFocused ? Color.white.opacity(0.08) : Color.white.opacity(0.03))
@@ -1419,10 +1464,16 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 submitCodexSurface(surface)
             } label: {
                 Text(surface.primaryButtonTitle)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.actionFontSize,
+                        weight: .bold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, CodexApprovalCompactLayout.actionHorizontalPadding + 1)
+                    .padding(.vertical, CodexApprovalCompactLayout.actionVerticalPadding)
                     .background(
                         Capsule(style: .continuous)
                             .fill(
@@ -1448,7 +1499,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     @ViewBuilder
     private func codexSurfaceControls(_ surface: CodexActionableSurface) -> some View {
         if surface.options.isEmpty == false || surface.textInput != nil {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.controlsSpacing) {
                 let feedbackOptionID = CodexApprovalInteractionState.feedbackOptionID(for: surface)
                 let standardOptions = surface.options.filter { $0.id != feedbackOptionID }
                 let feedbackOption = feedbackOptionID.flatMap { optionID in
@@ -1456,7 +1507,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 }
 
                 if standardOptions.isEmpty == false {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.optionStackSpacing) {
                         ForEach(standardOptions) { option in
                             codexSurfaceOptionRow(option, surface: surface)
                         }
@@ -1484,11 +1535,18 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         return Button {
             activateCodexApprovalOption(option.id, surface: surface)
         } label: {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .center, spacing: CodexApprovalCompactLayout.optionContentSpacing) {
                 Text("\(option.index)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.optionIndexFontSize,
+                        weight: .bold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(isSelected ? .white : NotchPilotTheme.islandTextSecondary)
-                    .frame(width: 24, height: 24)
+                    .frame(
+                        width: CodexApprovalCompactLayout.optionIndexSize,
+                        height: CodexApprovalCompactLayout.optionIndexSize
+                    )
                     .background(
                         Circle()
                             .fill(
@@ -1499,21 +1557,27 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     )
 
                 Text(option.title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.optionTitleFontSize,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(isSelected ? NotchPilotTheme.islandTextPrimary : NotchPilotTheme.islandTextPrimary)
+                    .lineLimit(CodexApprovalCompactLayout.optionLineLimit)
+                    .minimumScaleFactor(0.86)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if isSelected {
                     Image(systemName: "return")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.84))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, CodexApprovalCompactLayout.optionHorizontalPadding)
+            .padding(.vertical, CodexApprovalCompactLayout.optionVerticalPadding)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.optionCornerRadius, style: .continuous)
                     .fill(
                         isSelected
                             ? LinearGradient(
@@ -1535,7 +1599,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                     )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.optionCornerRadius, style: .continuous)
                     .strokeBorder(
                         isSelected ? NotchPilotTheme.codex.opacity(0.2) : Color.white.opacity(0.08),
                         lineWidth: 1
@@ -1555,17 +1619,23 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         let presentation = CodexApprovalTextInputPresentation.feedback(textInput: textInput, option: option)
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
-            verticalPadding: 12
+            verticalPadding: CodexApprovalCompactLayout.textInputVerticalPadding
         )
-        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading ? 28 : 0
+        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading
+            ? CodexApprovalCompactLayout.textInputLeadingInset
+            : 0
 
         return ZStack(alignment: .topLeading) {
             if presentation.indexPlacement == .insideFieldLeading {
                 Text(presentation.indexText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.textInputFontSize,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(.white.opacity(0.45))
-                    .padding(.leading, 10)
-                    .padding(.top, 10)
+                    .padding(.leading, CodexApprovalCompactLayout.textInputIndexLeadingPadding)
+                    .padding(.top, CodexApprovalCompactLayout.textInputIndexTopPadding)
                     .allowsHitTesting(false)
             }
 
@@ -1594,11 +1664,17 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 .padding(.leading, leadingInset)
                 .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(
+                        cornerRadius: CodexApprovalCompactLayout.textInputCornerRadius,
+                        style: .continuous
+                    )
                         .fill(Color.white.opacity(isFocused ? 0.08 : 0.03))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(
+                        cornerRadius: CodexApprovalCompactLayout.textInputCornerRadius,
+                        style: .continuous
+                    )
                         .strokeBorder(
                             isFocused ? NotchPilotTheme.codex.opacity(0.48) : Color.white.opacity(0.08),
                             lineWidth: 1
@@ -1610,11 +1686,15 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                    currentCodexTextDraft(for: surface).isEmpty,
                    presentation.placeholder.isEmpty == false {
                     Text(presentation.placeholder)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(
+                            size: CodexApprovalCompactLayout.textInputFontSize,
+                            weight: .medium,
+                            design: .rounded
+                        ))
                         .foregroundStyle(.white.opacity(0.3))
-                        .padding(.leading, 10 + leadingInset)
-                        .padding(.trailing, 10)
-                        .padding(.vertical, 10)
+                        .padding(.leading, CodexApprovalCompactLayout.placeholderHorizontalPadding + leadingInset)
+                        .padding(.trailing, CodexApprovalCompactLayout.placeholderHorizontalPadding)
+                        .padding(.vertical, CodexApprovalCompactLayout.placeholderVerticalPadding)
                         .allowsHitTesting(false)
                 }
             }
@@ -1636,17 +1716,23 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         let presentation = CodexApprovalTextInputPresentation.standalone(textInput: textInput, index: index)
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
-            verticalPadding: 12
+            verticalPadding: CodexApprovalCompactLayout.textInputVerticalPadding
         )
-        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading ? 28 : 0
+        let leadingInset: CGFloat = presentation.indexPlacement == .insideFieldLeading
+            ? CodexApprovalCompactLayout.textInputLeadingInset
+            : 0
 
         return ZStack(alignment: .topLeading) {
             if presentation.indexPlacement == .insideFieldLeading {
                 Text(presentation.indexText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.textInputFontSize,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(.white.opacity(0.45))
-                    .padding(.leading, 10)
-                    .padding(.top, 10)
+                    .padding(.leading, CodexApprovalCompactLayout.textInputIndexLeadingPadding)
+                    .padding(.top, CodexApprovalCompactLayout.textInputIndexTopPadding)
                     .allowsHitTesting(false)
             }
 
@@ -1675,11 +1761,17 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 .padding(.leading, leadingInset)
                 .frame(height: sizing.height(forContentHeight: codexTextInputContentHeight))
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(
+                        cornerRadius: CodexApprovalCompactLayout.textInputCornerRadius,
+                        style: .continuous
+                    )
                         .fill(Color.white.opacity(isFocused ? 0.08 : 0.03))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(
+                        cornerRadius: CodexApprovalCompactLayout.textInputCornerRadius,
+                        style: .continuous
+                    )
                         .strokeBorder(
                             isFocused ? NotchPilotTheme.codex.opacity(0.48) : Color.white.opacity(0.08),
                             lineWidth: 1
@@ -1690,11 +1782,15 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                    currentCodexTextDraft(for: surface).isEmpty,
                    presentation.placeholder.isEmpty == false {
                     Text(presentation.placeholder)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(
+                            size: CodexApprovalCompactLayout.textInputFontSize,
+                            weight: .medium,
+                            design: .rounded
+                        ))
                         .foregroundStyle(.white.opacity(0.3))
-                        .padding(.leading, 10 + leadingInset)
-                        .padding(.trailing, 10)
-                        .padding(.vertical, 10)
+                        .padding(.leading, CodexApprovalCompactLayout.placeholderHorizontalPadding + leadingInset)
+                        .padding(.trailing, CodexApprovalCompactLayout.placeholderHorizontalPadding)
+                        .padding(.vertical, CodexApprovalCompactLayout.placeholderVerticalPadding)
                         .allowsHitTesting(false)
                 }
             }
