@@ -1,11 +1,95 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import NotchPilotKit
 
 final class AIPluginSupportTests: XCTestCase {
+    private static let compactContext = NotchContext(
+        screenID: "test-screen",
+        notchState: .previewClosed,
+        notchGeometry: NotchGeometry(
+            compactSize: CGSize(width: 185, height: 32),
+            expandedSize: CGSize(width: 520, height: 320)
+        ),
+        isPrimaryScreen: true
+    )
+
     func testExpandedSessionListPresentationHidesEmptyAgentSurfaces() {
         let presentation = AIPluginExpandedSessionListPresentation(summaries: [])
 
         XCTAssertFalse(presentation.shouldRender)
+    }
+
+    @MainActor
+    func testCompactMetricsPlaceRuntimeLeftAndTokensInRightColumnForAIHosts() throws {
+        let runtimeWidth = measuredWidth(
+            "2s",
+            font: .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        )
+        let inputTokenWidth = measuredWidth(
+            "↑98.8K",
+            font: .systemFont(ofSize: 10, weight: .semibold)
+        )
+        let outputTokenWidth = measuredWidth(
+            "↓1.3K",
+            font: .systemFont(ofSize: 10, weight: .semibold)
+        )
+        let expectedTokenColumnWidth = max(inputTokenWidth, outputTokenWidth)
+        let previousHorizontalTokenWidth = inputTokenWidth + 6 + outputTokenWidth
+
+        for host in [AIHost.claude, .codex] {
+            let plugin = CompactMetricsProbePlugin(
+                activity: AIPluginCompactActivity(
+                    host: host,
+                    label: "Working",
+                    inputTokenCount: 98_765,
+                    outputTokenCount: 1_300,
+                    approvalCount: 0,
+                    sessionTitle: nil,
+                    runtimeDurationText: "2s"
+                )
+            )
+
+            let metrics = try XCTUnwrap(plugin.compactMetrics(context: Self.compactContext))
+
+            XCTAssertEqual(metrics.leftWidth, 22 + 5 + runtimeWidth, accuracy: 0.5)
+            XCTAssertEqual(metrics.rightWidth, expectedTokenColumnWidth, accuracy: 0.5)
+            XCTAssertLessThan(metrics.rightWidth, previousHorizontalTokenWidth)
+            XCTAssertEqual(
+                metrics.sideFrameWidth,
+                max(34, metrics.leftWidth, metrics.rightWidth),
+                accuracy: 0.5
+            )
+        }
+    }
+
+    @MainActor
+    func testCompactViewRefreshesRuntimeWithoutPluginEvents() throws {
+        let plugin = CompactRuntimeRefreshProbePlugin()
+        let metrics = try XCTUnwrap(plugin.compactMetrics(context: Self.compactContext))
+        let noticeLayout = AIPluginCompactApprovalNoticeLayout(
+            notice: nil,
+            baseTotalWidth: metrics.totalWidth
+        )
+        let view = AIPluginCompactView(
+            plugin: plugin,
+            context: Self.compactContext,
+            approvalNotice: nil,
+            noticeLayout: noticeLayout
+        )
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = CGRect(
+            origin: .zero,
+            size: CGSize(width: noticeLayout.totalWidth, height: Self.compactContext.notchGeometry.compactSize.height)
+        )
+
+        hostingView.layoutSubtreeIfNeeded()
+        let initialReadCount = plugin.activityReadCount
+
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(plugin.activityReadCount, initialReadCount)
     }
 
     func testExpandedSessionListPresentationRendersWhenAThreadExists() {
@@ -58,6 +142,40 @@ final class AIPluginSupportTests: XCTestCase {
 
         XCTAssertFalse(working.isDimmed)
         XCTAssertTrue(completed.isDimmed)
+    }
+
+    func testAttentionSessionRowsOpenReviewFromPrimaryAreaAndUseLargerJumpTarget() {
+        let attention = AIPluginExpandedSessionSummary(
+            id: "thread-attention",
+            host: .claude,
+            title: "Needs approval",
+            subtitle: "Bash",
+            phase: .working,
+            approvalCount: 1,
+            approvalRequestID: "approval-1",
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
+        let ordinary = AIPluginExpandedSessionSummary(
+            id: "thread-ordinary",
+            host: .claude,
+            title: "Working",
+            subtitle: "Processing",
+            phase: .working,
+            approvalCount: 0,
+            approvalRequestID: nil,
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 1),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
+
+        XCTAssertEqual(attention.primaryRowAction, .reviewAttention)
+        XCTAssertGreaterThanOrEqual(attention.jumpAccessoryHitWidth, 36)
+        XCTAssertEqual(ordinary.primaryRowAction, .activateSession)
+        XCTAssertEqual(ordinary.jumpAccessoryHitWidth, 0)
     }
 
     func testApprovalReviewStateAdvancesToNextPendingApprovalWhileReviewing() {
@@ -278,4 +396,81 @@ final class AIPluginSupportTests: XCTestCase {
         XCTAssertGreaterThan(layout.height, 44)
         XCTAssertNil(layout.lineLimit)
     }
+}
+
+@MainActor
+private final class CompactMetricsProbePlugin: AIPluginRendering {
+    let id = "compact-metrics-probe"
+    let title = "Compact Metrics Probe"
+    let iconSystemName = "sparkles"
+    let accentColor: Color = .blue
+    var isEnabled = true
+    let dockOrder = 1
+    let previewPriority: Int? = nil
+
+    var sessions: [AISession] = []
+    var pendingApprovals: [PendingApproval] = []
+    var codexActionableSurface: CodexActionableSurface? = nil
+    var currentCompactActivity: AIPluginCompactActivity?
+    var expandedSessionSummaries: [AIPluginExpandedSessionSummary] = []
+    var approvalSneakNotificationsEnabled = true
+
+    init(activity: AIPluginCompactActivity) {
+        self.currentCompactActivity = activity
+    }
+
+    func displayTitle(for session: AISession) -> String? { nil }
+
+    func expandedSessionTitle(for session: AISession) -> String {
+        hostDisplayName(for: session.host)
+    }
+
+    func activate(bus: EventBus) {}
+
+    func deactivate() {}
+}
+
+@MainActor
+private final class CompactRuntimeRefreshProbePlugin: AIPluginRendering {
+    let id = "compact-runtime-refresh-probe"
+    let title = "Compact Runtime Refresh Probe"
+    let iconSystemName = "sparkles"
+    let accentColor: Color = .blue
+    var isEnabled = true
+    let dockOrder = 1
+    let previewPriority: Int? = nil
+
+    var sessions: [AISession] = []
+    var pendingApprovals: [PendingApproval] = []
+    var codexActionableSurface: CodexActionableSurface? = nil
+    var expandedSessionSummaries: [AIPluginExpandedSessionSummary] = []
+    var approvalSneakNotificationsEnabled = true
+    private(set) var activityReadCount = 0
+
+    var currentCompactActivity: AIPluginCompactActivity? {
+        activityReadCount += 1
+        return AIPluginCompactActivity(
+            host: .claude,
+            label: "Working",
+            inputTokenCount: 98_765,
+            outputTokenCount: 1_300,
+            approvalCount: 0,
+            sessionTitle: nil,
+            runtimeDurationText: "\(activityReadCount)s"
+        )
+    }
+
+    func displayTitle(for session: AISession) -> String? { nil }
+
+    func expandedSessionTitle(for session: AISession) -> String {
+        hostDisplayName(for: session.host)
+    }
+
+    func activate(bus: EventBus) {}
+
+    func deactivate() {}
+}
+
+private func measuredWidth(_ text: String, font: NSFont) -> CGFloat {
+    ceil((text as NSString).size(withAttributes: [.font: font]).width)
 }

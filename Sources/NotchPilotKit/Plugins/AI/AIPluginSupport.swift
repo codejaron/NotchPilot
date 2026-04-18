@@ -76,25 +76,16 @@ extension AIPluginRendering {
             return nil
         }
 
+        let runtimeWidth = compactRuntimeWidth(activity.runtimeDurationText)
         let leftWidth =
             22
             + (activity.approvalCount > 0 ? 5 + approvalBadgeWidth(count: activity.approvalCount) : 0)
+            + (runtimeWidth > 0 ? 5 + runtimeWidth : 0)
 
-        let tokensWidth =
-            tokenWidth(symbol: "↑", value: activity.inputTokenCount)
-            + 6
-            + tokenWidth(symbol: "↓", value: activity.outputTokenCount)
-        let runtimeWidth: CGFloat = {
-            guard let runtime = activity.runtimeDurationText,
-                  runtime.isEmpty == false else {
-                return 0
-            }
-            return AICompactTextMeasurer.width(
-                runtime,
-                font: .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            )
-        }()
-        let rightWidth = max(tokensWidth, runtimeWidth)
+        let rightWidth = tokenColumnWidth(
+            input: activity.inputTokenCount,
+            output: activity.outputTokenCount
+        )
 
         let sideFrameWidth = max(34, leftWidth, rightWidth)
         let totalWidth =
@@ -171,6 +162,30 @@ extension AIPluginRendering {
         AICompactTextMeasurer.width(
             "\(symbol)\(formattedTokenCount(value))",
             font: .systemFont(ofSize: 10, weight: .semibold)
+        )
+    }
+
+    private func tokenColumnWidth(input: Int?, output: Int?) -> CGFloat {
+        guard input != nil || output != nil else {
+            return 0
+        }
+
+        return max(
+            tokenWidth(symbol: "↑", value: input),
+            tokenWidth(symbol: "↓", value: output)
+        )
+    }
+
+    private func compactRuntimeWidth(_ runtime: String?) -> CGFloat {
+        guard let runtime,
+              runtime.isEmpty == false
+        else {
+            return 0
+        }
+
+        return AICompactTextMeasurer.width(
+            runtime,
+            font: .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         )
     }
 
@@ -322,6 +337,14 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         approvalRequestID != nil || codexSurfaceID != nil
     }
 
+    var primaryRowAction: AIPluginSessionRowPrimaryAction {
+        hasAttention ? .reviewAttention : .activateSession
+    }
+
+    var jumpAccessoryHitWidth: CGFloat {
+        hasAttention ? 38 : 0
+    }
+
     var isDimmed: Bool {
         phase == .completed
     }
@@ -338,6 +361,11 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     var hasMeta: Bool {
         hasTokenUsage || hasRuntime
     }
+}
+
+enum AIPluginSessionRowPrimaryAction: Equatable {
+    case activateSession
+    case reviewAttention
 }
 
 enum AIPluginSessionPhase: Equatable {
@@ -816,45 +844,56 @@ struct AIPluginCompactApprovalNoticeLayout: Equatable {
 }
 
 struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
+    private let runtimeRefreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     @ObservedObject var plugin: Plugin
+    @State private var runtimeRefreshTick = Date()
+
     let context: NotchContext
     let approvalNotice: AIPluginApprovalSneakNotice?
     let noticeLayout: AIPluginCompactApprovalNoticeLayout
 
     var body: some View {
-        if let activity = plugin.currentCompactActivity,
-           let metrics = plugin.compactMetrics(context: context) {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    compactBrandCluster(activity)
-                        .frame(width: metrics.sideFrameWidth, alignment: .leading)
+        let _ = runtimeRefreshTick
 
-                    Spacer(minLength: context.notchGeometry.compactSize.width)
+        Group {
+            if let activity = plugin.currentCompactActivity,
+               let metrics = plugin.compactMetrics(context: context) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        compactBrandCluster(activity)
+                            .frame(width: metrics.sideFrameWidth, alignment: .leading)
 
-                    compactMetaCluster(activity)
-                        .frame(width: metrics.sideFrameWidth, alignment: .trailing)
+                        Spacer(minLength: context.notchGeometry.compactSize.width)
+
+                        compactTokenCluster(activity)
+                            .frame(width: metrics.sideFrameWidth, alignment: .trailing)
+                    }
+                    .frame(height: context.notchGeometry.compactSize.height, alignment: .center)
+
+                    if let approvalNotice {
+                        approvalNoticeRow(approvalNotice)
+                    }
                 }
-                .frame(height: context.notchGeometry.compactSize.height, alignment: .center)
-
-                if let approvalNotice {
-                    approvalNoticeRow(approvalNotice)
+                .padding(.horizontal, AIPluginCompactLayout.outerPadding)
+                .frame(
+                    width: noticeLayout.totalWidth,
+                    height: context.notchGeometry.compactSize.height + noticeLayout.height,
+                    alignment: .top
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.gray)
+                        .frame(width: 10, height: 10)
+                    Text("Idle")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
                 }
             }
-            .padding(.horizontal, AIPluginCompactLayout.outerPadding)
-            .frame(
-                width: noticeLayout.totalWidth,
-                height: context.notchGeometry.compactSize.height + noticeLayout.height,
-                alignment: .top
-            )
-        } else {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.gray)
-                    .frame(width: 10, height: 10)
-                Text("Idle")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
+        }
+        .onReceive(runtimeRefreshTimer) { date in
+            runtimeRefreshTick = date
         }
     }
 
@@ -878,12 +917,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
                     foreground: .white
                 )
             }
-        }
-    }
 
-    @ViewBuilder
-    private func compactMetaCluster(_ activity: AIPluginCompactActivity) -> some View {
-        VStack(alignment: .trailing, spacing: 1) {
             if let runtime = activity.runtimeDurationText, runtime.isEmpty == false {
                 Text(runtime)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -892,13 +926,17 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
+        }
+    }
 
-            if activity.inputTokenCount != nil || activity.outputTokenCount != nil {
-                HStack(spacing: 6) {
-                    tokenChip(symbol: "↑", value: activity.inputTokenCount)
-                    tokenChip(symbol: "↓", value: activity.outputTokenCount)
-                }
+    @ViewBuilder
+    private func compactTokenCluster(_ activity: AIPluginCompactActivity) -> some View {
+        if activity.inputTokenCount != nil || activity.outputTokenCount != nil {
+            VStack(alignment: .trailing, spacing: 0) {
+                tokenChip(symbol: "↑", value: activity.inputTokenCount)
+                tokenChip(symbol: "↓", value: activity.outputTokenCount)
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -919,6 +957,8 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
             .font(.system(size: 10, weight: .medium, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.82))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -1118,13 +1158,15 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             glyph: .claude,
             accent: NotchPilotTheme.claude,
             onActivate: {
-                _ = plugin.activateSession(id: summary.id)
-            },
-            onReview: summary.approvalRequestID.map { approvalRequestID in
-                {
+                if let approvalRequestID = summary.approvalRequestID {
                     codexSurfaceReviewState.selectedSurfaceID = nil
                     approvalReviewState.beginReviewing(requestID: approvalRequestID)
+                } else {
+                    _ = plugin.activateSession(id: summary.id)
                 }
+            },
+            onJump: summary.approvalRequestID.map { _ in
+                { _ = plugin.activateSession(id: summary.id) }
             }
         )
     }
@@ -1135,15 +1177,17 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             glyph: .codex,
             accent: NotchPilotTheme.codex,
             onActivate: {
-                _ = plugin.activateSession(id: summary.id)
-            },
-            onReview: summary.codexSurfaceID.map { codexSurfaceID in
-                {
+                if let codexSurfaceID = summary.codexSurfaceID {
                     approvalReviewState.exitReviewing()
                     codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
                     codexApprovalInteractionState = nil
                     codexTextInputContentHeight = 0
+                } else {
+                    _ = plugin.activateSession(id: summary.id)
                 }
+            },
+            onJump: summary.codexSurfaceID.map { _ in
+                { _ = plugin.activateSession(id: summary.id) }
             }
         )
     }
@@ -1154,10 +1198,10 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             glyph: NotchPilotBrandGlyph(host: summary.host),
             accent: hostColor(for: summary.host),
             onActivate: {
-                _ = plugin.activateSession(id: summary.id)
-            },
-            onReview: summary.hasAttention
-                ? {
+                switch summary.primaryRowAction {
+                case .activateSession:
+                    _ = plugin.activateSession(id: summary.id)
+                case .reviewAttention:
                     if let approvalRequestID = summary.approvalRequestID {
                         codexSurfaceReviewState.selectedSurfaceID = nil
                         approvalReviewState.beginReviewing(requestID: approvalRequestID)
@@ -1168,6 +1212,9 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                         codexTextInputContentHeight = 0
                     }
                 }
+            },
+            onJump: summary.hasAttention
+                ? { _ = plugin.activateSession(id: summary.id) }
                 : nil
         )
     }
@@ -1177,7 +1224,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         glyph: NotchPilotBrandGlyph?,
         accent: Color,
         onActivate: @escaping () -> Void,
-        onReview: (() -> Void)? = nil
+        onJump: (() -> Void)? = nil
     ) -> some View {
         HStack(spacing: 4) {
             Button(action: onActivate) {
@@ -1219,24 +1266,26 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                         sessionMetaColumn(summary)
                     }
 
-                    Image(systemName: "arrow.up.forward")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.22))
+                    if onJump == nil {
+                        Image(systemName: "arrow.up.forward")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.22))
+                    }
                 }
                 .padding(.leading, 8)
-                .padding(.trailing, onReview == nil ? 8 : 4)
+                .padding(.trailing, onJump == nil ? 8 : 4)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if let onReview {
-                Button(action: onReview) {
+            if let onJump {
+                Button(action: onJump) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.32))
-                        .frame(width: 28, height: 36)
+                        .frame(width: summary.jumpAccessoryHitWidth, height: 38)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
