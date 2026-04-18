@@ -4,8 +4,6 @@ import AppKit
 public final class StatusItemController: NSObject, NSMenuItemValidation {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-    private let openHandler: () -> Void
-    private let closeHandler: () -> Void
     private let searchLyricsHandler: () -> Void
     private let ignoreCurrentTrackLyricsHandler: () -> Void
     private let revealCurrentLyricsInFinderHandler: () -> Void
@@ -17,13 +15,14 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     private let canAdjustLyricsOffset: () -> Bool
     private let getLyricsOffset: () -> Int
     private let setLyricsOffset: (Int) -> Void
+    private let isActivitySneakPreviewsHidden: () -> Bool
+    private let toggleActivitySneakPreviewsHandler: () -> Void
     private let menu: NSMenu
+    private var hideActivitySneaksItem: NSMenuItem!
     private var lyricsOffsetItem: NSMenuItem!
     private var offsetView: LyricsOffsetMenuView!
 
     public init(
-        openHandler: @escaping () -> Void,
-        closeHandler: @escaping () -> Void,
         searchLyricsHandler: @escaping () -> Void,
         ignoreCurrentTrackLyricsHandler: @escaping () -> Void,
         revealCurrentLyricsInFinderHandler: @escaping () -> Void,
@@ -33,11 +32,11 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         canAdjustLyricsOffset: @escaping () -> Bool,
         getLyricsOffset: @escaping () -> Int,
         setLyricsOffset: @escaping (Int) -> Void,
+        isActivitySneakPreviewsHidden: @escaping () -> Bool,
+        toggleActivitySneakPreviewsHandler: @escaping () -> Void,
         settingsHandler: @escaping () -> Void,
         quitHandler: @escaping () -> Void
     ) {
-        self.openHandler = openHandler
-        self.closeHandler = closeHandler
         self.searchLyricsHandler = searchLyricsHandler
         self.ignoreCurrentTrackLyricsHandler = ignoreCurrentTrackLyricsHandler
         self.revealCurrentLyricsInFinderHandler = revealCurrentLyricsInFinderHandler
@@ -47,6 +46,8 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         self.canAdjustLyricsOffset = canAdjustLyricsOffset
         self.getLyricsOffset = getLyricsOffset
         self.setLyricsOffset = setLyricsOffset
+        self.isActivitySneakPreviewsHidden = isActivitySneakPreviewsHidden
+        self.toggleActivitySneakPreviewsHandler = toggleActivitySneakPreviewsHandler
         self.settingsHandler = settingsHandler
         self.quitHandler = quitHandler
         self.menu = NSMenu()
@@ -58,8 +59,6 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
             button.title = "NotchPilot"
         }
 
-        menu.addItem(NSMenuItem(title: "Open on Active Screen", action: #selector(openAI), keyEquivalent: "o"))
-        menu.addItem(NSMenuItem(title: "Close All", action: #selector(closeAll), keyEquivalent: "w"))
         menu.addItem(NSMenuItem(title: "Search Lyrics…", action: #selector(searchLyrics), keyEquivalent: ""))
         menu.addItem(
             NSMenuItem(
@@ -84,19 +83,19 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         menu.addItem(lyricsOffsetItem)
 
         menu.addItem(.separator())
+        let hideActivitySneaksItem = NSMenuItem(
+            title: "Hide All Sneaks",
+            action: #selector(toggleActivitySneakPreviews),
+            keyEquivalent: "s"
+        )
+        hideActivitySneaksItem.keyEquivalentModifierMask = [.command, .shift]
+        self.hideActivitySneaksItem = hideActivitySneaksItem
+        menu.addItem(hideActivitySneaksItem)
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Quit NotchPilot", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
         menu.delegate = self
         statusItem.menu = menu
-    }
-
-    @objc private func openAI() {
-        openHandler()
-    }
-
-    @objc private func closeAll() {
-        closeHandler()
     }
 
     @objc private func searchLyrics() {
@@ -109,6 +108,11 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
 
     @objc private func revealCurrentLyricsInFinder() {
         revealCurrentLyricsInFinderHandler()
+    }
+
+    @objc private func toggleActivitySneakPreviews() {
+        toggleActivitySneakPreviewsHandler()
+        syncActivitySneakPreviewMenuState()
     }
 
     @objc private func openSettings() {
@@ -139,10 +143,15 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     var menuItemsForTesting: [NSMenuItem] {
         menu.items
     }
+
+    private func syncActivitySneakPreviewMenuState() {
+        hideActivitySneaksItem.state = isActivitySneakPreviewsHidden() ? .on : .off
+    }
 }
 
 extension StatusItemController: NSMenuDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
+        syncActivitySneakPreviewMenuState()
         let enabled = canAdjustLyricsOffset()
         lyricsOffsetItem.isHidden = !enabled
         if enabled {

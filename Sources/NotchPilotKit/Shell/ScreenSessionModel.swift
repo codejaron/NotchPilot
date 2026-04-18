@@ -28,14 +28,25 @@ public final class ScreenSessionModel: ObservableObject {
     public var id: String { descriptor.id }
     public var layoutDidChange: (() -> Void)?
 
+    private let settingsStore: SettingsStore
     private let queue = SneakPeekQueue()
     private var autoDismissTask: Task<Void, Never>?
     private var hoverOpenTask: Task<Void, Never>?
     private var hoverCloseTask: Task<Void, Never>?
+    private var settingsCancellable: AnyCancellable?
+    private var activitySneakPreviewsHidden: Bool
     private var openReason: OpenReason?
 
-    public init(descriptor: ScreenDescriptor) {
+    public init(descriptor: ScreenDescriptor, settingsStore: SettingsStore = .shared) {
         self.descriptor = descriptor
+        self.settingsStore = settingsStore
+        self.activitySneakPreviewsHidden = settingsStore.activitySneakPreviewsHidden
+
+        settingsCancellable = settingsStore.$activitySneakPreviewsHidden
+            .removeDuplicates()
+            .sink { [weak self] isHidden in
+                self?.handleActivitySneakPreviewVisibilityChange(isHidden: isHidden)
+            }
     }
 
     public var currentSize: CGSize {
@@ -179,7 +190,7 @@ public final class ScreenSessionModel: ObservableObject {
 
     private func refreshCurrentSneakPeek() {
         autoDismissTask?.cancel()
-        currentSneakPeek = queue.current
+        currentSneakPeek = queue.requests.first(where: isVisibleSneakPeek)
 
         if let request = currentSneakPeek, let delay = request.autoDismissAfter {
             autoDismissTask = Task { @MainActor [weak self] in
@@ -197,6 +208,15 @@ public final class ScreenSessionModel: ObservableObject {
             updatePresentationState()
             layoutDidChange?()
         }
+    }
+
+    private func handleActivitySneakPreviewVisibilityChange(isHidden: Bool) {
+        activitySneakPreviewsHidden = isHidden
+        refreshCurrentSneakPeek()
+    }
+
+    private func isVisibleSneakPeek(_ request: SneakPeekRequest) -> Bool {
+        request.kind == .attention || activitySneakPreviewsHidden == false
     }
 
     private func scheduleHoverClose() {

@@ -5,48 +5,25 @@ import XCTest
 final class StatusItemControllerTests: XCTestCase {
     @MainActor
     func testStatusItemMenuIncludesLyricsActionsBeforeSettings() {
-        let controller = StatusItemController(
-            openHandler: {},
-            closeHandler: {},
-            searchLyricsHandler: {},
-            ignoreCurrentTrackLyricsHandler: {},
-            revealCurrentLyricsInFinderHandler: {},
-            canSearchCurrentTrackLyrics: { true },
-            canIgnoreCurrentTrackLyrics: { true },
-            canRevealCurrentLyricsInFinder: { true },
-            canAdjustLyricsOffset: { false },
-            getLyricsOffset: { 0 },
-            setLyricsOffset: { _ in },
-            settingsHandler: {},
-            quitHandler: {}
-        )
+        let controller = makeController()
 
         let titles = controller.menuItemTitlesForTesting
-        XCTAssertTrue(titles.contains("Open on Active Screen"))
-        XCTAssertTrue(titles.contains("Close All"))
+        XCTAssertFalse(titles.contains("Open on Active Screen"))
+        XCTAssertFalse(titles.contains("Close All"))
         XCTAssertTrue(titles.contains("Search Lyrics…"))
         XCTAssertTrue(titles.contains("Mark Current Lyrics as Wrong"))
         XCTAssertTrue(titles.contains("Reveal Lyrics Cache in Finder"))
+        XCTAssertTrue(titles.contains("Hide All Sneaks"))
         XCTAssertTrue(titles.contains("Settings…"))
         XCTAssertTrue(titles.contains("Quit NotchPilot"))
     }
 
     @MainActor
     func testStatusItemMenuDisablesLyricsActionsWhenUnavailable() throws {
-        let controller = StatusItemController(
-            openHandler: {},
-            closeHandler: {},
-            searchLyricsHandler: {},
-            ignoreCurrentTrackLyricsHandler: {},
-            revealCurrentLyricsInFinderHandler: {},
+        let controller = makeController(
             canSearchCurrentTrackLyrics: { false },
             canIgnoreCurrentTrackLyrics: { false },
-            canRevealCurrentLyricsInFinder: { false },
-            canAdjustLyricsOffset: { false },
-            getLyricsOffset: { 0 },
-            setLyricsOffset: { _ in },
-            settingsHandler: {},
-            quitHandler: {}
+            canRevealCurrentLyricsInFinder: { false }
         )
 
         let menuItems = controller.menuItemsForTesting
@@ -57,5 +34,72 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertFalse(controller.validateMenuItem(searchItem))
         XCTAssertFalse(controller.validateMenuItem(ignoreItem))
         XCTAssertFalse(controller.validateMenuItem(revealItem))
+    }
+
+    @MainActor
+    func testActivitySneakToggleUsesShortcutAndReflectsMenuState() throws {
+        var activitySneaksHidden = false
+        let controller = makeController(
+            isActivitySneakPreviewsHidden: { activitySneaksHidden },
+            toggleActivitySneakPreviewsHandler: { activitySneaksHidden.toggle() }
+        )
+
+        let hideSneaksItem = try XCTUnwrap(
+            controller.menuItemsForTesting.first(where: { $0.title == "Hide All Sneaks" })
+        )
+
+        XCTAssertEqual(hideSneaksItem.keyEquivalent, "s")
+        XCTAssertTrue(hideSneaksItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertTrue(hideSneaksItem.keyEquivalentModifierMask.contains(.shift))
+
+        controller.menuWillOpen(NSMenu())
+        XCTAssertEqual(hideSneaksItem.state, .off)
+
+        activitySneaksHidden = true
+        controller.menuWillOpen(NSMenu())
+        XCTAssertEqual(hideSneaksItem.state, .on)
+    }
+
+    @MainActor
+    func testActivitySneakToggleActionUpdatesSetting() throws {
+        var activitySneaksHidden = false
+        let controller = makeController(
+            isActivitySneakPreviewsHidden: { activitySneaksHidden },
+            toggleActivitySneakPreviewsHandler: { activitySneaksHidden.toggle() }
+        )
+
+        let hideSneaksItem = try XCTUnwrap(
+            controller.menuItemsForTesting.first(where: { $0.title == "Hide All Sneaks" })
+        )
+        let action = try XCTUnwrap(hideSneaksItem.action)
+
+        XCTAssertTrue(NSApp.sendAction(action, to: hideSneaksItem.target, from: hideSneaksItem))
+        XCTAssertTrue(activitySneaksHidden)
+        XCTAssertEqual(hideSneaksItem.state, .on)
+    }
+
+    @MainActor
+    private func makeController(
+        canSearchCurrentTrackLyrics: @escaping () -> Bool = { true },
+        canIgnoreCurrentTrackLyrics: @escaping () -> Bool = { true },
+        canRevealCurrentLyricsInFinder: @escaping () -> Bool = { true },
+        isActivitySneakPreviewsHidden: @escaping () -> Bool = { false },
+        toggleActivitySneakPreviewsHandler: @escaping () -> Void = {}
+    ) -> StatusItemController {
+        StatusItemController(
+            searchLyricsHandler: {},
+            ignoreCurrentTrackLyricsHandler: {},
+            revealCurrentLyricsInFinderHandler: {},
+            canSearchCurrentTrackLyrics: canSearchCurrentTrackLyrics,
+            canIgnoreCurrentTrackLyrics: canIgnoreCurrentTrackLyrics,
+            canRevealCurrentLyricsInFinder: canRevealCurrentLyricsInFinder,
+            canAdjustLyricsOffset: { false },
+            getLyricsOffset: { 0 },
+            setLyricsOffset: { _ in },
+            isActivitySneakPreviewsHidden: isActivitySneakPreviewsHidden,
+            toggleActivitySneakPreviewsHandler: toggleActivitySneakPreviewsHandler,
+            settingsHandler: {},
+            quitHandler: {}
+        )
     }
 }

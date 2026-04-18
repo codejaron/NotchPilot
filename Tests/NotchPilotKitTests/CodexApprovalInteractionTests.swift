@@ -86,6 +86,18 @@ final class CodexApprovalInteractionTests: XCTestCase {
         XCTAssertEqual(sizing.height(forContentHeight: 220), 96, accuracy: 0.1)
     }
 
+    func testCompactDetailLayoutFitsThreeOptionCommandApprovalInDefaultViewport() {
+        let height = CodexApprovalCompactLayout.estimatedDetailHeight(
+            optionCount: 3,
+            commandLineCount: 1,
+            includesTextInput: false,
+            headerLineCount: 1
+        )
+        let defaultPluginViewportHeight = NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: 240)
+
+        XCTAssertLessThanOrEqual(height, defaultPluginViewportHeight)
+    }
+
     func testTextBoundaryMovesUpOnlyFromFirstLine() {
         XCTAssertTrue(
             CodexApprovalTextBoundary.shouldMoveOutOfTextView(

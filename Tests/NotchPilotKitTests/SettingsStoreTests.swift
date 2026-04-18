@@ -103,6 +103,26 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testActivitySneakPreviewHiddenSettingDefaultsToFalseAndPersistsChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(store.activitySneakPreviewsHidden)
+
+        store.activitySneakPreviewsHidden = true
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        XCTAssertTrue(reloadedStore.activitySneakPreviewsHidden)
+    }
+
+    @MainActor
     func testSystemMonitorSneakSettingsDefaultToApprovedLayoutAndPersistChanges() {
         let store = SettingsStore(
             defaults: defaults,

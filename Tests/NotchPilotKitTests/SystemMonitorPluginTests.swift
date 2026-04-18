@@ -173,6 +173,76 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertNil(request.autoDismissAfter)
     }
 
+    func testReenablingGlobalActivitySneaksReissuesPersistentSneakPreview() {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        guard case let .sneakPeekRequested(initialRequest)? = receivedEvents.first else {
+            XCTFail("Expected initial system monitor sneak request")
+            return
+        }
+
+        store.activitySneakPreviewsHidden = true
+
+        guard case let .dismissSneakPeek(hiddenRequestID, _)? = receivedEvents.last else {
+            XCTFail("Expected system monitor sneak dismissal when hiding activity sneaks")
+            return
+        }
+        XCTAssertEqual(hiddenRequestID, initialRequest.id)
+
+        store.activitySneakPreviewsHidden = false
+
+        guard case let .sneakPeekRequested(restoredRequest)? = receivedEvents.last else {
+            XCTFail("Expected system monitor sneak request after showing activity sneaks")
+            return
+        }
+        XCTAssertEqual(restoredRequest.pluginID, plugin.id)
+        XCTAssertNotEqual(restoredRequest.id, initialRequest.id)
+    }
+
+    func testReenablingSystemMonitorSneakSettingReissuesPersistentSneakPreview() {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        guard case let .sneakPeekRequested(initialRequest)? = receivedEvents.first else {
+            XCTFail("Expected initial system monitor sneak request")
+            return
+        }
+
+        store.systemMonitorSneakPreviewEnabled = false
+
+        guard case let .dismissSneakPeek(disabledRequestID, _)? = receivedEvents.last else {
+            XCTFail("Expected system monitor sneak dismissal when disabling its sneak setting")
+            return
+        }
+        XCTAssertEqual(disabledRequestID, initialRequest.id)
+
+        store.systemMonitorSneakPreviewEnabled = true
+
+        guard case let .sneakPeekRequested(restoredRequest)? = receivedEvents.last else {
+            XCTFail("Expected system monitor sneak request after reenabling its sneak setting")
+            return
+        }
+        XCTAssertEqual(restoredRequest.pluginID, plugin.id)
+        XCTAssertNotEqual(restoredRequest.id, initialRequest.id)
+    }
+
     func testDeactivateDismissesPersistentSneakPreviewRequest() {
         let store = makeSettingsStore()
         let plugin = SystemMonitorPlugin(

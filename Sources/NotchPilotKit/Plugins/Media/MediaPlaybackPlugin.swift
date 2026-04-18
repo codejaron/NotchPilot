@@ -43,15 +43,26 @@ public final class MediaPlaybackPlugin: NotchPlugin {
 
         settingsStore.$mediaPlaybackSneakPreviewEnabled
             .removeDuplicates()
-            .sink { [weak self] _ in
-                self?.syncSneakPeek()
+            .sink { [weak self] isEnabled in
+                self?.syncSneakPeek(mediaPlaybackSneakPreviewEnabled: isEnabled)
+                self?.objectWillChange.send()
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$activitySneakPreviewsHidden
+            .removeDuplicates()
+            .sink { [weak self] isHidden in
+                self?.syncSneakPeek(activitySneakPreviewsHidden: isHidden)
                 self?.objectWillChange.send()
             }
             .store(in: &settingsCancellables)
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard isEnabled, settingsStore.mediaPlaybackSneakPreviewEnabled else {
+        guard isEnabled,
+              settingsStore.mediaPlaybackSneakPreviewEnabled,
+              settingsStore.activitySneakPreviewsHidden == false
+        else {
             return nil
         }
         guard case let .active(snapshot) = playbackState else {
@@ -114,8 +125,19 @@ public final class MediaPlaybackPlugin: NotchPlugin {
         objectWillChange.send()
     }
 
-    private func syncSneakPeek() {
-        guard isEnabled, settingsStore.mediaPlaybackSneakPreviewEnabled else {
+    private func syncSneakPeek(
+        mediaPlaybackSneakPreviewEnabled: Bool? = nil,
+        activitySneakPreviewsHidden: Bool? = nil
+    ) {
+        let isMediaSneakEnabled =
+            mediaPlaybackSneakPreviewEnabled ?? settingsStore.mediaPlaybackSneakPreviewEnabled
+        let areActivitySneaksHidden =
+            activitySneakPreviewsHidden ?? settingsStore.activitySneakPreviewsHidden
+
+        guard isEnabled,
+              isMediaSneakEnabled,
+              areActivitySneaksHidden == false
+        else {
             dismissSneakPeek()
             return
         }

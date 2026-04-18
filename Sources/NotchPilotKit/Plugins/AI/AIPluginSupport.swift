@@ -9,6 +9,7 @@ protocol AIPluginRendering: NotchPlugin {
     var currentCompactActivity: AIPluginCompactActivity? { get }
     var expandedSessionSummaries: [AIPluginExpandedSessionSummary] { get }
     var approvalSneakNotificationsEnabled: Bool { get }
+    var activitySneakPreviewsHidden: Bool { get }
 
     func displayTitle(for session: AISession) -> String?
     func expandedSessionTitle(for session: AISession) -> String
@@ -60,8 +61,15 @@ extension AIPluginRendering {
     }
 
     var shouldRenderCompactPreview: Bool {
-        (approvalSneakNotificationsEnabled && approvalDrivenCompactPreviewAvailable)
-            || compactPreviewSession() != nil
+        if approvalSneakNotificationsEnabled && approvalDrivenCompactPreviewAvailable {
+            return true
+        }
+
+        guard activitySneakPreviewsHidden == false else {
+            return false
+        }
+
+        return compactPreviewSession() != nil
     }
 
     func compactPreviewSession() -> AISession? {
@@ -112,6 +120,10 @@ extension AIPluginRendering {
 
     var approvalSneakNotificationsEnabled: Bool {
         SettingsStore.shared.approvalSneakNotificationsEnabled
+    }
+
+    var activitySneakPreviewsHidden: Bool {
+        SettingsStore.shared.activitySneakPreviewsHidden
     }
 
     func approvalSneakNotice() -> AIPluginApprovalSneakNotice? {

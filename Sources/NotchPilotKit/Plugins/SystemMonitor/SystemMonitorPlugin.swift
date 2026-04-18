@@ -65,13 +65,22 @@ public final class SystemMonitorPlugin: NotchPlugin {
         settingsStore.$systemMonitorSneakPreviewEnabled
             .removeDuplicates()
             .sink { [weak self] isEnabled in
-                self?.syncSneakPeekRequest(isEnabled: isEnabled)
+                self?.syncSneakPeekRequest(systemMonitorSneakPreviewEnabled: isEnabled)
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$activitySneakPreviewsHidden
+            .removeDuplicates()
+            .sink { [weak self] isHidden in
+                self?.syncSneakPeekRequest(activitySneakPreviewsHidden: isHidden)
             }
             .store(in: &settingsCancellables)
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard settingsStore.systemMonitorSneakPreviewEnabled else {
+        guard settingsStore.systemMonitorSneakPreviewEnabled,
+              settingsStore.activitySneakPreviewsHidden == false
+        else {
             return nil
         }
 
@@ -106,7 +115,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
     public func activate(bus: EventBus) {
         self.bus = bus
         scheduleRefresh()
-        syncSneakPeekRequest(isEnabled: settingsStore.systemMonitorSneakPreviewEnabled)
+        syncSneakPeekRequest()
         refreshCancellable?.cancel()
         refreshCancellable = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
@@ -160,8 +169,18 @@ public final class SystemMonitorPlugin: NotchPlugin {
         snapshot = latestSnapshot
     }
 
-    private func syncSneakPeekRequest(isEnabled: Bool = SettingsStore.shared.systemMonitorSneakPreviewEnabled) {
-        guard isEnabled else {
+    private func syncSneakPeekRequest(
+        systemMonitorSneakPreviewEnabled: Bool? = nil,
+        activitySneakPreviewsHidden: Bool? = nil
+    ) {
+        let isSystemMonitorSneakEnabled =
+            systemMonitorSneakPreviewEnabled ?? settingsStore.systemMonitorSneakPreviewEnabled
+        let areActivitySneaksHidden =
+            activitySneakPreviewsHidden ?? settingsStore.activitySneakPreviewsHidden
+
+        guard isSystemMonitorSneakEnabled,
+              areActivitySneaksHidden == false
+        else {
             dismissSneakPeekRequest()
             return
         }

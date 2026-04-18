@@ -10,6 +10,7 @@ public final class SettingsStore: ObservableObject {
         static let autoStartSocket = "bridge.autoStartSocket"
         static let bridgeScriptPath = "bridge.scriptPath"
         static let approvalSneakNotificationsEnabled = "approval.sneakNotificationsEnabled"
+        static let activitySneakPreviewsHidden = "sneak.activityPreviewsHidden"
         static let mediaPlaybackEnabled = "media.enabled"
         static let mediaPlaybackSneakPreviewEnabled = "media.sneakPreviewEnabled"
         static let desktopLyricsEnabled = "media.desktopLyricsEnabled"
@@ -46,6 +47,12 @@ public final class SettingsStore: ObservableObject {
     @Published public var approvalSneakNotificationsEnabled: Bool {
         didSet {
             defaults.set(approvalSneakNotificationsEnabled, forKey: Key.approvalSneakNotificationsEnabled)
+        }
+    }
+
+    @Published var activitySneakPreviewsHidden: Bool {
+        didSet {
+            defaults.set(activitySneakPreviewsHidden, forKey: Key.activitySneakPreviewsHidden)
         }
     }
 
@@ -122,6 +129,8 @@ public final class SettingsStore: ObservableObject {
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
         self.approvalSneakNotificationsEnabled =
             defaults.object(forKey: Key.approvalSneakNotificationsEnabled) as? Bool ?? true
+        self.activitySneakPreviewsHidden =
+            defaults.object(forKey: Key.activitySneakPreviewsHidden) as? Bool ?? false
         self.mediaPlaybackEnabled =
             defaults.object(forKey: Key.mediaPlaybackEnabled) as? Bool ?? true
         self.mediaPlaybackSneakPreviewEnabled =

@@ -52,19 +52,6 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         self.desktopLyricsManager = desktopLyricsManager
 
         statusItemController = StatusItemController(
-            openHandler: { [weak self] in
-                guard let self else { return }
-                guard let pluginID = self.pluginManager.defaultOpenPluginID(
-                    previewPluginID: nil,
-                    lastSelectedPluginID: nil
-                ) else {
-                    return
-                }
-                self.bus.emit(.openRequested(pluginID: pluginID, target: .activeScreen))
-            },
-            closeHandler: { [weak self] in
-                self?.bus.emit(.closeRequested(target: .allScreens))
-            },
             searchLyricsHandler: { [weak self] in
                 self?.desktopLyricsManager?.showLyricsSearchWindow()
             },
@@ -91,6 +78,12 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             },
             setLyricsOffset: { [weak self] value in
                 self?.desktopLyricsManager?.setLyricsOffset(value)
+            },
+            isActivitySneakPreviewsHidden: {
+                SettingsStore.shared.activitySneakPreviewsHidden
+            },
+            toggleActivitySneakPreviewsHandler: {
+                SettingsStore.shared.activitySneakPreviewsHidden.toggle()
             },
             settingsHandler: { [weak self] in
                 self?.settingsController.showSettings()

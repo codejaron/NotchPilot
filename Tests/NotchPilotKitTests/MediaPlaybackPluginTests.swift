@@ -111,6 +111,51 @@ final class MediaPlaybackPluginTests: XCTestCase {
     }
 
     @MainActor
+    func testReenablingGlobalActivitySneaksReissuesActivePlaybackSneakPreview() {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.mediaPlaybackSneakPreviewEnabled = true
+        let monitor = TestNowPlayingSessionMonitor()
+        let plugin = MediaPlaybackPlugin(monitor: monitor, settingsStore: store)
+        let bus = EventBus()
+        let recorder = MediaPlaybackEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        monitor.push(Self.activeState(isPlaying: true))
+
+        guard case let .sneakPeekRequested(initialRequest)? = recorder.events.first else {
+            XCTFail("Expected initial media sneak peek request")
+            bus.unsubscribe(token)
+            return
+        }
+
+        store.activitySneakPreviewsHidden = true
+
+        guard case let .dismissSneakPeek(hiddenRequestID, _)? = recorder.events.last else {
+            XCTFail("Expected media sneak peek dismissal when hiding activity sneaks")
+            bus.unsubscribe(token)
+            return
+        }
+        XCTAssertEqual(hiddenRequestID, initialRequest.id)
+
+        store.activitySneakPreviewsHidden = false
+
+        guard case let .sneakPeekRequested(restoredRequest)? = recorder.events.last else {
+            XCTFail("Expected media sneak peek request after showing activity sneaks")
+            bus.unsubscribe(token)
+            return
+        }
+        XCTAssertEqual(restoredRequest.pluginID, plugin.id)
+        XCTAssertNotEqual(restoredRequest.id, initialRequest.id)
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
     func testIdleStateDismissesExistingSneakPreview() {
         let store = makeSettingsStore()
         store.mediaPlaybackEnabled = true

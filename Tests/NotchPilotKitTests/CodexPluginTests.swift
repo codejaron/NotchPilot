@@ -98,6 +98,127 @@ final class CodexPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertEqual(request.kind, .activity)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testActiveThreadDoesNotEmitSneakPeekWhenGlobalActivitySneakSettingIsHidden() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run {
+            makeSettingsStore(activitySneakPreviewsHidden: true)
+        }
+        let plugin = await MainActor.run {
+            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-hidden-activity",
+                    title: "Hidden Activity Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        await Task.yield()
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }
+
+        XCTAssertTrue(receivedEvents.isEmpty)
+        XCTAssertFalse(hasPreview)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testReenablingGlobalActivitySneaksReissuesActiveThreadSneakPeek() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run { makeSettingsStore() }
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                settingsStore: settingsStore,
+                codexMonitor: codexMonitor,
+                nowProvider: { Date(timeIntervalSince1970: 5) }
+            )
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-thread-restore-activity",
+                    title: "Restore Activity Thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        await Task.yield()
+
+        let initialRequest = await MainActor.run { () -> SneakPeekRequest? in
+            guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+                return nil
+            }
+            return request
+        }
+        guard let initialRequest else {
+            XCTFail("expected initial codex activity sneak peek")
+            await MainActor.run { bus.unsubscribe(token) }
+            return
+        }
+
+        await MainActor.run {
+            settingsStore.activitySneakPreviewsHidden = true
+        }
+
+        let dismissID = await MainActor.run { () -> UUID? in
+            guard case let .dismissSneakPeek(requestID, _)? = recorder.events.last else {
+                return nil
+            }
+            return requestID
+        }
+        XCTAssertEqual(dismissID, initialRequest.id)
+
+        await MainActor.run {
+            settingsStore.activitySneakPreviewsHidden = false
+        }
+
+        let restoredRequest = await MainActor.run { () -> SneakPeekRequest? in
+            guard case let .sneakPeekRequested(request)? = recorder.events.last else {
+                return nil
+            }
+            return request
+        }
+        XCTAssertEqual(restoredRequest?.pluginID, "codex")
+        XCTAssertEqual(restoredRequest?.kind, .activity)
+        XCTAssertNotEqual(restoredRequest?.id, initialRequest.id)
 
         await MainActor.run {
             bus.unsubscribe(token)
@@ -350,6 +471,7 @@ final class CodexPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertEqual(request.kind, .attention)
         XCTAssertEqual(request.priority, 1000)
         XCTAssertTrue(request.isInteractive)
 
@@ -390,6 +512,51 @@ final class CodexPluginTests: XCTestCase {
 
         XCTAssertTrue(receivedEvents.isEmpty)
         XCTAssertFalse(hasPreview)
+
+        await MainActor.run {
+            bus.unsubscribe(token)
+        }
+    }
+
+    func testActionableSurfaceStillEmitsAttentionSneakPeekWhenGlobalActivitySneakSettingIsHidden() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run {
+            makeSettingsStore(activitySneakPreviewsHidden: true)
+        }
+        let plugin = await MainActor.run {
+            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+        }
+        let recorder = await MainActor.run { SplitEventRecorder() }
+
+        let token = await MainActor.run {
+            bus.subscribe { event in
+                recorder.events.append(event)
+            }
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-global-sneak-hidden",
+                    summary: "Approval still visible",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let receivedEvents = await MainActor.run { recorder.events }
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            return XCTFail("expected an attention sneak peek request")
+        }
+
+        XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertEqual(request.kind, .attention)
+        XCTAssertTrue(request.isInteractive)
+        let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }
+        XCTAssertTrue(hasPreview)
 
         await MainActor.run {
             bus.unsubscribe(token)
@@ -566,7 +733,8 @@ private final class MutableDateProvider: @unchecked Sendable {
 
 @MainActor
 private func makeSettingsStore(
-    approvalSneakNotificationsEnabled: Bool = true
+    approvalSneakNotificationsEnabled: Bool = true,
+    activitySneakPreviewsHidden: Bool = false
 ) -> SettingsStore {
     let suiteName = "CodexPluginTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
@@ -574,5 +742,6 @@ private func makeSettingsStore(
 
     let store = SettingsStore(defaults: defaults)
     store.approvalSneakNotificationsEnabled = approvalSneakNotificationsEnabled
+    store.activitySneakPreviewsHidden = activitySneakPreviewsHidden
     return store
 }

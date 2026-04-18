@@ -182,6 +182,10 @@ public final class ClaudePlugin: AIPluginRendering {
         settingsStore.approvalSneakNotificationsEnabled
     }
 
+    var activitySneakPreviewsHidden: Bool {
+        settingsStore.activitySneakPreviewsHidden
+    }
+
     var currentCompactActivity: AIPluginCompactActivity? {
         if approvalSneakNotificationsEnabled, let approval = pendingApprovals.first {
             let matchingSession = sessions.first(where: { $0.id == approval.sessionID })
@@ -315,6 +319,7 @@ public final class ClaudePlugin: AIPluginRendering {
             pluginID: id,
             priority: 1000,
             target: .activeScreen,
+            kind: .attention,
             isInteractive: true,
             autoDismissAfter: nil
         )

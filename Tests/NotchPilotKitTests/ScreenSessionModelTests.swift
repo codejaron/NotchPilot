@@ -43,6 +43,64 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertTrue(session.showsSneakPeekOverlay)
     }
 
+    func testActivitySneakRequestsAreHiddenWhenGlobalSettingIsEnabled() {
+        let store = makeSettingsStore(activitySneakPreviewsHidden: true)
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            ),
+            settingsStore: store
+        )
+
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "codex",
+                priority: 1000,
+                target: .activeScreen,
+                kind: .activity,
+                isInteractive: false,
+                autoDismissAfter: nil
+            )
+        )
+
+        XCTAssertEqual(session.notchState, .idleClosed)
+        XCTAssertFalse(session.showsSneakPeekOverlay)
+
+        store.activitySneakPreviewsHidden = false
+
+        XCTAssertEqual(session.notchState, .previewClosed)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "codex")
+    }
+
+    func testAttentionSneakRequestsRemainVisibleWhenActivitySneaksAreHidden() {
+        let store = makeSettingsStore(activitySneakPreviewsHidden: true)
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            ),
+            settingsStore: store
+        )
+
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "codex",
+                priority: 1000,
+                target: .activeScreen,
+                kind: .attention,
+                isInteractive: true,
+                autoDismissAfter: nil
+            )
+        )
+
+        XCTAssertEqual(session.notchState, .previewClosed)
+        XCTAssertTrue(session.showsSneakPeekOverlay)
+        XCTAssertEqual(session.currentSneakPeek?.kind, .attention)
+    }
+
     func testWindowFrameUsesFixedExpandedWindowSizeAndStaysPinnedToTopCenter() {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(
@@ -193,5 +251,14 @@ final class ScreenSessionModelTests: XCTestCase {
 
         XCTAssertEqual(session.notchState, .open)
         XCTAssertEqual(session.activePluginID, "codex")
+    }
+
+    private func makeSettingsStore(activitySneakPreviewsHidden: Bool) -> SettingsStore {
+        let suiteName = "ScreenSessionModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults)
+        store.activitySneakPreviewsHidden = activitySneakPreviewsHidden
+        return store
     }
 }
