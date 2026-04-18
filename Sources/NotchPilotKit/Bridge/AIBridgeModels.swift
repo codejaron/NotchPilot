@@ -5,6 +5,41 @@ public enum AIHost: String, Codable, Equatable, Sendable {
     case codex
 }
 
+public struct AISessionLaunchContext: Codable, Equatable, Sendable {
+    public let processIdentifier: Int32?
+    public let bundleIdentifier: String?
+    public let terminalIdentifier: String?
+    public let codexClientID: String?
+
+    public init(
+        processIdentifier: Int32? = nil,
+        bundleIdentifier: String? = nil,
+        terminalIdentifier: String? = nil,
+        codexClientID: String? = nil
+    ) {
+        self.processIdentifier = processIdentifier
+        self.bundleIdentifier = Self.normalized(bundleIdentifier)
+        self.terminalIdentifier = Self.normalized(terminalIdentifier)
+        self.codexClientID = Self.normalized(codexClientID)
+    }
+
+    public var isEmpty: Bool {
+        processIdentifier == nil
+            && bundleIdentifier == nil
+            && terminalIdentifier == nil
+            && codexClientID == nil
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.isEmpty == false
+        else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 public enum ApprovalKind: Equatable, Sendable {
     case toolRequest
     case commandExecution
@@ -34,11 +69,18 @@ public struct NetworkApprovalContext: Equatable, Sendable {
 public struct BridgeFrame: Codable, Equatable, Sendable {
     public let host: AIHost
     public let requestID: String
+    public let origin: AISessionLaunchContext?
     public let rawJSON: String
 
-    public init(host: AIHost, requestID: String, rawJSON: String) {
+    public init(
+        host: AIHost,
+        requestID: String,
+        origin: AISessionLaunchContext? = nil,
+        rawJSON: String
+    ) {
         self.host = host
         self.requestID = requestID
+        self.origin = origin?.isEmpty == true ? nil : origin
         self.rawJSON = rawJSON
     }
 }
@@ -139,6 +181,7 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
     public let eventType: AIBridgeEventType
     public let capabilities: AIBridgeCapabilities
     public let needsResponse: Bool
+    public let launchContext: AISessionLaunchContext?
     public let payload: AIBridgePayload
 
     public init(
@@ -148,6 +191,7 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         eventType: AIBridgeEventType,
         capabilities: AIBridgeCapabilities,
         needsResponse: Bool,
+        launchContext: AISessionLaunchContext? = nil,
         payload: AIBridgePayload
     ) {
         self.host = host
@@ -156,6 +200,7 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         self.eventType = eventType
         self.capabilities = capabilities
         self.needsResponse = needsResponse
+        self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
         self.payload = payload
     }
 }

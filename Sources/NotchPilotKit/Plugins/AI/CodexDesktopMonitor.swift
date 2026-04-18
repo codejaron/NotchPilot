@@ -76,6 +76,11 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
         }
     }
 
+    @discardableResult
+    public func focusThread(id: String) -> Bool {
+        false
+    }
+
     private func attemptConnect() {
         guard isRunning else {
             return

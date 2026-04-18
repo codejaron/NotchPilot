@@ -23,6 +23,7 @@ public final class ClaudePlugin: AIPluginRendering {
     private let sessionScopedApprovalStore: SessionScopedRuleStoring
     private let settingsStore: SettingsStore
     private let nowProvider: @Sendable () -> Date
+    private let sessionFocuser: any AISessionFocusing
 
     private weak var bus: EventBus?
     private var responders: [String: @Sendable (Data) -> Void] = [:]
@@ -34,11 +35,13 @@ public final class ClaudePlugin: AIPluginRendering {
         settingsStore: SettingsStore = .shared,
         permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
         sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
+        sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
         self.encoder = HookResponseEncoder(permissionRuleStore: permissionRuleStore)
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
+        self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
         settingsStore.$approvalSneakNotificationsEnabled
             .removeDuplicates()
@@ -123,6 +126,7 @@ public final class ClaudePlugin: AIPluginRendering {
             eventType: envelope.eventType,
             capabilities: envelope.capabilities,
             needsResponse: false,
+            launchContext: envelope.launchContext,
             payload: envelope.payload
         )
     }
@@ -219,6 +223,7 @@ public final class ClaudePlugin: AIPluginRendering {
                     host: session.host,
                     title: expandedSessionTitle(for: session),
                     subtitle: expandedSessionSubtitle(for: session, approval: firstApproval),
+                    phase: expandedSessionPhase(for: session),
                     approvalCount: sessionApprovals.count,
                     approvalRequestID: firstApproval?.requestID,
                     codexSurfaceID: nil,
@@ -234,6 +239,18 @@ public final class ClaudePlugin: AIPluginRendering {
                 }
                 return lhs.updatedAt > rhs.updatedAt
             }
+    }
+
+    @discardableResult
+    public func activateSession(id: String) -> Bool {
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            return false
+        }
+
+        return sessionFocuser.focus(
+            context: session.launchContext ?? AISessionLaunchContext(),
+            fallback: .host(.claude)
+        )
     }
 
     private func runtimeDurationText(forSessionID sessionID: String) -> String? {
@@ -266,6 +283,17 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         return session.activityLabel
+    }
+
+    private func expandedSessionPhase(for session: AISession) -> AIPluginSessionPhase {
+        switch session.lastEventType {
+        case .stop:
+            return .completed
+        case .sessionStart:
+            return .connected
+        default:
+            return .working
+        }
     }
 
     private func syncState() {

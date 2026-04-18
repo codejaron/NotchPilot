@@ -18,6 +18,8 @@ public enum HookInstallError: LocalizedError {
 }
 
 public struct HookInstaller {
+    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 2"
+
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
 
@@ -137,6 +139,10 @@ public struct HookInstaller {
             return false
         }
 
+        if installedBridgeScriptNeedsUpdate(bridgeScript) {
+            return true
+        }
+
         let settingsURL = homeDirectoryURL.appendingPathComponent(".claude/settings.json")
         guard let root = try? loadJSONObject(at: settingsURL),
               let hooks = root["hooks"] as? [String: Any]
@@ -158,6 +164,18 @@ public struct HookInstaller {
             return true
         }
         return promptEntries.contains { isManagedEntry($0, bridgeScript: bridgeScript) } == false
+    }
+
+    private func installedBridgeScriptNeedsUpdate(_ bridgeScript: String?) -> Bool {
+        guard let bridgeScript,
+              bridgeScript.isEmpty == false,
+              fileManager.fileExists(atPath: bridgeScript),
+              let script = try? String(contentsOfFile: bridgeScript, encoding: .utf8)
+        else {
+            return false
+        }
+
+        return script.contains(Self.bridgeVersionNeedle) == false
     }
 
     private func claudeHookConfiguration(command: String) -> [String: [[String: Any]]] {

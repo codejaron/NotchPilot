@@ -38,6 +38,12 @@ final class HookEventParserTests: XCTestCase {
         let frame = BridgeFrame(
             host: .claude,
             requestID: "req-3",
+            origin: AISessionLaunchContext(
+                processIdentifier: 4242,
+                bundleIdentifier: "com.apple.Terminal",
+                terminalIdentifier: "ttys003",
+                codexClientID: nil
+            ),
             rawJSON: """
             {
               "hook_event_name": "PostToolUse",
@@ -52,6 +58,8 @@ final class HookEventParserTests: XCTestCase {
 
         XCTAssertEqual(envelope.eventType, .postToolUse)
         XCTAssertFalse(envelope.needsResponse)
+        XCTAssertEqual(envelope.launchContext?.bundleIdentifier, "com.apple.Terminal")
+        XCTAssertEqual(envelope.launchContext?.terminalIdentifier, "ttys003")
     }
 
     func testPermissionPayloadExtractsCommandFileAndDiffPreview() throws {

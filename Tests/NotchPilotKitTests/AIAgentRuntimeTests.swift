@@ -39,6 +39,12 @@ final class AIAgentRuntimeTests: XCTestCase {
             eventType: .postToolUse,
             capabilities: .none,
             needsResponse: false,
+            launchContext: AISessionLaunchContext(
+                processIdentifier: 100,
+                bundleIdentifier: "com.apple.Terminal",
+                terminalIdentifier: "ttys010",
+                codexClientID: nil
+            ),
             payload: .generic([
                 "tool_name": "Bash",
             ])
@@ -48,6 +54,48 @@ final class AIAgentRuntimeTests: XCTestCase {
 
         XCTAssertEqual(result, .respondNow(Data("{}".utf8)))
         XCTAssertEqual(runtime.sessions.map(\.id), ["session-1"])
+        XCTAssertEqual(runtime.sessions.first?.launchContext?.bundleIdentifier, "com.apple.Terminal")
+    }
+
+    func testSessionLaunchContextPreservesWhereSessionStarted() {
+        let runtime = AIAgentRuntime()
+        let firstEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-first",
+            sessionID: "session-origin",
+            eventType: .sessionStart,
+            capabilities: .none,
+            needsResponse: false,
+            launchContext: AISessionLaunchContext(
+                processIdentifier: 100,
+                bundleIdentifier: "com.apple.Terminal",
+                terminalIdentifier: "ttys010",
+                codexClientID: nil
+            ),
+            payload: .generic([:])
+        )
+        let laterEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-later",
+            sessionID: "session-origin",
+            eventType: .postToolUse,
+            capabilities: .none,
+            needsResponse: false,
+            launchContext: AISessionLaunchContext(
+                processIdentifier: 200,
+                bundleIdentifier: "com.anthropic.claudefordesktop",
+                terminalIdentifier: nil,
+                codexClientID: nil
+            ),
+            payload: .generic(["tool_name": "Bash"])
+        )
+
+        _ = runtime.handle(envelope: firstEnvelope)
+        _ = runtime.handle(envelope: laterEnvelope)
+
+        XCTAssertEqual(runtime.sessions.first?.launchContext?.processIdentifier, 100)
+        XCTAssertEqual(runtime.sessions.first?.launchContext?.bundleIdentifier, "com.apple.Terminal")
+        XCTAssertEqual(runtime.sessions.first?.launchContext?.terminalIdentifier, "ttys010")
     }
 
     func testDisconnectExpiresPendingApprovalAndRemovesIt() {

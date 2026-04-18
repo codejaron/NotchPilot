@@ -202,6 +202,39 @@ final class ClaudePluginTests: XCTestCase {
         XCTAssertFalse(hasPreview)
     }
 
+    @MainActor
+    func testActivateSessionUsesStoredLaunchContext() {
+        let focuser = RecordingAISessionFocuser()
+        let plugin = ClaudePlugin(sessionFocuser: focuser)
+        let bus = EventBus()
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-origin",
+                origin: AISessionLaunchContext(
+                    processIdentifier: 321,
+                    bundleIdentifier: "com.apple.Terminal",
+                    terminalIdentifier: "ttys021",
+                    codexClientID: nil
+                ),
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-session-origin",
+                  "prompt": "write a changelog"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(plugin.activateSession(id: "claude-session-origin"))
+        XCTAssertEqual(focuser.focusedContexts.map(\.processIdentifier), [321])
+        XCTAssertEqual(focuser.focusedContexts.map(\.terminalIdentifier), ["ttys021"])
+    }
+
     func testVeryLongPermissionRequestPreviewCanGrowBeyondTwoLines() async {
         let plugin = await MainActor.run { ClaudePlugin() }
         let bus = await MainActor.run { EventBus() }
@@ -268,5 +301,20 @@ final class ClaudePluginTests: XCTestCase {
         let response = String(data: responseBox.data ?? Data(), encoding: .utf8)
         XCTAssertTrue(response?.contains(#""permissionDecision":"deny""#) == true)
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+    }
+}
+
+private final class RecordingAISessionFocuser: AISessionFocusing {
+    private(set) var focusedContexts: [AISessionLaunchContext] = []
+    private(set) var focusedCodexThreads: [String] = []
+
+    func focus(context: AISessionLaunchContext, fallback: AISessionFocusFallback) -> Bool {
+        focusedContexts.append(context)
+        return true
+    }
+
+    func focusCodexThread(id: String, fallbackContext: AISessionLaunchContext?) -> Bool {
+        focusedCodexThreads.append(id)
+        return true
     }
 }

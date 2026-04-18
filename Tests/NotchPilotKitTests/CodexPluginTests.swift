@@ -145,6 +145,27 @@ final class CodexPluginTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testActivateSessionFocusesCodexThreadThroughMonitor() {
+        let bus = EventBus()
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = CodexPlugin(codexMonitor: codexMonitor)
+
+        plugin.activate(bus: bus)
+        codexMonitor.emit(
+            context: CodexThreadContext(
+                threadID: "codex-thread-focus",
+                title: "Focus Thread",
+                activityLabel: "Working",
+                phase: .working,
+                updatedAt: Date(timeIntervalSince1970: 0)
+            )
+        )
+
+        XCTAssertTrue(plugin.activateSession(id: "codex-thread-focus"))
+        XCTAssertEqual(codexMonitor.focusedThreadIDs, ["codex-thread-focus"])
+    }
+
     func testCompletedThreadDismissesActivitySneakPeekAndFallsBackToSystem() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

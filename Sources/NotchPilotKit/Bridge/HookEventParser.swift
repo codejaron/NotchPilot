@@ -56,6 +56,7 @@ public struct HookEventParser {
             eventType: eventType,
             capabilities: capabilities,
             needsResponse: needsResponse,
+            launchContext: frame.origin,
             payload: payload
         )
     }

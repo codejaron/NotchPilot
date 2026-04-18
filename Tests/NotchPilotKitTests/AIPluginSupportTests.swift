@@ -14,6 +14,7 @@ final class AIPluginSupportTests: XCTestCase {
             host: .claude,
             title: "create a react dashboard for my app",
             subtitle: "Processing",
+            phase: .working,
             approvalCount: 0,
             approvalRequestID: nil,
             codexSurfaceID: nil,
@@ -25,6 +26,38 @@ final class AIPluginSupportTests: XCTestCase {
         let presentation = AIPluginExpandedSessionListPresentation(summaries: [summary])
 
         XCTAssertTrue(presentation.shouldRender)
+    }
+
+    func testExpandedSessionSummaryOnlyDimsCompletedSessions() {
+        let working = AIPluginExpandedSessionSummary(
+            id: "thread-working",
+            host: .claude,
+            title: "Working",
+            subtitle: "Processing",
+            phase: .working,
+            approvalCount: 0,
+            approvalRequestID: nil,
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
+        let completed = AIPluginExpandedSessionSummary(
+            id: "thread-completed",
+            host: .claude,
+            title: "Completed",
+            subtitle: "Done",
+            phase: .completed,
+            approvalCount: 0,
+            approvalRequestID: nil,
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 1),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
+
+        XCTAssertFalse(working.isDimmed)
+        XCTAssertTrue(completed.isDimmed)
     }
 
     func testApprovalReviewStateAdvancesToNextPendingApprovalWhileReviewing() {

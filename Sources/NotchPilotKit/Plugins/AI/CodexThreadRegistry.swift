@@ -81,7 +81,8 @@ struct CodexThreadRegistry {
             inputTokenCount: context.inputTokenCount,
             outputTokenCount: context.outputTokenCount,
             updatedAt: activeAt,
-            sessionTitle: normalizedTitle(context.title)
+            sessionTitle: normalizedTitle(context.title),
+            launchContext: context.launchContext
         )
     }
 

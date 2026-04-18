@@ -20,6 +20,7 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
     public let inputTokenCount: Int?
     public let outputTokenCount: Int?
     public let updatedAt: Date
+    public let launchContext: AISessionLaunchContext?
 
     public init(
         threadID: String,
@@ -28,7 +29,8 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
         phase: CodexThreadPhase,
         inputTokenCount: Int? = nil,
         outputTokenCount: Int? = nil,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        launchContext: AISessionLaunchContext? = nil
     ) {
         self.threadID = threadID
         self.title = title
@@ -37,6 +39,7 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
         self.inputTokenCount = inputTokenCount
         self.outputTokenCount = outputTokenCount
         self.updatedAt = updatedAt
+        self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
     }
 }
 
@@ -214,6 +217,9 @@ public protocol CodexDesktopContextMonitoring: AnyObject {
 
     func start()
     func stop()
+
+    @discardableResult
+    func focusThread(id: String) -> Bool
 }
 
 public protocol CodexDesktopActionableSurfaceMonitoring: AnyObject {

@@ -13,6 +13,8 @@ protocol AIPluginRendering: NotchPlugin {
     func displayTitle(for session: AISession) -> String?
     func expandedSessionTitle(for session: AISession) -> String
     func preferredCodexTitle(for surface: CodexActionableSurface?) -> String?
+    @discardableResult
+    func activateSession(id: String) -> Bool
     func respond(to requestID: String, with action: ApprovalAction)
 
     @discardableResult
@@ -113,6 +115,9 @@ extension AIPluginRendering {
     }
 
     func preferredCodexTitle(for surface: CodexActionableSurface?) -> String? { nil }
+
+    @discardableResult
+    func activateSession(id: String) -> Bool { false }
 
     var approvalSneakNotificationsEnabled: Bool {
         SettingsStore.shared.approvalSneakNotificationsEnabled
@@ -276,6 +281,7 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     let host: AIHost
     let title: String
     let subtitle: String
+    let phase: AIPluginSessionPhase
     let approvalCount: Int
     let approvalRequestID: String?
     let codexSurfaceID: String?
@@ -289,6 +295,7 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         host: AIHost,
         title: String,
         subtitle: String,
+        phase: AIPluginSessionPhase,
         approvalCount: Int,
         approvalRequestID: String?,
         codexSurfaceID: String?,
@@ -301,6 +308,7 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         self.host = host
         self.title = title
         self.subtitle = subtitle
+        self.phase = phase
         self.approvalCount = approvalCount
         self.approvalRequestID = approvalRequestID
         self.codexSurfaceID = codexSurfaceID
@@ -314,6 +322,10 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         approvalRequestID != nil || codexSurfaceID != nil
     }
 
+    var isDimmed: Bool {
+        phase == .completed
+    }
+
     var hasTokenUsage: Bool {
         inputTokenCount != nil || outputTokenCount != nil
     }
@@ -325,6 +337,35 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
 
     var hasMeta: Bool {
         hasTokenUsage || hasRuntime
+    }
+}
+
+enum AIPluginSessionPhase: Equatable {
+    case plan
+    case working
+    case completed
+    case connected
+    case interrupted
+    case error
+    case unknown
+
+    init(codexPhase: CodexThreadPhase) {
+        switch codexPhase {
+        case .plan:
+            self = .plan
+        case .working:
+            self = .working
+        case .completed:
+            self = .completed
+        case .connected:
+            self = .connected
+        case .interrupted:
+            self = .interrupted
+        case .error:
+            self = .error
+        case .unknown:
+            self = .unknown
+        }
     }
 }
 
@@ -1076,9 +1117,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             summary,
             glyph: .claude,
             accent: NotchPilotTheme.claude,
-            isInteractive: summary.approvalRequestID != nil,
             onActivate: {
-                if let approvalRequestID = summary.approvalRequestID {
+                _ = plugin.activateSession(id: summary.id)
+            },
+            onReview: summary.approvalRequestID.map { approvalRequestID in
+                {
                     codexSurfaceReviewState.selectedSurfaceID = nil
                     approvalReviewState.beginReviewing(requestID: approvalRequestID)
                 }
@@ -1091,9 +1134,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             summary,
             glyph: .codex,
             accent: NotchPilotTheme.codex,
-            isInteractive: summary.codexSurfaceID != nil,
             onActivate: {
-                if let codexSurfaceID = summary.codexSurfaceID {
+                _ = plugin.activateSession(id: summary.id)
+            },
+            onReview: summary.codexSurfaceID.map { codexSurfaceID in
+                {
                     approvalReviewState.exitReviewing()
                     codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
                     codexApprovalInteractionState = nil
@@ -1108,18 +1153,22 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             summary,
             glyph: NotchPilotBrandGlyph(host: summary.host),
             accent: hostColor(for: summary.host),
-            isInteractive: summary.hasAttention,
             onActivate: {
-                if let approvalRequestID = summary.approvalRequestID {
-                    codexSurfaceReviewState.selectedSurfaceID = nil
-                    approvalReviewState.beginReviewing(requestID: approvalRequestID)
-                } else if let codexSurfaceID = summary.codexSurfaceID {
-                    approvalReviewState.exitReviewing()
-                    codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
-                    codexApprovalInteractionState = nil
-                    codexTextInputContentHeight = 0
+                _ = plugin.activateSession(id: summary.id)
+            },
+            onReview: summary.hasAttention
+                ? {
+                    if let approvalRequestID = summary.approvalRequestID {
+                        codexSurfaceReviewState.selectedSurfaceID = nil
+                        approvalReviewState.beginReviewing(requestID: approvalRequestID)
+                    } else if let codexSurfaceID = summary.codexSurfaceID {
+                        approvalReviewState.exitReviewing()
+                        codexSurfaceReviewState.selectedSurfaceID = codexSurfaceID
+                        codexApprovalInteractionState = nil
+                        codexTextInputContentHeight = 0
+                    }
                 }
-            }
+                : nil
         )
     }
 
@@ -1127,60 +1176,73 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         _ summary: AIPluginExpandedSessionSummary,
         glyph: NotchPilotBrandGlyph?,
         accent: Color,
-        isInteractive: Bool,
-        onActivate: @escaping () -> Void
+        onActivate: @escaping () -> Void,
+        onReview: (() -> Void)? = nil
     ) -> some View {
-        Button(action: onActivate) {
-            HStack(spacing: 10) {
-                attentionAccent(hasAttention: summary.hasAttention, accent: accent)
+        HStack(spacing: 4) {
+            Button(action: onActivate) {
+                HStack(spacing: 10) {
+                    attentionAccent(hasAttention: summary.hasAttention, accent: accent)
 
-                if let glyph {
-                    NotchPilotBrandIcon(glyph: glyph, size: 20)
-                } else {
-                    NotchPilotIconTile(
-                        systemName: plugin.iconSystemName,
-                        accent: plugin.accentColor,
-                        size: 20,
-                        isActive: summary.hasAttention
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(summary.title)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    Text(summary.subtitle)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(
-                            summary.hasAttention
-                                ? accent.opacity(0.92)
-                                : NotchPilotTheme.islandTextSecondary
+                    if let glyph {
+                        NotchPilotBrandIcon(glyph: glyph, size: 20)
+                    } else {
+                        NotchPilotIconTile(
+                            systemName: plugin.iconSystemName,
+                            accent: plugin.accentColor,
+                            size: 20,
+                            isActive: summary.hasAttention
                         )
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(summary.title)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Text(summary.subtitle)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(
+                                summary.hasAttention
+                                    ? accent.opacity(0.92)
+                                    : NotchPilotTheme.islandTextSecondary
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if summary.hasMeta {
+                        sessionMetaColumn(summary)
+                    }
+
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.22))
                 }
-
-                Spacer(minLength: 6)
-
-                if summary.hasMeta {
-                    sessionMetaColumn(summary)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.22))
+                .padding(.leading, 8)
+                .padding(.trailing, onReview == nil ? 8 : 4)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if let onReview {
+                Button(action: onReview) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.32))
+                        .frame(width: 28, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(isInteractive == false)
-        .opacity(isInteractive ? 1 : 0.9)
+        .opacity(summary.isDimmed ? 0.58 : 1)
     }
 
     private func attentionAccent(hasAttention: Bool, accent: Color) -> some View {

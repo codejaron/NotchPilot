@@ -18,10 +18,17 @@ final class SplitFakeCodexContextMonitor: @unchecked Sendable, CodexDesktopConte
     private(set) var performedActions: [(CodexSurfaceAction, String)] = []
     private(set) var selectedOptions: [(String, String)] = []
     private(set) var updatedTexts: [(String, String)] = []
+    private(set) var focusedThreadIDs: [String] = []
     private var currentSurface: CodexActionableSurface?
 
     func start() {}
     func stop() {}
+
+    @discardableResult
+    func focusThread(id: String) -> Bool {
+        focusedThreadIDs.append(id)
+        return true
+    }
 
     @discardableResult
     func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {

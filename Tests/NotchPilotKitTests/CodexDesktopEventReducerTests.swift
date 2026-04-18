@@ -52,6 +52,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(context.phase, .working)
         XCTAssertEqual(context.inputTokenCount, 4567)
         XCTAssertEqual(context.outputTokenCount, 890)
+        XCTAssertEqual(context.launchContext?.codexClientID, "desktop-client")
         XCTAssertFalse(marksActivity)
     }
 

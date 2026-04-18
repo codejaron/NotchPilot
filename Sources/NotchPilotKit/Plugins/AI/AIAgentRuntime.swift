@@ -9,6 +9,7 @@ public struct AISession: Equatable, Sendable, Identifiable {
     public var outputTokenCount: Int?
     public var updatedAt: Date
     public var sessionTitle: String?
+    public var launchContext: AISessionLaunchContext?
 
     public init(
         id: String,
@@ -18,7 +19,8 @@ public struct AISession: Equatable, Sendable, Identifiable {
         inputTokenCount: Int? = nil,
         outputTokenCount: Int? = nil,
         updatedAt: Date = Date(),
-        sessionTitle: String? = nil
+        sessionTitle: String? = nil,
+        launchContext: AISessionLaunchContext? = nil
     ) {
         self.id = id
         self.host = host
@@ -28,6 +30,7 @@ public struct AISession: Equatable, Sendable, Identifiable {
         self.outputTokenCount = outputTokenCount
         self.updatedAt = updatedAt
         self.sessionTitle = sessionTitle
+        self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
     }
 }
 
@@ -122,7 +125,13 @@ public final class AIAgentRuntime {
 
     @discardableResult
     public func handle(envelope: AIBridgeEnvelope) -> HandleResult {
-        refreshSession(id: envelope.sessionID, host: envelope.host, eventType: envelope.eventType, payload: envelope.payload)
+        refreshSession(
+            id: envelope.sessionID,
+            host: envelope.host,
+            eventType: envelope.eventType,
+            launchContext: envelope.launchContext,
+            payload: envelope.payload
+        )
 
         guard envelope.needsResponse else {
             return .respondNow(Data("{}".utf8))
@@ -211,6 +220,10 @@ public final class AIAgentRuntime {
                     merged.sessionTitle = sessionTitle
                 }
             }
+            if merged.launchContext == nil,
+               let launchContext = session.launchContext {
+                merged.launchContext = launchContext
+            }
             merged.updatedAt = Date()
             sessions[index] = merged
             sessions.sort { $0.updatedAt > $1.updatedAt }
@@ -221,7 +234,13 @@ public final class AIAgentRuntime {
         sessions.sort { $0.updatedAt > $1.updatedAt }
     }
 
-    private func refreshSession(id: String, host: AIHost, eventType: AIBridgeEventType, payload: AIBridgePayload) {
+    private func refreshSession(
+        id: String,
+        host: AIHost,
+        eventType: AIBridgeEventType,
+        launchContext: AISessionLaunchContext?,
+        payload: AIBridgePayload
+    ) {
         let activity = SessionActivity(eventType: eventType, payload: payload)
         let sessionTitle = extractSessionTitle(from: payload, eventType: eventType)
 
@@ -233,7 +252,8 @@ public final class AIAgentRuntime {
                 activityLabel: activity.label,
                 inputTokenCount: activity.inputTokenCount,
                 outputTokenCount: activity.outputTokenCount,
-                sessionTitle: sessionTitle
+                sessionTitle: sessionTitle,
+                launchContext: launchContext
             )
         )
     }

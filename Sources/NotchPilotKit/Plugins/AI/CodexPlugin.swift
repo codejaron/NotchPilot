@@ -24,6 +24,7 @@ public final class CodexPlugin: AIPluginRendering {
     private let settingsStore: SettingsStore
     private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
     private let nowProvider: @Sendable () -> Date
+    private let sessionFocuser: any AISessionFocusing
 
     private weak var bus: EventBus?
     private var sneakPeekIDs: [String: UUID] = [:]
@@ -34,10 +35,12 @@ public final class CodexPlugin: AIPluginRendering {
     public init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
+        sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
         self.codexMonitor = codexMonitor
+        self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
         self.codexThreads = CodexThreadRegistry(activityExpiry: Self.codexThreadActivityExpiry)
 
@@ -153,6 +156,7 @@ public final class CodexPlugin: AIPluginRendering {
                     host: session.host,
                     title: expandedSessionTitle(for: session),
                     subtitle: codexSurface.map { _ in "Action Needed" } ?? session.activityLabel,
+                    phase: expandedSessionPhase(for: session),
                     approvalCount: 0,
                     approvalRequestID: nil,
                     codexSurfaceID: codexSurface?.id,
@@ -170,6 +174,22 @@ public final class CodexPlugin: AIPluginRendering {
             }
     }
 
+    @discardableResult
+    public func activateSession(id: String) -> Bool {
+        let context = codexThreads.preferredContext(for: id)
+        guard sessions.contains(where: { $0.id == id }) || context?.threadID == id else {
+            return false
+        }
+
+        if codexMonitor.focusThread(id: id) {
+            return true
+        }
+
+        let launchContext = sessions.first(where: { $0.id == id })?.launchContext
+            ?? context?.launchContext
+        return sessionFocuser.focusCodexThread(id: id, fallbackContext: launchContext)
+    }
+
     private func runtimeDurationText(forThreadID threadID: String, now: Date) -> String? {
         guard let duration = codexThreads.preferredActivityDuration(for: threadID, now: now) else {
             return nil
@@ -184,6 +204,14 @@ public final class CodexPlugin: AIPluginRendering {
 
     public func preferredCodexTitle(for surface: CodexActionableSurface?) -> String? {
         codexThreads.preferredDisplayTitle(for: surface?.threadID)
+    }
+
+    private func expandedSessionPhase(for session: AISession) -> AIPluginSessionPhase {
+        guard let context = codexThreads.preferredContext(for: session.id) else {
+            return .unknown
+        }
+
+        return AIPluginSessionPhase(codexPhase: context.phase)
     }
 
     @discardableResult

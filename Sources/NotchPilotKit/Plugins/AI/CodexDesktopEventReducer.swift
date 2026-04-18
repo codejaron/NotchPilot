@@ -179,8 +179,17 @@ public struct CodexDesktopEventReducer {
             activityLabel: conversationActivityLabel(from: state),
             phase: conversationPhase(from: state),
             inputTokenCount: state.integerValue(at: ["latestTokenUsageInfo", "total", "inputTokens"]),
-            outputTokenCount: state.integerValue(at: ["latestTokenUsageInfo", "total", "outputTokens"])
+            outputTokenCount: state.integerValue(at: ["latestTokenUsageInfo", "total", "outputTokens"]),
+            launchContext: conversationLaunchContext(conversationID: conversationID)
         )
+    }
+
+    private func conversationLaunchContext(conversationID: String) -> AISessionLaunchContext? {
+        guard let ownerClientID = conversationOwnerClientIDs[conversationID] else {
+            return nil
+        }
+
+        return AISessionLaunchContext(codexClientID: ownerClientID)
     }
 
     private func conversationTitle(from state: [String: JSONValue]) -> String? {

@@ -277,15 +277,15 @@ struct ClaudePluginSettingsView: View {
     }
 
     private func ensureBridgeScript() throws -> String {
-        if store.bridgeScriptPath.isEmpty == false,
-           FileManager.default.fileExists(atPath: store.bridgeScriptPath) {
-            return store.bridgeScriptPath
-        }
-
         if let bundledURL = Bundle.module.url(forResource: "notch-bridge", withExtension: "py") {
             let path = try HookInstaller().installBridgeScript(fromBundle: bundledURL.path)
             store.bridgeScriptPath = path
             return path
+        }
+
+        if store.bridgeScriptPath.isEmpty == false,
+           FileManager.default.fileExists(atPath: store.bridgeScriptPath) {
+            return store.bridgeScriptPath
         }
 
         let fallbackPath = FileManager.default.homeDirectoryForCurrentUser
