@@ -49,7 +49,7 @@ final class MediaPlaybackLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(preferredWidth - compactWidth, 85)
     }
 
-    func testCompactMediaPreviewUsesBoringNotchStyleSpectrumSizing() {
+    func testCompactMediaPreviewUsesCompactSpectrumSizing() {
         XCTAssertEqual(MediaPlaybackCompactPreviewLayout.levelIndicatorWidth, 16)
         XCTAssertEqual(MediaPlaybackCompactPreviewLayout.levelIndicatorHeight, 12)
         XCTAssertEqual(MediaPlaybackCompactPreviewLayout.levelBarWidth, 2)

@@ -1,23 +1,65 @@
 # Third-Party Notices
 
+This file documents third-party code bundled in this repository and
+third-party package dependencies required to build or run NotchPilot.
+
 ## LyricsKit
 
 - Project: `MxIris-LyricsX-Project/LyricsKit`
 - Upstream: <https://github.com/MxIris-LyricsX-Project/LyricsKit>
 - Used revision: `9e52e0986b89df6d8815c823fac23b6a775c3b49`
-- Related project: `MxIris-LyricsX-Project/LyricsX`
-- Related upstream: <https://github.com/MxIris-LyricsX-Project/LyricsX>
 - License: `MPL-2.0`
 
-NotchPilot consumes LyricsKit as a Swift Package dependency. The NotchPilot
-sources in this repository do not include copied LyricsX source files; the
-dependency supplies lyrics search and parsing types used by the desktop lyrics
-feature.
+NotchPilot consumes LyricsKit as a Swift Package dependency; no LyricsKit
+source files are vendored in this repository. The dependency supplies lyrics
+search and parsing types used by the desktop lyrics feature.
 
-LyricsKit states that it is part of LyricsX and licensed under MPL 2.0. The
-MPL text is available from the upstream `LICENSE` file and
-<https://mozilla.org/MPL/2.0/>. Source for the exact dependency revision can be
-obtained from the upstream repository using the revision above.
+LyricsKit is licensed under MPL 2.0. The MPL text is available from the
+upstream `LICENSE` file and <https://mozilla.org/MPL/2.0/>. Source for the
+exact dependency revision can be obtained from the upstream repository using
+the revision above.
+
+## Stats
+
+- Project: `exelban/stats`
+- Upstream: <https://github.com/exelban/stats>
+- License: `MIT`
+
+Portions of the system monitor plugin are adapted from Stats:
+
+- `SystemMonitorSMCSensorBridge.decodedValue(dataType:bytes:)` — SMC data
+  type decoding table (`ui8`/`ui16`/`ui32`/`sp1e`/`sp3c`/`sp4b`/`sp5a`/`sp69`/
+  `sp78`/`sp87`/`sp96`/`spa5`/`spb4`/`spf0`/`flt `/`fpe2`) and the associated
+  fixed-point divisors.
+- `SystemMonitorBestEffortSampler` — the `/bin/ps -Aceo pid,pcpu,comm -r`
+  and `/usr/bin/top -l 1 -o mem -stats pid,command,mem` invocations used to
+  enumerate top CPU and memory processes, and their output parsing.
+
+### MIT License
+
+```text
+MIT License
+
+Copyright (c) 2019 Serhiy Mytrovtsiy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## MediaRemoteAdapter
 
@@ -33,9 +75,8 @@ NotchPilot bundles the following upstream-derived files under
 - `MediaRemoteAdapter.framework`
 - `LICENSE`
 
-The bundled framework in this repository was built locally from the upstream
-source tree above. It is included for runtime use by the media playback plugin
-and is not sourced from `TheBoredTeam/boring.notch`.
+The bundled framework was built locally from the upstream source tree above
+and is included for runtime use by the media playback plugin.
 
 ### BSD 3-Clause License
 
