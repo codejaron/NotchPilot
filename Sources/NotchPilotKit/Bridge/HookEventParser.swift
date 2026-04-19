@@ -6,18 +6,6 @@ public enum HookEventParserError: Error, Equatable {
 }
 
 public struct HookEventParser {
-    private static let sessionTitlePaths: [[String]] = [
-        ["session_title"],
-        ["sessionTitle"],
-        ["conversation_title"],
-        ["conversationTitle"],
-        ["title"],
-        ["session", "title"],
-        ["metadata", "title"],
-        ["conversation", "title"],
-        ["thread", "title"],
-    ]
-
     private let loadFileContent: @Sendable (String) -> String?
 
     public init(loadFileContent: @escaping @Sendable (String) -> String? = { path in
@@ -307,7 +295,7 @@ public struct HookEventParser {
                 )
             )
         case .userPromptSubmit:
-            var values = genericValues(from: dictionary, eventType: eventType)
+            var values = flattenStrings(from: dictionary)
             if let prompt = findString(in: dictionary, paths: [
                 ["prompt"],
                 ["user_prompt"],
@@ -317,97 +305,8 @@ public struct HookEventParser {
             }
             return .generic(values)
         default:
-            return .generic(genericValues(from: dictionary, eventType: eventType))
+            return .generic(flattenStrings(from: dictionary))
         }
-    }
-
-    private func genericValues(
-        from dictionary: [String: Any],
-        eventType: AIBridgeEventType
-    ) -> [String: String] {
-        var values = flattenStrings(from: dictionary)
-        guard shouldResolveSessionTitle(for: eventType),
-              let sessionTitle = resolveSessionTitle(from: dictionary)
-        else {
-            return values
-        }
-
-        values["session_title"] = sessionTitle
-        return values
-    }
-
-    private func shouldResolveSessionTitle(for eventType: AIBridgeEventType) -> Bool {
-        switch eventType {
-        case .sessionStart, .postToolUse, .stop, .userPromptSubmit:
-            return true
-        case .permissionRequest, .preToolUse, .unknown:
-            return false
-        }
-    }
-
-    private func resolveSessionTitle(from dictionary: [String: Any]) -> String? {
-        if let explicitTitle = findNormalizedSessionTitle(in: dictionary, paths: Self.sessionTitlePaths) {
-            return explicitTitle
-        }
-
-        guard let transcriptPath = findString(in: dictionary, paths: [
-            ["transcript_path"],
-            ["transcriptPath"],
-        ]) else {
-            return nil
-        }
-
-        return sessionTitleFromTranscript(at: transcriptPath)
-    }
-
-    private func sessionTitleFromTranscript(at path: String) -> String? {
-        guard let content = loadFileContent(path) else {
-            return nil
-        }
-
-        for line in content.split(whereSeparator: \.isNewline).reversed() {
-            guard let data = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data),
-                  let dictionary = object as? [String: Any]
-            else {
-                continue
-            }
-
-            if let title = findNormalizedSessionTitle(in: dictionary, paths: Self.sessionTitlePaths) {
-                return title
-            }
-        }
-
-        return nil
-    }
-
-    private func findNormalizedSessionTitle(
-        in dictionary: [String: Any],
-        paths: [[String]]
-    ) -> String? {
-        for path in paths {
-            guard let title = normalizedSessionTitle(value(in: dictionary, for: path) as? String) else {
-                continue
-            }
-            return title
-        }
-        return nil
-    }
-
-    private func normalizedSessionTitle(_ rawTitle: String?) -> String? {
-        guard let title = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
-              title.isEmpty == false,
-              looksLikeUUID(title) == false
-        else {
-            return nil
-        }
-
-        return title
-    }
-
-    private func looksLikeUUID(_ value: String) -> Bool {
-        let pattern = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
-        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private func permissionSuggestions(from dictionary: [String: Any]) -> [JSONValue] {

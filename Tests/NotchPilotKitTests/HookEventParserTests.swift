@@ -215,7 +215,7 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(values["tool_name"], "Bash")
     }
 
-    func testUserPromptSubmitIncludesGeneratedSessionTitleFromTranscript() throws {
+    func testUserPromptSubmitDoesNotInjectTranscriptSessionTitle() throws {
         let transcriptURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("claude-session-title-\(UUID().uuidString).jsonl")
         defer {
@@ -246,7 +246,7 @@ final class HookEventParserTests: XCTestCase {
             return XCTFail("expected generic user prompt payload")
         }
         XCTAssertEqual(values["prompt"], "请帮我修复审批同步问题")
-        XCTAssertEqual(values["session_title"], "Fix Approval Sync")
+        XCTAssertNil(values["session_title"])
     }
 
     func testPreToolUseEditToolDoesNotRequireResponseInDefaultMode() throws {
