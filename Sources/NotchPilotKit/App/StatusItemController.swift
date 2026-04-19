@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 public final class StatusItemController: NSObject, NSMenuItemValidation {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
     private let searchLyricsHandler: () -> Void
     private let ignoreCurrentTrackLyricsHandler: () -> Void
@@ -54,9 +54,11 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         super.init()
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "capsule.bottomhalf.filled", accessibilityDescription: "NotchPilot")
-            button.imagePosition = .imageLeading
-            button.title = "NotchPilot"
+            button.image = Self.makeNotchedComputerStatusImage()
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.title = ""
+            button.toolTip = "NotchPilot"
         }
 
         menu.addItem(NSMenuItem(title: "Search Lyrics…", action: #selector(searchLyrics), keyEquivalent: ""))
@@ -146,6 +148,37 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
 
     private func syncActivitySneakPreviewMenuState() {
         hideActivitySneaksItem.state = isActivitySneakPreviewsHidden() ? .on : .off
+    }
+
+    private static func makeNotchedComputerStatusImage() -> NSImage {
+        let size = NSSize(width: 22, height: 18)
+        let image = NSImage(size: size, flipped: false) { _ in
+            NSColor.black.setStroke()
+            NSColor.black.setFill()
+
+            let displayRect = NSRect(x: 2.5, y: 4.5, width: 17, height: 11)
+            let display = NSBezierPath(roundedRect: displayRect, xRadius: 2.8, yRadius: 2.8)
+            display.lineWidth = 1.8
+            display.stroke()
+
+            let notch = NSBezierPath(
+                roundedRect: NSRect(x: 8.0, y: 12.2, width: 6.0, height: 4.2),
+                xRadius: 1.5,
+                yRadius: 1.5
+            )
+            notch.fill()
+
+            let base = NSBezierPath()
+            base.move(to: NSPoint(x: 7.0, y: 2.5))
+            base.line(to: NSPoint(x: 15.0, y: 2.5))
+            base.lineWidth = 1.8
+            base.lineCapStyle = .round
+            base.stroke()
+
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 

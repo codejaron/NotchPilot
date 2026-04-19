@@ -4,6 +4,20 @@ import XCTest
 
 final class StatusItemControllerTests: XCTestCase {
     @MainActor
+    func testStatusItemUsesIconOnlyNotchedComputerMark() throws {
+        let controller = makeController()
+
+        let statusItem = try XCTUnwrap(statusItem(from: controller))
+        XCTAssertEqual(statusItem.length, NSStatusItem.squareLength)
+
+        let button = try XCTUnwrap(statusButton(from: controller))
+        XCTAssertEqual(button.title, "")
+        XCTAssertNotNil(button.image)
+        XCTAssertEqual(button.image?.isTemplate, true)
+        XCTAssertEqual(button.imageScaling, .scaleProportionallyDown)
+    }
+
+    @MainActor
     func testStatusItemMenuIncludesLyricsActionsBeforeSettings() {
         let controller = makeController()
 
@@ -101,5 +115,14 @@ final class StatusItemControllerTests: XCTestCase {
             settingsHandler: {},
             quitHandler: {}
         )
+    }
+
+    private func statusButton(from controller: StatusItemController) -> NSStatusBarButton? {
+        statusItem(from: controller)?.button
+    }
+
+    private func statusItem(from controller: StatusItemController) -> NSStatusItem? {
+        let mirror = Mirror(reflecting: controller)
+        return mirror.children.first { $0.label == "statusItem" }?.value as? NSStatusItem
     }
 }
