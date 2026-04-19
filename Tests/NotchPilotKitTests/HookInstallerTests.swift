@@ -119,7 +119,7 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(promptEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
     }
 
-    func testInstallClaudeHooksRegistersPermissionRequestInsteadOfPreToolUse() throws {
+    func testInstallClaudeHooksRegistersPermissionRequestAndPreToolUseObserver() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -129,11 +129,12 @@ final class HookInstallerTests: XCTestCase {
         let json = try loadJSONObject(at: claudeDirectory.appendingPathComponent("settings.json"))
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
         let permissionEntries = try XCTUnwrap(hooks["PermissionRequest"] as? [[String: Any]])
+        let preToolEntries = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
         XCTAssertTrue(permissionEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
-        XCTAssertNil(hooks["PreToolUse"])
+        XCTAssertTrue(preToolEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
     }
 
-    func testInstallClaudeHooksRemovesStaleManagedPreToolUseEntries() throws {
+    func testInstallClaudeHooksReplacesManagedPreToolUseEntries() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -163,11 +164,86 @@ final class HookInstallerTests: XCTestCase {
 
         let json = try loadJSONObject(at: settingsURL)
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
-        XCTAssertNil(hooks["PreToolUse"])
+        let preToolEntries = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let preToolCommands = preToolEntries.flatMap(commandStrings(in:))
+        XCTAssertEqual(preToolCommands.count, 1)
+        XCTAssertTrue(preToolCommands.first?.contains("/tmp/notch-bridge.py") == true)
         XCTAssertNotNil(hooks["PermissionRequest"])
     }
 
-    func testClaudeHooksNeedUpdateDetectsStalePreToolUseEntry() throws {
+    func testClaudeHooksNeedUpdateReturnsTrueWhenPreToolUseObserverMissing() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        try Data(
+            """
+            {
+              "hooks": {
+                "PermissionRequest": [
+                  {
+                    "matcher": "*",
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ],
+                "PostToolUse": [
+                  {
+                    "matcher": "*",
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ],
+                "SessionStart": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ],
+                "Stop": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ],
+                "UserPromptSubmit": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "\\"/tmp/notch-bridge.py\\" --host claude"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+
+        XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: "/tmp/notch-bridge.py"))
+        XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
+    }
+
+    func testClaudeHooksNeedUpdateDetectsIncompleteManagedHookSet() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 

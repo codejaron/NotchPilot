@@ -185,6 +185,17 @@ public struct HookInstaller {
 
     private func claudeHookConfiguration(command: String) -> [String: [[String: Any]]] {
         [
+            "PreToolUse": [
+                [
+                    "matcher": "*",
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": command,
+                        ],
+                    ],
+                ],
+            ],
             "PermissionRequest": [
                 [
                     "matcher": "*",

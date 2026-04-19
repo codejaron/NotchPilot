@@ -108,6 +108,18 @@ public enum AIRealtimeEvent: Equatable {
 }
 
 public final class AIAgentRuntime {
+    private static let sessionTitleKeys = [
+        "session_title",
+        "sessionTitle",
+        "conversation_title",
+        "conversationTitle",
+        "metadata.title",
+        "conversation.title",
+        "session.title",
+        "thread.title",
+        "title",
+    ]
+
     public enum HandleResult: Equatable {
         case respondNow(Data)
         case awaitDecision(requestID: String)
@@ -217,9 +229,7 @@ public final class AIAgentRuntime {
                 }
             }
             if let sessionTitle = session.sessionTitle, sessionTitle.isEmpty == false {
-                if merged.sessionTitle?.isEmpty != false {
-                    merged.sessionTitle = sessionTitle
-                }
+                merged.sessionTitle = sessionTitle
             }
             if merged.launchContext == nil,
                let launchContext = session.launchContext {
@@ -260,23 +270,41 @@ public final class AIAgentRuntime {
     }
 
     private func extractSessionTitle(from payload: AIBridgePayload, eventType: AIBridgeEventType) -> String? {
-        guard eventType == .userPromptSubmit else {
+        switch eventType {
+        case .sessionStart, .postToolUse, .stop, .userPromptSubmit:
+            break
+        case .permissionRequest, .preToolUse, .unknown:
             return nil
         }
 
-        guard case let .generic(values) = payload,
-              let prompt = values["prompt"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-              prompt.isEmpty == false
+        guard case let .generic(values) = payload else {
+            return nil
+        }
+
+        for key in Self.sessionTitleKeys {
+            guard let title = normalizedSessionTitle(values[key]) else {
+                continue
+            }
+            return title
+        }
+
+        return nil
+    }
+
+    private func normalizedSessionTitle(_ rawTitle: String?) -> String? {
+        guard let title = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              title.isEmpty == false,
+              looksLikeUUID(title) == false
         else {
             return nil
         }
 
-        let limit = 30
-        guard prompt.count > limit else {
-            return prompt
-        }
+        return title
+    }
 
-        return String(prompt.prefix(limit)) + "…"
+    private func looksLikeUUID(_ value: String) -> Bool {
+        let pattern = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
+        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private func mutatePendingApproval(requestID: String, newStatus: ApprovalStatus) -> PendingApproval? {

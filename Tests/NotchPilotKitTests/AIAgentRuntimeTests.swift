@@ -150,7 +150,7 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.pendingApprovals.first?.eventType, .preToolUse)
     }
 
-    func testUserPromptSubmitSetsSessionTitleAndPreservesTokensOnLaterPromptEvents() throws {
+    func testGeneratedSessionTitleIsUsedInsteadOfPromptTextAndPreservesTokens() throws {
         let runtime = AIAgentRuntime()
 
         let usageEnvelope = AIBridgeEnvelope(
@@ -166,7 +166,7 @@ final class AIAgentRuntimeTests: XCTestCase {
             ])
         )
 
-        let firstPromptEnvelope = AIBridgeEnvelope(
+        let promptEnvelope = AIBridgeEnvelope(
             host: .claude,
             requestID: "req-6",
             sessionID: "session-5",
@@ -178,26 +178,48 @@ final class AIAgentRuntimeTests: XCTestCase {
             ])
         )
 
-        let secondPromptEnvelope = AIBridgeEnvelope(
+        let generatedTitleEnvelope = AIBridgeEnvelope(
             host: .claude,
             requestID: "req-7",
             sessionID: "session-5",
-            eventType: .userPromptSubmit,
+            eventType: .postToolUse,
             capabilities: .none,
             needsResponse: false,
             payload: .generic([
-                "prompt": "Overwrite me",
+                "tool_name": "Bash",
+                "session_title": "Express SQLite Backend",
             ])
         )
 
         _ = runtime.handle(envelope: usageEnvelope)
-        _ = runtime.handle(envelope: firstPromptEnvelope)
-        _ = runtime.handle(envelope: secondPromptEnvelope)
+        _ = runtime.handle(envelope: promptEnvelope)
+        _ = runtime.handle(envelope: generatedTitleEnvelope)
 
         let session = try XCTUnwrap(runtime.sessions.first)
-        XCTAssertEqual(session.sessionTitle, "Build a backend server with ex…")
+        XCTAssertEqual(session.sessionTitle, "Express SQLite Backend")
         XCTAssertEqual(session.inputTokenCount, 1200)
         XCTAssertEqual(session.outputTokenCount, 300)
+    }
+
+    func testPromptTextAloneDoesNotBecomeClaudeSessionTitle() throws {
+        let runtime = AIAgentRuntime()
+
+        _ = runtime.handle(
+            envelope: AIBridgeEnvelope(
+                host: .claude,
+                requestID: "req-prompt-title",
+                sessionID: "session-prompt-title",
+                eventType: .userPromptSubmit,
+                capabilities: .none,
+                needsResponse: false,
+                payload: .generic([
+                    "prompt": "请帮我修复审批同步问题",
+                ])
+            )
+        )
+
+        let session = try XCTUnwrap(runtime.sessions.first)
+        XCTAssertNil(session.sessionTitle)
     }
 
     func testCodexSessionUpsertClearsTokenCountsWhenDesktopStreamOmitsThem() throws {

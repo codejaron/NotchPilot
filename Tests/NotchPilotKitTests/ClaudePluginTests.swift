@@ -255,6 +255,68 @@ final class ClaudePluginTests: XCTestCase {
         bus.unsubscribe(token)
     }
 
+    @MainActor
+    func testPreToolUseFromExternalClaudeApprovalClearsPendingApprovalAndSneakPeek() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+        let preToolResponseBox = SplitResponseBox()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-external-permission",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-external-approval",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo externally approved" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-external-permission"])
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .sneakPeekRequested = event { return true }
+            return false
+        })
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-external-pretool",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-external-approval",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo externally approved" }
+                }
+                """
+            ),
+            respond: { data in
+                preToolResponseBox.data = data
+            }
+        )
+
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertEqual(String(data: preToolResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+
+        bus.unsubscribe(token)
+    }
+
     func testStoppedSessionDoesNotRenderCompactPreviewWithoutApproval() async {
         let plugin = await MainActor.run { ClaudePlugin() }
         let bus = await MainActor.run { EventBus() }

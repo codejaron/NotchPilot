@@ -120,8 +120,12 @@ public final class ClaudePlugin: AIPluginRendering {
                 return
             }
 
+            let resolvedExternalApprovals = resolveExternallyHandledApprovals(for: envelope)
             let result = runtime.handle(envelope: envelope)
             syncState()
+            if resolvedExternalApprovals {
+                syncSneakPeek()
+            }
 
             switch result {
             case let .respondNow(data):
@@ -158,6 +162,44 @@ public final class ClaudePlugin: AIPluginRendering {
 
         syncState()
         syncSneakPeek()
+    }
+
+    @discardableResult
+    private func resolveExternallyHandledApprovals(for envelope: AIBridgeEnvelope) -> Bool {
+        guard isExternalApprovalCompletionEvent(envelope.eventType),
+              let observedToolUse = ClaudeObservedToolUse(payload: envelope.payload)
+        else {
+            return false
+        }
+
+        let requestIDs = runtime.pendingApprovals
+            .filter { approval in
+                approval.sessionID == envelope.sessionID
+                    && observedToolUse.matches(approval.payload)
+            }
+            .map(\.requestID)
+
+        guard requestIDs.isEmpty == false else {
+            return false
+        }
+
+        for requestID in requestIDs {
+            if let responder = responders.removeValue(forKey: requestID) {
+                responder(Data("{}".utf8))
+            }
+            _ = runtime.resolvePendingApproval(requestID: requestID)
+        }
+
+        return true
+    }
+
+    private func isExternalApprovalCompletionEvent(_ eventType: AIBridgeEventType) -> Bool {
+        switch eventType {
+        case .preToolUse, .postToolUse:
+            return true
+        case .permissionRequest, .sessionStart, .stop, .userPromptSubmit, .unknown:
+            return false
+        }
     }
 
     public func respond(to requestID: String, with action: ApprovalAction) {
@@ -429,5 +471,73 @@ struct ClaudeSessionActivityTracker {
         let isTerminal = (lastEventType[sessionID] == .stop)
         let endedAt: Date = isTerminal ? (lastActiveAt[sessionID] ?? now) : now
         return max(0, endedAt.timeIntervalSince(start))
+    }
+}
+
+private struct ClaudeObservedToolUse {
+    let toolName: String?
+    let command: String?
+    let filePath: String?
+    let webFetchURL: String?
+
+    init?(payload: AIBridgePayload) {
+        guard case let .generic(values) = payload else {
+            return nil
+        }
+
+        self.toolName = Self.firstNonEmptyValue(in: values, keys: [
+            "tool_name",
+            "tool.name",
+            "request.tool",
+        ])
+        self.command = Self.firstNonEmptyValue(in: values, keys: [
+            "tool_input.command",
+            "tool.input.command",
+            "command",
+            "request.command",
+        ])
+        self.filePath = Self.firstNonEmptyValue(in: values, keys: [
+            "tool_input.file_path",
+            "tool_input.filePath",
+            "tool.input.file_path",
+            "tool.input.filePath",
+            "file_path",
+            "filePath",
+        ])
+        self.webFetchURL = Self.firstNonEmptyValue(in: values, keys: [
+            "tool_input.url",
+            "tool.input.url",
+            "url",
+        ])
+    }
+
+    func matches(_ payload: ApprovalPayload) -> Bool {
+        if let toolName, payload.toolName != toolName {
+            return false
+        }
+
+        if let command {
+            return payload.command == command || payload.previewText == command
+        }
+
+        if let filePath {
+            return payload.filePath == filePath || payload.previewText == filePath
+        }
+
+        if let webFetchURL {
+            return payload.webFetchURL == webFetchURL || payload.previewText == webFetchURL
+        }
+
+        return toolName != nil
+    }
+
+    private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {
+        for key in keys {
+            if let value = values[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               value.isEmpty == false {
+                return value
+            }
+        }
+        return nil
     }
 }

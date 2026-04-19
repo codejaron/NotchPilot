@@ -215,6 +215,40 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(values["tool_name"], "Bash")
     }
 
+    func testUserPromptSubmitIncludesGeneratedSessionTitleFromTranscript() throws {
+        let transcriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-session-title-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: transcriptURL)
+        }
+
+        try """
+        {"type":"user","message":{"role":"user","content":"请帮我修复审批同步问题"}}
+        {"type":"assistant","sessionTitle":"Fix Approval Sync"}
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-title-transcript",
+            rawJSON: """
+            {
+              "hook_event_name": "UserPromptSubmit",
+              "session_id": "claude-session-title",
+              "transcript_path": "\(transcriptURL.path)",
+              "prompt": "请帮我修复审批同步问题"
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        guard case let .generic(values) = envelope.payload else {
+            return XCTFail("expected generic user prompt payload")
+        }
+        XCTAssertEqual(values["prompt"], "请帮我修复审批同步问题")
+        XCTAssertEqual(values["session_title"], "Fix Approval Sync")
+    }
+
     func testPreToolUseEditToolDoesNotRequireResponseInDefaultMode() throws {
         let frame = BridgeFrame(
             host: .claude,
