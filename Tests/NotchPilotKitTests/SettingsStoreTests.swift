@@ -194,6 +194,36 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testPluginAvailabilitySettingsDefaultToEnabledAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.systemMonitorEnabled)
+        XCTAssertTrue(store.claudePluginEnabled)
+        XCTAssertTrue(store.codexPluginEnabled)
+        XCTAssertTrue(store.mediaPlaybackEnabled)
+
+        store.systemMonitorEnabled = false
+        store.claudePluginEnabled = false
+        store.codexPluginEnabled = false
+        store.mediaPlaybackEnabled = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(reloadedStore.systemMonitorEnabled)
+        XCTAssertFalse(reloadedStore.claudePluginEnabled)
+        XCTAssertFalse(reloadedStore.codexPluginEnabled)
+        XCTAssertFalse(reloadedStore.mediaPlaybackEnabled)
+    }
+
+    @MainActor
     func testDesktopLyricsSettingDefaultsToDisabledAndPersistsChanges() {
         let store = SettingsStore(
             defaults: defaults,

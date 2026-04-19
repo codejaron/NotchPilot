@@ -24,13 +24,24 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     var iconSystemName: String {
         switch self {
         case .media:
-            return "play.circle.fill"
+            return "music.note"
         case .claude:
             return "sparkles"
         case .codex:
             return "terminal"
         case .systemMonitor:
-            return "speedometer"
+            return "cpu"
+        }
+    }
+
+    var brandGlyph: NotchPilotBrandGlyph? {
+        switch self {
+        case .claude:
+            return .claude
+        case .codex:
+            return .codex
+        case .media, .systemMonitor:
+            return nil
         }
     }
 
@@ -72,7 +83,7 @@ struct MediaPluginSettingsView: View {
             SettingsGroupSection(title: "播放") {
                 SettingsToggleRow(
                     title: "启用媒体插件",
-                    detail: "跟随当前 macOS Now Playing 播放会话。",
+                    detail: "关闭后不再监听播放状态，也不会出现在 Notch。",
                     isOn: $store.mediaPlaybackEnabled
                 )
 
@@ -81,6 +92,7 @@ struct MediaPluginSettingsView: View {
                 SettingsToggleRow(
                     title: "播放变化时显示预览",
                     detail: "在 Notch 闭合态显示当前播放信息。",
+                    isEnabled: store.mediaPlaybackEnabled,
                     isOn: $store.mediaPlaybackSneakPreviewEnabled
                 )
 
@@ -89,6 +101,7 @@ struct MediaPluginSettingsView: View {
                 SettingsToggleRow(
                     title: "桌面底部歌词卡片",
                     detail: "在当前活跃屏幕底部显示当前歌词与下一句。",
+                    isEnabled: store.mediaPlaybackEnabled,
                     isOn: $store.desktopLyricsEnabled
                 )
             }
@@ -96,8 +109,8 @@ struct MediaPluginSettingsView: View {
             SettingsGroupSection(title: "歌词样式") {
                 SettingsRow(
                     title: "高亮颜色",
-                    detail: "歌词 KTV 进度填充颜色。",
-                    isEnabled: store.desktopLyricsEnabled
+                    detail: "歌词进度填充颜色。",
+                    isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
                 ) {
                     ColorPicker(
                         "",
@@ -108,7 +121,7 @@ struct MediaPluginSettingsView: View {
                         supportsOpacity: false
                     )
                     .labelsHidden()
-                    .disabled(!store.desktopLyricsEnabled)
+                    .disabled(!store.mediaPlaybackEnabled || !store.desktopLyricsEnabled)
                 }
 
                 SettingsRowDivider()
@@ -116,11 +129,11 @@ struct MediaPluginSettingsView: View {
                 SettingsRow(
                     title: "字体大小",
                     detail: "当前歌词行文字大小（\(Int(store.desktopLyricsFontSize))pt）。",
-                    isEnabled: store.desktopLyricsEnabled
+                    isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
                 ) {
                     Slider(value: $store.desktopLyricsFontSize, in: 18...42, step: 2)
                         .frame(width: 170)
-                        .disabled(!store.desktopLyricsEnabled)
+                        .disabled(!store.mediaPlaybackEnabled || !store.desktopLyricsEnabled)
                 }
             }
         }
@@ -180,6 +193,14 @@ struct ClaudePluginSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "Claude") {
+            SettingsGroupSection(title: "插件") {
+                SettingsToggleRow(
+                    title: "启用 Claude 插件",
+                    detail: "关闭后不会处理 Claude Hook，也不会在 Notch 中显示 Claude 会话。",
+                    isOn: $store.claudePluginEnabled
+                )
+            }
+
             SettingsGroupSection(title: "Claude Code") {
                 SettingsStatusRow(
                     title: "集成状态",
@@ -193,7 +214,7 @@ struct ClaudePluginSettingsView: View {
                     title: "操作",
                     detail: claudeActionDetail,
                     buttonTitle: claudeActionTitle,
-                    isEnabled: store.claudeCodeDetected && isWorking == false
+                    isEnabled: store.claudePluginEnabled && store.claudeCodeDetected && isWorking == false
                 ) {
                     claudeAction()
                 }
@@ -309,6 +330,14 @@ struct CodexPluginSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "Codex") {
+            SettingsGroupSection(title: "插件") {
+                SettingsToggleRow(
+                    title: "启用 Codex 插件",
+                    detail: "关闭后不再监听 Codex Desktop 会话，也不会出现在 Notch。",
+                    isOn: $store.codexPluginEnabled
+                )
+            }
+
             SettingsGroupSection(title: "Codex Desktop") {
                 SettingsStatusRow(
                     title: "连接状态",
@@ -346,9 +375,18 @@ struct SystemMonitorPluginSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "System") {
+            SettingsGroupSection(title: "插件") {
+                SettingsToggleRow(
+                    title: "启用系统监控插件",
+                    detail: "关闭后停止采样 CPU、内存、网络等指标，并从 Notch 中移除。",
+                    isOn: $store.systemMonitorEnabled
+                )
+            }
+
             SettingsGroupSection(title: "预览") {
                 SettingsToggleRow(
                     title: "在 Notch 闭合态显示系统监控",
+                    isEnabled: store.systemMonitorEnabled,
                     isOn: $store.systemMonitorSneakPreviewEnabled
                 )
 
@@ -357,7 +395,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: "左侧槽位 1",
                     selection: metricBinding(side: .left, index: 0),
-                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
                     metricOptions
                 }
@@ -367,7 +405,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: "左侧槽位 2",
                     selection: metricBinding(side: .left, index: 1),
-                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
                     metricOptions
                 }
@@ -377,7 +415,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: "右侧槽位 1",
                     selection: metricBinding(side: .right, index: 0),
-                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
                     metricOptions
                 }
@@ -387,7 +425,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: "右侧槽位 2",
                     selection: metricBinding(side: .right, index: 1),
-                    isEnabled: store.systemMonitorSneakPreviewEnabled
+                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
                     metricOptions
                 }

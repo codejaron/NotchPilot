@@ -6,6 +6,7 @@ public final class PluginManager: ObservableObject {
     @Published private var plugins: [any NotchPlugin] = []
     private weak var bus: EventBus?
     private var pluginCancellables: [String: AnyCancellable] = [:]
+    private var activePluginIDs: Set<String> = []
 
     public init() {}
 
@@ -23,25 +24,24 @@ public final class PluginManager: ObservableObject {
     public func register(_ plugin: any NotchPlugin) {
         plugins.append(plugin)
         observe(plugin)
-        if let bus {
-            plugin.activate(bus: bus)
-        }
+        syncActivation(for: plugin)
         objectWillChange.send()
     }
 
     public func activateAll(using bus: EventBus) {
         self.bus = bus
         for plugin in plugins {
-            plugin.activate(bus: bus)
+            syncActivation(for: plugin)
         }
         objectWillChange.send()
     }
 
     public func deactivateAll() {
         for plugin in plugins {
-            plugin.deactivate()
+            deactivateIfNeeded(plugin)
         }
         pluginCancellables.removeAll()
+        activePluginIDs.removeAll()
         bus = nil
         objectWillChange.send()
     }
@@ -96,8 +96,34 @@ public final class PluginManager: ObservableObject {
     }
 
     private func observe(_ plugin: any NotchPlugin) {
-        pluginCancellables[plugin.id] = plugin.objectWillChange.sink { [weak self] (_: Void) in
-            self?.objectWillChange.send()
+        pluginCancellables[plugin.id] = plugin.objectWillChange.sink { [weak self, plugin] (_: Void) in
+            Task { @MainActor [weak self, plugin] in
+                self?.syncActivation(for: plugin)
+                self?.objectWillChange.send()
+            }
         }
+    }
+
+    private func syncActivation(for plugin: any NotchPlugin) {
+        guard let bus else {
+            return
+        }
+
+        if plugin.isEnabled {
+            guard activePluginIDs.insert(plugin.id).inserted else {
+                return
+            }
+            plugin.activate(bus: bus)
+        } else {
+            deactivateIfNeeded(plugin)
+        }
+    }
+
+    private func deactivateIfNeeded(_ plugin: any NotchPlugin) {
+        guard activePluginIDs.remove(plugin.id) != nil else {
+            return
+        }
+
+        plugin.deactivate()
     }
 }

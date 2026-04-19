@@ -21,7 +21,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
     public let id = "system-monitor"
     public let title = "System"
-    public let iconSystemName = "speedometer"
+    public let iconSystemName = "cpu"
     public let accentColor = Color(red: 0.36, green: 0.82, blue: 1.0)
     public let dockOrder = 90
     public let previewPriority: Int? = 300
@@ -52,6 +52,14 @@ public final class SystemMonitorPlugin: NotchPlugin {
         self.settingsStore = settingsStore
         self.sneakConfiguration = sneakConfiguration ?? settingsStore.systemMonitorSneakConfiguration
         self.snapshot = .unavailable
+        self.isEnabled = settingsStore.systemMonitorEnabled
+
+        settingsStore.$systemMonitorEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                self?.handlePluginEnabledChange(isEnabled)
+            }
+            .store(in: &settingsCancellables)
 
         if sneakConfiguration == nil {
             settingsStore.$systemMonitorSneakConfiguration
@@ -78,7 +86,8 @@ public final class SystemMonitorPlugin: NotchPlugin {
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard settingsStore.systemMonitorSneakPreviewEnabled,
+        guard isEnabled,
+              settingsStore.systemMonitorSneakPreviewEnabled,
               settingsStore.activitySneakPreviewsHidden == false
         else {
             return nil
@@ -113,6 +122,10 @@ public final class SystemMonitorPlugin: NotchPlugin {
     }
 
     public func activate(bus: EventBus) {
+        guard isEnabled else {
+            return
+        }
+
         self.bus = bus
         scheduleRefresh()
         syncSneakPeekRequest()
@@ -178,7 +191,8 @@ public final class SystemMonitorPlugin: NotchPlugin {
         let areActivitySneaksHidden =
             activitySneakPreviewsHidden ?? settingsStore.activitySneakPreviewsHidden
 
-        guard isSystemMonitorSneakEnabled,
+        guard isEnabled,
+              isSystemMonitorSneakEnabled,
               areActivitySneaksHidden == false
         else {
             dismissSneakPeekRequest()
@@ -207,5 +221,11 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
         bus?.emit(.dismissSneakPeek(requestID: requestID, target: .allScreens))
         sneakPeekRequestID = nil
+    }
+
+    private func handlePluginEnabledChange(_ isEnabled: Bool) {
+        self.isEnabled = isEnabled
+        syncSneakPeekRequest()
+        objectWillChange.send()
     }
 }

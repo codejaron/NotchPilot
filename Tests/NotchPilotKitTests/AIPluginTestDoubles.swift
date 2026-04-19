@@ -15,14 +15,21 @@ final class SplitFakeCodexContextMonitor: @unchecked Sendable, CodexDesktopConte
     var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
     var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
     private(set) var performedActions: [(CodexSurfaceAction, String)] = []
     private(set) var selectedOptions: [(String, String)] = []
     private(set) var updatedTexts: [(String, String)] = []
     private(set) var focusedThreadIDs: [String] = []
     private var currentSurface: CodexActionableSurface?
 
-    func start() {}
-    func stop() {}
+    func start() {
+        startCount += 1
+    }
+
+    func stop() {
+        stopCount += 1
+    }
 
     @discardableResult
     func focusThread(id: String) -> Bool {

@@ -43,6 +43,15 @@ public final class ClaudePlugin: AIPluginRendering {
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
         self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
+        self.isEnabled = settingsStore.claudePluginEnabled
+
+        settingsStore.$claudePluginEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                self?.handlePluginEnabledChange(isEnabled)
+            }
+            .store(in: &settingsCancellables)
+
         settingsStore.$approvalSneakNotificationsEnabled
             .removeDuplicates()
             .sink { [weak self] isEnabled in
@@ -52,6 +61,10 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     public func activate(bus: EventBus) {
+        guard isEnabled else {
+            return
+        }
+
         self.bus = bus
     }
 
@@ -67,6 +80,11 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     public func handle(frame: BridgeFrame, respond: @escaping @Sendable (Data) -> Void) {
+        guard isEnabled else {
+            respond(Data("{}".utf8))
+            return
+        }
+
         guard frame.host == .claude else {
             respond(Data("{}".utf8))
             return
@@ -310,6 +328,12 @@ public final class ClaudePlugin: AIPluginRendering {
         syncSneakPeek(approvalSneakNotificationsEnabled: isEnabled)
     }
 
+    private func handlePluginEnabledChange(_ isEnabled: Bool) {
+        self.isEnabled = isEnabled
+        syncSneakPeek()
+        objectWillChange.send()
+    }
+
     private func presentSneakPeek(for requestID: String) {
         guard sneakPeekIDs[requestID] == nil else {
             return
@@ -343,11 +367,13 @@ public final class ClaudePlugin: AIPluginRendering {
         let pendingRequestIDs = Set(pendingApprovals.map(\.requestID))
 
         for requestID in Array(sneakPeekIDs.keys)
-        where approvalSneakNotificationsEnabled == false || pendingRequestIDs.contains(requestID) == false {
+        where isEnabled == false
+            || approvalSneakNotificationsEnabled == false
+            || pendingRequestIDs.contains(requestID) == false {
             dismissSneakPeek(for: requestID)
         }
 
-        guard approvalSneakNotificationsEnabled else {
+        guard isEnabled, approvalSneakNotificationsEnabled else {
             return
         }
 

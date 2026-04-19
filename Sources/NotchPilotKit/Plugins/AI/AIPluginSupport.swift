@@ -30,7 +30,7 @@ protocol AIPluginRendering: NotchPlugin {
 
 extension AIPluginRendering {
     public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard shouldRenderCompactPreview else {
+        guard isEnabled, shouldRenderCompactPreview else {
             return nil
         }
         guard let metrics = compactMetrics(context: context) else {
@@ -61,6 +61,10 @@ extension AIPluginRendering {
     }
 
     var shouldRenderCompactPreview: Bool {
+        guard isEnabled else {
+            return false
+        }
+
         if approvalSneakNotificationsEnabled && approvalDrivenCompactPreviewAvailable {
             return true
         }

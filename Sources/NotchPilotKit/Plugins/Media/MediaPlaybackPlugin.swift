@@ -10,7 +10,7 @@ public final class MediaPlaybackPlugin: NotchPlugin {
 
     public let id = "media-playback"
     public let title = "Media"
-    public let iconSystemName = "play.circle.fill"
+    public let iconSystemName = "music.note"
     public let accentColor = NotchPilotTheme.mediaPlayback
     public let dockOrder = 120
     public let previewPriority: Int? = 200
@@ -69,7 +69,8 @@ public final class MediaPlaybackPlugin: NotchPlugin {
             return nil
         }
 
-        let totalWidth = context.notchGeometry.compactSize.width + 126
+        let cameraClearanceWidth = context.notchGeometry.compactSize.width
+        let totalWidth = MediaPlaybackCompactPreviewLayout.preferredWidth(forCompactWidth: cameraClearanceWidth)
         return NotchPluginPreview(
             width: totalWidth,
             height: context.notchGeometry.compactSize.height,
@@ -77,6 +78,7 @@ public final class MediaPlaybackPlugin: NotchPlugin {
                 MediaPlaybackCompactPreviewView(
                     snapshot: snapshot,
                     totalWidth: totalWidth,
+                    cameraClearanceWidth: cameraClearanceWidth,
                     notchHeight: context.notchGeometry.compactSize.height
                 )
             )
@@ -97,6 +99,10 @@ public final class MediaPlaybackPlugin: NotchPlugin {
     }
 
     public func activate(bus: EventBus) {
+        guard isEnabled else {
+            return
+        }
+
         self.bus = bus
         monitor.onStateChange = { [weak self] state in
             self?.handleMonitorStateChange(state)

@@ -35,6 +35,16 @@ final class SettingsSidebarStateTests: XCTestCase {
         XCTAssertEqual(SettingsPluginID.codex.sidebarSubtitle, "连接状态")
     }
 
+    @MainActor
+    func testSidebarUsesFixedPluginIconsAndBrandGlyphsForAIPlugins() {
+        XCTAssertEqual(SettingsPluginID.systemMonitor.iconSystemName, "cpu")
+        XCTAssertEqual(SettingsPluginID.media.iconSystemName, "music.note")
+        XCTAssertNil(SettingsPluginID.systemMonitor.brandGlyph)
+        XCTAssertNil(SettingsPluginID.media.brandGlyph)
+        XCTAssertEqual(SettingsPluginID.claude.brandGlyph, .claude)
+        XCTAssertEqual(SettingsPluginID.codex.brandGlyph, .codex)
+    }
+
     func testClaudeStatusTextUsesUserFacingLabels() {
         XCTAssertEqual(
             ClaudeSettingsStatusText(detected: false, installed: false, needsUpdate: false).value,

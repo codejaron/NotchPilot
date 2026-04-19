@@ -12,6 +12,50 @@ final class ClaudePluginTests: XCTestCase {
         isPrimaryScreen: true
     )
 
+    @MainActor
+    func testDisabledPluginIgnoresBridgeFramesAndDoesNotRenderInNotch() {
+        let store = Self.makeSettingsStore()
+        store.claudePluginEnabled = false
+        let bus = EventBus()
+        let plugin = ClaudePlugin(settingsStore: store)
+        let recorder = SplitEventRecorder()
+        let responseBox = SplitResponseBox()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-disabled",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-disabled-session",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo disabled" }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        XCTAssertFalse(plugin.isEnabled)
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertTrue(recorder.events.isEmpty)
+        XCTAssertNil(plugin.preview(context: Self.previewContext))
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+
+        store.claudePluginEnabled = true
+        XCTAssertTrue(plugin.isEnabled)
+
+        bus.unsubscribe(token)
+    }
+
     func testPermissionRequestEmitsInteractiveSneakPeek() async {
         let bus = await MainActor.run { EventBus() }
         let plugin = await MainActor.run { ClaudePlugin() }
@@ -338,6 +382,16 @@ final class ClaudePluginTests: XCTestCase {
         let response = String(data: responseBox.data ?? Data(), encoding: .utf8)
         XCTAssertTrue(response?.contains(#""behavior":"deny""#) == true)
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+    }
+}
+
+private extension ClaudePluginTests {
+    @MainActor
+    static func makeSettingsStore() -> SettingsStore {
+        let suiteName = "ClaudePluginTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return SettingsStore(defaults: defaults)
     }
 }
 

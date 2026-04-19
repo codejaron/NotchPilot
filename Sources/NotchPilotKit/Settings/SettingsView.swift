@@ -38,8 +38,8 @@ public struct SettingsView: View {
 
             ForEach(SettingsPluginID.allCases) { plugin in
                 sidebarButton(
+                    plugin: plugin,
                     title: plugin.title,
-                    systemImage: plugin.iconSystemName,
                     pane: .plugin(plugin)
                 )
             }
@@ -51,14 +51,17 @@ public struct SettingsView: View {
         .padding(.bottom, 12)
     }
 
-    private func sidebarButton(title: String, systemImage: String, pane: SettingsPane) -> some View {
+    private func sidebarButton(
+        plugin: SettingsPluginID? = nil,
+        title: String,
+        systemImage: String? = nil,
+        pane: SettingsPane
+    ) -> some View {
         Button {
             sidebarState.selectedPane = pane
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 18)
+                sidebarIcon(plugin: plugin, systemImage: systemImage)
 
                 Text(title)
                     .font(.system(size: 14, weight: .medium))
@@ -75,6 +78,18 @@ public struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func sidebarIcon(plugin: SettingsPluginID?, systemImage: String?) -> some View {
+        if let glyph = plugin?.brandGlyph {
+            NotchPilotBrandIcon(glyph: glyph, size: 15)
+                .frame(width: 18)
+        } else if let systemImage = systemImage ?? plugin?.iconSystemName {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 18)
+        }
     }
 
     private var detailPane: some View {

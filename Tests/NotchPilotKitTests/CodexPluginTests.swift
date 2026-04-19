@@ -12,6 +12,44 @@ final class CodexPluginTests: XCTestCase {
         isPrimaryScreen: true
     )
 
+    func testDisabledPluginDoesNotStartMonitorOrRenderInNotch() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let settingsStore = await MainActor.run { makeSettingsStore() }
+        await MainActor.run {
+            settingsStore.codexPluginEnabled = false
+        }
+        let plugin = await MainActor.run {
+            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-disabled-thread",
+                    title: "Disabled",
+                    activityLabel: "Working",
+                    phase: .working
+                )
+            )
+        }
+
+        let isEnabled = await MainActor.run { plugin.isEnabled }
+        let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }
+
+        XCTAssertFalse(isEnabled)
+        XCTAssertEqual(codexMonitor.startCount, 0)
+        XCTAssertFalse(hasPreview)
+
+        await MainActor.run {
+            settingsStore.codexPluginEnabled = true
+        }
+
+        let reenabled = await MainActor.run { plugin.isEnabled }
+        XCTAssertTrue(reenabled)
+    }
+
     func testActionableSurfaceDrivesCompactActivityAndSessionSummary() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

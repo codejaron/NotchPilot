@@ -43,6 +43,14 @@ public final class CodexPlugin: AIPluginRendering {
         self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
         self.codexThreads = CodexThreadRegistry(activityExpiry: Self.codexThreadActivityExpiry)
+        self.isEnabled = settingsStore.codexPluginEnabled
+
+        settingsStore.$codexPluginEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                self?.handlePluginEnabledChange(isEnabled)
+            }
+            .store(in: &settingsCancellables)
 
         settingsStore.$approvalSneakNotificationsEnabled
             .removeDuplicates()
@@ -60,6 +68,10 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     public func activate(bus: EventBus) {
+        guard isEnabled else {
+            return
+        }
+
         self.bus = bus
         codexMonitor.onThreadContextChanged = { [weak self] update in
             self?.performOnMainActor {
@@ -95,7 +107,7 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard shouldRenderCompactPreview else {
+        guard isEnabled, shouldRenderCompactPreview else {
             return nil
         }
         guard let metrics = compactMetrics(context: context) else {
@@ -132,6 +144,10 @@ public final class CodexPlugin: AIPluginRendering {
         approvalSneakNotificationsEnabled: Bool,
         activitySneakPreviewsHidden: Bool
     ) -> AIPluginCompactActivity? {
+        guard isEnabled else {
+            return nil
+        }
+
         if approvalSneakNotificationsEnabled, let codexActionableSurface {
             return AIPluginCompactActivity(
                 host: .codex,
@@ -193,6 +209,10 @@ public final class CodexPlugin: AIPluginRendering {
 
     @discardableResult
     public func activateSession(id: String) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
         let context = codexThreads.preferredContext(for: id)
         guard sessions.contains(where: { $0.id == id }) || context?.threadID == id else {
             return false
@@ -233,6 +253,10 @@ public final class CodexPlugin: AIPluginRendering {
 
     @discardableResult
     public func performCodexAction(_ action: CodexSurfaceAction, surfaceID: String) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
         let performed = codexMonitor.perform(action: action, on: surfaceID)
         if performed {
             let previousSurfaceID = rawCodexActionableSurface?.id
@@ -247,6 +271,10 @@ public final class CodexPlugin: AIPluginRendering {
 
     @discardableResult
     public func selectCodexOption(_ optionID: String, surfaceID: String) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
         let performed = codexMonitor.selectOption(optionID, on: surfaceID)
         if performed {
             optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
@@ -258,6 +286,10 @@ public final class CodexPlugin: AIPluginRendering {
 
     @discardableResult
     public func updateCodexText(_ text: String, surfaceID: String) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
         let performed = codexMonitor.updateText(text, on: surfaceID)
         if performed {
             optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
@@ -420,6 +452,10 @@ public final class CodexPlugin: AIPluginRendering {
         approvalSneakNotificationsEnabled: Bool,
         activitySneakPreviewsHidden: Bool
     ) -> Bool {
+        guard isEnabled else {
+            return false
+        }
+
         if approvalSneakNotificationsEnabled, codexActionableSurface != nil {
             return true
         }
@@ -456,10 +492,20 @@ public final class CodexPlugin: AIPluginRendering {
         )
     }
 
+    private func handlePluginEnabledChange(_ isEnabled: Bool) {
+        self.isEnabled = isEnabled
+        syncSneakPeek()
+        objectWillChange.send()
+    }
+
     private func desiredSneakPeek(
         approvalSneakNotificationsEnabled: Bool,
         activitySneakPreviewsHidden: Bool
     ) -> (key: String, kind: SneakPeekRequestKind)? {
+        guard isEnabled else {
+            return nil
+        }
+
         if approvalSneakNotificationsEnabled,
            let codexActionableSurface,
            currentCompactActivity(

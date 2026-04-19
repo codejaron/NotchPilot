@@ -16,9 +16,12 @@ public final class SettingsStore: ObservableObject {
         static let desktopLyricsEnabled = "media.desktopLyricsEnabled"
         static let desktopLyricsHighlightColorHex = "media.desktopLyricsHighlightColorHex"
         static let desktopLyricsFontSize = "media.desktopLyricsFontSize"
+        static let systemMonitorEnabled = "systemMonitor.enabled"
         static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
         static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
         static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
+        static let claudePluginEnabled = "claude.enabled"
+        static let codexPluginEnabled = "codex.enabled"
     }
 
     private let defaults: UserDefaults
@@ -86,6 +89,12 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var systemMonitorEnabled: Bool {
+        didSet {
+            defaults.set(systemMonitorEnabled, forKey: Key.systemMonitorEnabled)
+        }
+    }
+
     @Published var systemMonitorSneakPreviewEnabled: Bool {
         didSet {
             defaults.set(systemMonitorSneakPreviewEnabled, forKey: Key.systemMonitorSneakPreviewEnabled)
@@ -95,6 +104,18 @@ public final class SettingsStore: ObservableObject {
     @Published var systemMonitorSneakConfiguration: SystemMonitorSneakConfiguration {
         didSet {
             persistSystemMonitorSneakConfiguration(systemMonitorSneakConfiguration)
+        }
+    }
+
+    @Published var claudePluginEnabled: Bool {
+        didSet {
+            defaults.set(claudePluginEnabled, forKey: Key.claudePluginEnabled)
+        }
+    }
+
+    @Published var codexPluginEnabled: Bool {
+        didSet {
+            defaults.set(codexPluginEnabled, forKey: Key.codexPluginEnabled)
         }
     }
 
@@ -141,9 +162,15 @@ public final class SettingsStore: ObservableObject {
             defaults.string(forKey: Key.desktopLyricsHighlightColorHex) ?? "#4ADE80"
         self.desktopLyricsFontSize =
             defaults.object(forKey: Key.desktopLyricsFontSize) as? Double ?? 28
+        self.systemMonitorEnabled =
+            defaults.object(forKey: Key.systemMonitorEnabled) as? Bool ?? true
         self.systemMonitorSneakPreviewEnabled =
             defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)
+        self.claudePluginEnabled =
+            defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
+        self.codexPluginEnabled =
+            defaults.object(forKey: Key.codexPluginEnabled) as? Bool ?? true
     }
 
     public func synchronizeInstallationState() {

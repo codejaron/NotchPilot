@@ -9,8 +9,25 @@ final class SystemMonitorPluginTests: XCTestCase {
 
         XCTAssertEqual(plugin.id, "system-monitor")
         XCTAssertEqual(plugin.title, "System")
-        XCTAssertEqual(plugin.iconSystemName, "speedometer")
+        XCTAssertEqual(plugin.iconSystemName, "cpu")
         XCTAssertEqual(plugin.dockOrder, 90)
+        XCTAssertTrue(plugin.isEnabled)
+    }
+
+    func testPluginReflectsSystemMonitorAvailabilitySetting() {
+        let store = makeSettingsStore()
+        store.systemMonitorEnabled = false
+
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store
+        )
+
+        XCTAssertFalse(plugin.isEnabled)
+        XCTAssertNil(plugin.preview(context: Self.context))
+
+        store.systemMonitorEnabled = true
+
         XCTAssertTrue(plugin.isEnabled)
     }
 

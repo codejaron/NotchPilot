@@ -129,19 +129,22 @@ struct SettingsRowDivider: View {
 struct SettingsToggleRow: View {
     let title: String
     let detail: String?
+    let isEnabled: Bool
     @Binding var isOn: Bool
 
-    init(title: String, detail: String? = nil, isOn: Binding<Bool>) {
+    init(title: String, detail: String? = nil, isEnabled: Bool = true, isOn: Binding<Bool>) {
         self.title = title
         self.detail = detail
+        self.isEnabled = isEnabled
         _isOn = isOn
     }
 
     var body: some View {
-        SettingsRow(title: title, detail: detail) {
+        SettingsRow(title: title, detail: detail, isEnabled: isEnabled) {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .disabled(!isEnabled)
         }
     }
 }

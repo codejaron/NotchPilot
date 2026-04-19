@@ -44,8 +44,25 @@ final class MediaPlaybackPluginTests: XCTestCase {
 
         XCTAssertEqual(plugin.id, "media-playback")
         XCTAssertEqual(plugin.title, "Media")
-        XCTAssertEqual(plugin.iconSystemName, "play.circle.fill")
+        XCTAssertEqual(plugin.iconSystemName, "music.note")
         XCTAssertEqual(plugin.dockOrder, 120)
+        XCTAssertTrue(plugin.isEnabled)
+    }
+
+    @MainActor
+    func testPluginReflectsMediaAvailabilitySetting() {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = false
+        let plugin = MediaPlaybackPlugin(
+            monitor: TestNowPlayingSessionMonitor(initialState: Self.activeState(isPlaying: true)),
+            settingsStore: store
+        )
+
+        XCTAssertFalse(plugin.isEnabled)
+        XCTAssertNil(plugin.preview(context: Self.previewContext))
+
+        store.mediaPlaybackEnabled = true
+
         XCTAssertTrue(plugin.isEnabled)
     }
 
@@ -80,6 +97,25 @@ final class MediaPlaybackPluginTests: XCTestCase {
         XCTAssertNotNil(plugin.preview(context: Self.previewContext))
 
         bus.unsubscribe(token)
+    }
+
+    @MainActor
+    func testSneakPreviewWidthReservesCameraClearanceBetweenVisuals() throws {
+        let monitor = TestNowPlayingSessionMonitor(initialState: Self.activeState(isPlaying: true))
+        let plugin = MediaPlaybackPlugin(
+            monitor: monitor,
+            settingsStore: makeSettingsStore()
+        )
+
+        let preview = try XCTUnwrap(plugin.preview(context: Self.previewContext))
+
+        XCTAssertEqual(
+            preview.width,
+            MediaPlaybackCompactPreviewLayout.preferredWidth(
+                forCompactWidth: Self.previewContext.notchGeometry.compactSize.width
+            ),
+            accuracy: 0.01
+        )
     }
 
     @MainActor

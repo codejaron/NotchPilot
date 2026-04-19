@@ -17,7 +17,7 @@ struct GeneralSettingsTab: View {
             SettingsGroupSection(title: "应用") {
                 SettingsActionRow(
                     title: "退出应用",
-                    detail: "结束 NotchPilot，并关闭状态栏和 Notch 窗口。",
+                    detail: "结束 NotchPilot",
                     buttonTitle: "退出应用",
                     role: .destructive
                 ) {
