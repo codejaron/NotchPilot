@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎛️ NotchPilot
+# NotchPilot
 
 **把 MacBook 刘海变成可扩展的实时交互区域。**
 

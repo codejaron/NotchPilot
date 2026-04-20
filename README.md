@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎛️ NotchPilot
+# NotchPilot
 
 **A macOS notch companion that turns the camera cutout into a live surface.**
 

@@ -22,7 +22,7 @@ let package = Package(
         .target(
             name: "NotchPilotKit",
             dependencies: [
-                .product(name: "LyricsKit", package: "LyricsKit"),
+                .product(name: "LyricsKit", package: "lyricskit"),
             ],
             resources: [
                 .copy("Resources/notch-bridge.py"),
@@ -34,7 +34,7 @@ let package = Package(
             name: "NotchPilotKitTests",
             dependencies: [
                 "NotchPilotKit",
-                .product(name: "LyricsKit", package: "LyricsKit"),
+                .product(name: "LyricsKit", package: "lyricskit"),
             ]
         ),
     ]

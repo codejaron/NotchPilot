@@ -19,6 +19,7 @@ jobs:
       APP_NAME: NotchPilot
       BUILD_ROOT: ${{ github.workspace }}/build
       DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
+      SOURCE_PACKAGES: ${{ github.workspace }}/build/SourcePackages
 
     steps:
       - name: Checkout repository
@@ -32,14 +33,18 @@ jobs:
       - name: Resolve package dependencies
         run: |
           set -euo pipefail
+          rm -rf "$BUILD_ROOT"
+          mkdir -p "$BUILD_ROOT"
+
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" \
-            -scheme "$SCHEME"
+            -scheme "$SCHEME" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES"
 
       - name: Build unsigned release app
         run: |
           set -euo pipefail
-          rm -rf "$BUILD_ROOT"
           mkdir -p "$BUILD_ROOT"
 
           xcodebuild \
@@ -47,9 +52,23 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
+      - name: Ad-hoc sign app bundle
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Expected app bundle not found at $APP_PATH" >&2
+            exit 1
+          fi
+
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Package DMG
         env:
