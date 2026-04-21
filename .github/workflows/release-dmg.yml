@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$BUILD_ROOT"
 
-          xcodebuild \
+          XCODEBUILD_ARGS=(
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \
@@ -56,6 +56,19 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+          )
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            APP_VERSION="${GITHUB_REF_NAME#v}"
+            if [ -z "$APP_VERSION" ]; then
+              echo "Unable to resolve app version from tag $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            XCODEBUILD_ARGS+=(MARKETING_VERSION="$APP_VERSION")
+            echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          fi
+
+          xcodebuild "${XCODEBUILD_ARGS[@]}"
 
       - name: Ad-hoc sign app bundle
         run: |
@@ -88,11 +101,18 @@ jobs:
           cp -R "$APP_PATH" "$STAGING_DIR/"
           ln -s /Applications "$STAGING_DIR/Applications"
 
-          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)
-          if [ -z "$APP_VERSION" ]; then
+          PLIST_APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)
+          if [ -z "$PLIST_APP_VERSION" ]; then
             echo "Unable to read CFBundleShortVersionString from $APP_PATH/Contents/Info.plist" >&2
             exit 1
           fi
+
+          if [ -n "${APP_VERSION:-}" ] && [ "$PLIST_APP_VERSION" != "$APP_VERSION" ]; then
+            echo "Built app version $PLIST_APP_VERSION does not match release version $APP_VERSION" >&2
+            exit 1
+          fi
+
+          APP_VERSION="${APP_VERSION:-$PLIST_APP_VERSION}"
           DMG_NAME="$APP_NAME-$APP_VERSION.dmg"
 
           DMG_PATH="$ARTIFACT_DIR/$DMG_NAME"
@@ -122,6 +142,14 @@ jobs:
           set -euo pipefail
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            mapfile -t STALE_DMG_ASSETS < <(
+              gh release view "$GITHUB_REF_NAME" \
+                --json assets \
+                --jq ".assets[].name | select(startswith(\"$APP_NAME-\") and endswith(\".dmg\") and . != \"$DMG_NAME\")"
+            )
+            for asset_name in "${STALE_DMG_ASSETS[@]}"; do
+              gh release delete-asset "$GITHUB_REF_NAME" "$asset_name" --yes
+            done
             gh release upload "$GITHUB_REF_NAME" "$DMG_PATH" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "$DMG_PATH" \
