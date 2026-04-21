@@ -448,27 +448,30 @@ struct CodexApprovalTextInputPresentation: Equatable {
 
     static func standalone(
         textInput: CodexSurfaceTextInput,
-        index: Int
+        index: Int,
+        language: AppLanguage = .zhHans
     ) -> CodexApprovalTextInputPresentation {
         CodexApprovalTextInputPresentation(
             indexText: "\(index).",
             indexPlacement: .insideFieldLeading,
             placeholder: textInput.title?.isEmpty == false
-                ? (textInput.title ?? "")
-                : "否，请告知 Codex 如何调整"
+                ? AppStrings.codexOptionTitle(textInput.title ?? "", language: language)
+                : AppStrings.text(.codexTextInputFallback, language: language)
         )
     }
 
     static func feedback(
         textInput: CodexSurfaceTextInput,
-        option: CodexSurfaceOption
+        option: CodexSurfaceOption,
+        language: AppLanguage = .zhHans
     ) -> CodexApprovalTextInputPresentation {
-        CodexApprovalTextInputPresentation(
+        let localizedOptionTitle = AppStrings.codexOptionTitle(option.title, language: language)
+        return CodexApprovalTextInputPresentation(
             indexText: "\(option.index).",
             indexPlacement: .insideFieldLeading,
             placeholder: textInput.title?.isEmpty == false
-                ? (textInput.title ?? option.title)
-                : option.title
+                ? AppStrings.codexOptionTitle(textInput.title ?? localizedOptionTitle, language: language)
+                : localizedOptionTitle
         )
     }
 }
@@ -868,6 +871,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     private let runtimeRefreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     @ObservedObject var plugin: Plugin
+    @ObservedObject private var settingsStore = SettingsStore.shared
     @State private var runtimeRefreshTick = Date()
 
     let context: NotchContext
@@ -907,7 +911,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
                     Circle()
                         .fill(Color.gray)
                         .frame(width: 10, height: 10)
-                    Text("Idle")
+                    Text(AppStrings.text(.idle, language: settingsStore.interfaceLanguage))
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                 }
@@ -962,7 +966,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     }
 
     private func approvalNoticeRow(_ notice: AIPluginApprovalSneakNotice) -> some View {
-        Text(notice.text)
+        Text(localizedApprovalNoticeText(notice.text))
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.92))
             .lineLimit(noticeLayout.lineLimit)
@@ -971,6 +975,13 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 6)
             .frame(height: noticeLayout.height, alignment: noticeLayout.isSingleLine ? .center : .top)
+    }
+
+    private func localizedApprovalNoticeText(_ text: String) -> String {
+        let language = settingsStore.interfaceLanguage
+        let codexSummary = AppStrings.codexSurfaceSummary(text, language: language)
+        let claudeTitle = AppStrings.claudeApprovalTitle(codexSummary, language: language)
+        return AppStrings.activityLabel(claudeTitle, language: language)
     }
 
     private func tokenChip(symbol: String, value: Int?) -> some View {
@@ -985,6 +996,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
 
 private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     @ObservedObject var plugin: Plugin
+    @ObservedObject private var settingsStore = SettingsStore.shared
     @State private var approvalReviewState = AIPluginApprovalReviewState()
     @State private var codexSurfaceReviewState = AIPluginCodexSurfaceReviewState()
     @State private var codexApprovalInteractionState: CodexApprovalInteractionState?
@@ -1170,7 +1182,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
             minimalBackButton
 
             if let summaryText = presentation.summaryText {
-                Text(summaryText)
+                Text(AppStrings.codexSurfaceSummary(summaryText, language: settingsStore.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.headerSummaryFontSize,
                         weight: .semibold,
@@ -1296,7 +1308,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
 
-                        Text(summary.subtitle)
+                        Text(AppStrings.activityLabel(summary.subtitle, language: settingsStore.interfaceLanguage))
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(
                                 summary.hasAttention
@@ -1427,7 +1439,10 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
         presentation: CodexApprovalDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.primaryColumnSpacing) {
-            codexApprovalCommand(presentation.commandText, compact: true)
+            codexApprovalCommand(
+                AppStrings.codexSurfaceSummary(presentation.commandText, language: settingsStore.interfaceLanguage),
+                compact: true
+            )
             codexSurfaceControls(surface)
         }
     }
@@ -1441,7 +1456,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 focusCodexApproval(.cancel, surface: surface)
                 _ = plugin.performCodexAction(.cancel, surfaceID: surface.id)
             } label: {
-                Text(surface.cancelButtonTitle)
+                Text(AppStrings.codexButtonTitle(surface.cancelButtonTitle, language: settingsStore.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.actionFontSize,
                         weight: .bold,
@@ -1467,7 +1482,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 focusCodexApproval(.submit, surface: surface)
                 submitCodexSurface(surface)
             } label: {
-                Text(surface.primaryButtonTitle)
+                Text(AppStrings.codexButtonTitle(surface.primaryButtonTitle, language: settingsStore.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.actionFontSize,
                         weight: .bold,
@@ -1560,7 +1575,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                             )
                     )
 
-                Text(option.title)
+                Text(AppStrings.codexOptionTitle(option.title, language: settingsStore.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.optionTitleFontSize,
                         weight: .semibold,
@@ -1620,7 +1635,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     ) -> some View {
         let focusTarget = CodexApprovalFocusTarget.textInput(optionID: option.id)
         let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
-        let presentation = CodexApprovalTextInputPresentation.feedback(textInput: textInput, option: option)
+        let presentation = CodexApprovalTextInputPresentation.feedback(
+            textInput: textInput,
+            option: option,
+            language: settingsStore.interfaceLanguage
+        )
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
             verticalPadding: CodexApprovalCompactLayout.textInputVerticalPadding
@@ -1717,7 +1736,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     ) -> some View {
         let focusTarget = CodexApprovalFocusTarget.textInput(optionID: nil)
         let isFocused = codexApprovalInteractionState?.focusedTarget == focusTarget
-        let presentation = CodexApprovalTextInputPresentation.standalone(textInput: textInput, index: index)
+        let presentation = CodexApprovalTextInputPresentation.standalone(
+            textInput: textInput,
+            index: index,
+            language: settingsStore.interfaceLanguage
+        )
         let sizing = CodexApprovalTextInputSizing(
             lineHeight: codexTextInputFont.lineHeight,
             verticalPadding: CodexApprovalCompactLayout.textInputVerticalPadding
@@ -1832,13 +1855,13 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
 
     private func claudeApprovalSummary(for approval: PendingApproval) -> String {
         if approval.approvalKind == .networkAccess {
-            return "Network access request"
+            return AppStrings.text(.networkAccessRequest, language: settingsStore.interfaceLanguage)
         }
         let title = approval.payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty == false {
-            return title
+            return AppStrings.claudeApprovalTitle(title, language: settingsStore.interfaceLanguage)
         }
-        return "Claude is waiting for approval"
+        return AppStrings.text(.claudeWaitingApproval, language: settingsStore.interfaceLanguage)
     }
 
     private func approvalCommandText(for approval: PendingApproval) -> String {
@@ -1869,7 +1892,11 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 Button {
                     handleApprovalAction(action, approval: approval)
                 } label: {
-                    Text(action.title)
+                    Text(AppStrings.approvalActionTitle(
+                        action.title,
+                        id: action.id,
+                        language: settingsStore.interfaceLanguage
+                    ))
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(foregroundColor(for: action.style))
                         .lineLimit(1)
@@ -1930,7 +1957,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 )
 
                 if claudeFeedbackText.isEmpty {
-                    Text("Tell Claude what to change")
+                    Text(AppStrings.text(.tellClaudeWhatToChange, language: settingsStore.interfaceLanguage))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.3))
                         .padding(.horizontal, 10)
@@ -1944,7 +1971,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
                 Button {
                     submitClaudeFeedback(for: approval)
                 } label: {
-                    Text("Send")
+                    Text(AppStrings.text(.send, language: settingsStore.interfaceLanguage))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -1978,7 +2005,7 @@ private struct AIPluginExpandedView<Plugin: AIPluginRendering>: View {
     private func submitClaudeFeedback(for approval: PendingApproval) {
         let action = ApprovalAction(
             id: "claude-deny-feedback-submit",
-            title: "No, tell Claude why",
+            title: AppStrings.text(.noTellClaudeWhy, language: settingsStore.interfaceLanguage),
             style: .destructive,
             payload: .claude(
                 ApprovalDecision(

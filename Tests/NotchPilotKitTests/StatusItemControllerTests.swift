@@ -3,6 +3,21 @@ import XCTest
 @testable import NotchPilotKit
 
 final class StatusItemControllerTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUpWithError() throws {
+        suiteName = "StatusItemControllerTests.\(UUID().uuidString)"
+        defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    override func tearDownWithError() throws {
+        defaults?.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
+    }
+
     @MainActor
     func testStatusItemUsesIconOnlyNotchedComputerMark() throws {
         let controller = makeController()
@@ -30,6 +45,22 @@ final class StatusItemControllerTests: XCTestCase {
         XCTAssertTrue(titles.contains("Hide All Sneaks"))
         XCTAssertTrue(titles.contains("Settings…"))
         XCTAssertTrue(titles.contains("Quit NotchPilot"))
+    }
+
+    @MainActor
+    func testStatusItemMenuUsesConfiguredLanguageAndUpdatesWhenLanguageChanges() {
+        let store = SettingsStore(defaults: defaults)
+        store.interfaceLanguage = .english
+        let controller = makeController(settingsStore: store)
+
+        XCTAssertTrue(controller.menuItemTitlesForTesting.contains("Search Lyrics…"))
+        XCTAssertTrue(controller.menuItemTitlesForTesting.contains("Settings…"))
+
+        store.interfaceLanguage = .zhHans
+
+        XCTAssertTrue(controller.menuItemTitlesForTesting.contains("搜索歌词…"))
+        XCTAssertTrue(controller.menuItemTitlesForTesting.contains("设置…"))
+        XCTAssertTrue(controller.menuItemTitlesForTesting.contains("退出 NotchPilot"))
     }
 
     @MainActor
@@ -98,9 +129,18 @@ final class StatusItemControllerTests: XCTestCase {
         canIgnoreCurrentTrackLyrics: @escaping () -> Bool = { true },
         canRevealCurrentLyricsInFinder: @escaping () -> Bool = { true },
         isActivitySneakPreviewsHidden: @escaping () -> Bool = { false },
-        toggleActivitySneakPreviewsHandler: @escaping () -> Void = {}
+        toggleActivitySneakPreviewsHandler: @escaping () -> Void = {},
+        settingsStore: SettingsStore? = nil
     ) -> StatusItemController {
-        StatusItemController(
+        let resolvedSettingsStore: SettingsStore
+        if let settingsStore {
+            resolvedSettingsStore = settingsStore
+        } else {
+            resolvedSettingsStore = SettingsStore(defaults: defaults)
+            resolvedSettingsStore.interfaceLanguage = .english
+        }
+
+        return StatusItemController(
             searchLyricsHandler: {},
             ignoreCurrentTrackLyricsHandler: {},
             revealCurrentLyricsInFinderHandler: {},
@@ -112,6 +152,7 @@ final class StatusItemControllerTests: XCTestCase {
             setLyricsOffset: { _ in },
             isActivitySneakPreviewsHidden: isActivitySneakPreviewsHidden,
             toggleActivitySneakPreviewsHandler: toggleActivitySneakPreviewsHandler,
+            settingsStore: resolvedSettingsStore,
             settingsHandler: {},
             quitHandler: {}
         )

@@ -65,6 +65,14 @@ public final class CodexPlugin: AIPluginRendering {
                 self?.handleActivitySneakSettingChange(isHidden: isHidden)
             }
             .store(in: &settingsCancellables)
+
+        settingsStore.$interfaceLanguage
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+                self?.syncSneakPeek()
+            }
+            .store(in: &settingsCancellables)
     }
 
     public func activate(bus: EventBus) {

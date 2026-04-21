@@ -83,6 +83,13 @@ public final class SystemMonitorPlugin: NotchPlugin {
                 self?.syncSneakPeekRequest(activitySneakPreviewsHidden: isHidden)
             }
             .store(in: &settingsCancellables)
+
+        settingsStore.$interfaceLanguage
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &settingsCancellables)
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
@@ -95,7 +102,8 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
         let sideFrameWidth = SystemMonitorSneakPreviewLayout.sideFrameWidth(
             snapshot: snapshot,
-            configuration: sneakConfiguration
+            configuration: sneakConfiguration,
+            language: settingsStore.interfaceLanguage
         )
         let width = SystemMonitorSneakPreviewLayout.totalWidth(
             compactNotchWidth: context.notchGeometry.compactSize.width,

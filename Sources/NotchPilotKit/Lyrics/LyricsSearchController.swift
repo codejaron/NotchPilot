@@ -45,7 +45,7 @@ final class LyricsSearchController: ObservableObject {
 
     var selectedPreviewText: String {
         guard let selectedLyrics else {
-            return errorMessage ?? "没有可预览的歌词。"
+            return errorMessage ?? AppStrings.text(.noLyricsPreview, language: SettingsStore.shared.interfaceLanguage)
         }
 
         return selectedLyrics.lines
@@ -76,7 +76,7 @@ final class LyricsSearchController: ObservableObject {
         isSearching = false
 
         if results.isEmpty {
-            errorMessage = "没有找到可用歌词。"
+            errorMessage = AppStrings.text(.noLyricsFound, language: SettingsStore.shared.interfaceLanguage)
         } else {
             errorMessage = nil
         }
@@ -93,7 +93,7 @@ final class LyricsSearchController: ObservableObject {
             errorMessage = nil
         } catch {
             selectedLyrics = nil
-            errorMessage = "无法加载所选歌词。"
+            errorMessage = AppStrings.text(.unableToLoadLyrics, language: SettingsStore.shared.interfaceLanguage)
         }
     }
 
@@ -108,13 +108,14 @@ final class LyricsSearchController: ObservableObject {
 
 struct LyricsSearchView: View {
     @ObservedObject var controller: LyricsSearchController
+    @ObservedObject private var store = SettingsStore.shared
     let closeWindow: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("绑定到")
+                    Text(AppStrings.text(.lyricsBoundTo, language: store.interfaceLanguage))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(controller.bindingDisplayTitle)
@@ -124,7 +125,7 @@ struct LyricsSearchView: View {
 
                 Spacer(minLength: 16)
 
-                Button("关闭") {
+                Button(AppStrings.text(.close, language: store.interfaceLanguage)) {
                     closeWindow()
                 }
             }
@@ -135,9 +136,13 @@ struct LyricsSearchView: View {
 
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
-                    TextField("歌曲", text: $controller.searchTitle)
-                    TextField("艺人", text: $controller.searchArtist)
-                    Button(controller.isSearching ? "搜索中…" : "搜索") {
+                    TextField(AppStrings.text(.song, language: store.interfaceLanguage), text: $controller.searchTitle)
+                    TextField(AppStrings.text(.artist, language: store.interfaceLanguage), text: $controller.searchArtist)
+                    Button(
+                        controller.isSearching
+                            ? AppStrings.text(.searching, language: store.interfaceLanguage)
+                            : AppStrings.text(.search, language: store.interfaceLanguage)
+                    ) {
                         Task {
                             await controller.search()
                         }
@@ -148,11 +153,11 @@ struct LyricsSearchView: View {
                 HSplitView {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            Text("歌曲")
+                            Text(AppStrings.text(.song, language: store.interfaceLanguage))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("艺人")
+                            Text(AppStrings.text(.artist, language: store.interfaceLanguage))
                                 .frame(width: 180, alignment: .leading)
-                            Text("来源")
+                            Text(AppStrings.text(.source, language: store.interfaceLanguage))
                                 .frame(width: 110, alignment: .leading)
                         }
                         .font(.headline)
@@ -206,7 +211,7 @@ struct LyricsSearchView: View {
 
                     Spacer()
 
-                    Button("应用到当前歌曲") {
+                    Button(AppStrings.text(.applyToCurrentSong, language: store.interfaceLanguage)) {
                         controller.applySelectedLyrics()
                         closeWindow()
                     }
@@ -261,7 +266,7 @@ final class LyricsSearchWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Search Lyrics"
+        window.title = AppStrings.text(.searchLyricsWindowTitle, language: SettingsStore.shared.interfaceLanguage)
         window.center()
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: rootView)

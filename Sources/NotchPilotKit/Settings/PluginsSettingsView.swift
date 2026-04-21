@@ -9,15 +9,19 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     public var id: String { rawValue }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .media:
-            return "Media"
+            return AppStrings.text(.media, language: language)
         case .claude:
             return "Claude"
         case .codex:
             return "Codex"
         case .systemMonitor:
-            return "System"
+            return AppStrings.text(.system, language: language)
         }
     }
 
@@ -46,15 +50,19 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     }
 
     var sidebarSubtitle: String {
+        sidebarSubtitle(language: .zhHans)
+    }
+
+    func sidebarSubtitle(language: AppLanguage) -> String {
         switch self {
         case .media:
-            return "媒体播放"
+            return language == .zhHans ? "媒体播放" : "Media Playback"
         case .claude:
-            return "Claude 集成"
+            return language == .zhHans ? "Claude 集成" : "Claude Integration"
         case .codex:
-            return "连接状态"
+            return AppStrings.text(.connectionStatus, language: language)
         case .systemMonitor:
-            return "系统监控"
+            return language == .zhHans ? "系统监控" : "System Monitor"
         }
     }
 }
@@ -62,15 +70,15 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
 struct ClaudeSettingsStatusText: Equatable {
     let value: String
 
-    init(detected: Bool, installed: Bool, needsUpdate: Bool) {
+    init(detected: Bool, installed: Bool, needsUpdate: Bool, language: AppLanguage = .zhHans) {
         if detected == false {
-            value = "未检测到"
+            value = AppStrings.connectionStatus(.notDetected, language: language)
         } else if installed == false {
-            value = "未安装"
+            value = AppStrings.connectionStatus(.notInstalled, language: language)
         } else if needsUpdate {
-            value = "可更新"
+            value = AppStrings.connectionStatus(.updateAvailable, language: language)
         } else {
-            value = "已连接"
+            value = AppStrings.connectionStatus(.connected, language: language)
         }
     }
 }
@@ -79,19 +87,19 @@ struct MediaPluginSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
 
     var body: some View {
-        SettingsPage(title: "Media") {
-            SettingsGroupSection(title: "播放") {
+        SettingsPage(title: AppStrings.text(.media, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.playback, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "启用媒体插件",
-                    detail: "关闭后不再监听播放状态，也不会出现在 Notch。",
+                    title: AppStrings.text(.enableMediaPlugin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableMediaPluginDetail, language: store.interfaceLanguage),
                     isOn: $store.mediaPlaybackEnabled
                 )
 
                 SettingsRowDivider()
 
                 SettingsToggleRow(
-                    title: "播放变化时显示预览",
-                    detail: "在 Notch 闭合态显示当前播放信息。",
+                    title: AppStrings.text(.showPlaybackPreview, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.showPlaybackPreviewDetail, language: store.interfaceLanguage),
                     isEnabled: store.mediaPlaybackEnabled,
                     isOn: $store.mediaPlaybackSneakPreviewEnabled
                 )
@@ -99,17 +107,17 @@ struct MediaPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsToggleRow(
-                    title: "桌面底部歌词卡片",
-                    detail: "在当前活跃屏幕底部显示当前歌词与下一句。",
+                    title: AppStrings.text(.desktopLyricsCard, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.desktopLyricsCardDetail, language: store.interfaceLanguage),
                     isEnabled: store.mediaPlaybackEnabled,
                     isOn: $store.desktopLyricsEnabled
                 )
             }
 
-            SettingsGroupSection(title: "歌词样式") {
+            SettingsGroupSection(title: AppStrings.text(.lyricsStyle, language: store.interfaceLanguage)) {
                 SettingsRow(
-                    title: "高亮颜色",
-                    detail: "歌词进度填充颜色。",
+                    title: AppStrings.text(.highlightColor, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.highlightColorDetail, language: store.interfaceLanguage),
                     isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
                 ) {
                     ColorPicker(
@@ -127,8 +135,8 @@ struct MediaPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsRow(
-                    title: "字体大小",
-                    detail: "当前歌词行文字大小（\(Int(store.desktopLyricsFontSize))pt）。",
+                    title: AppStrings.text(.fontSize, language: store.interfaceLanguage),
+                    detail: AppStrings.fontSizeDetail(store.desktopLyricsFontSize, language: store.interfaceLanguage),
                     isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
                 ) {
                     Slider(value: $store.desktopLyricsFontSize, in: 18...42, step: 2)
@@ -143,23 +151,23 @@ struct MediaPluginSettingsView: View {
 struct CodexSettingsStatusText: Equatable {
     let value: String
 
-    init(detected: Bool, connection: CodexDesktopConnectionState) {
+    init(detected: Bool, connection: CodexDesktopConnectionState, language: AppLanguage = .zhHans) {
         if detected == false || connection.status == .notFound {
-            value = "未检测到"
+            value = AppStrings.connectionStatus(.notDetected, language: language)
             return
         }
 
         switch connection.status {
         case .disconnected:
-            value = "未连接"
+            value = AppStrings.connectionStatus(.disconnected, language: language)
         case .connecting:
-            value = "连接中"
+            value = AppStrings.connectionStatus(.connecting, language: language)
         case .connected:
-            value = "已连接"
+            value = AppStrings.connectionStatus(.connected, language: language)
         case .error:
-            value = "错误"
+            value = AppStrings.connectionStatus(.error, language: language)
         case .notFound:
-            value = "未检测到"
+            value = AppStrings.connectionStatus(.notDetected, language: language)
         }
     }
 }
@@ -193,17 +201,17 @@ struct ClaudePluginSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "Claude") {
-            SettingsGroupSection(title: "插件") {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "启用 Claude 插件",
-                    detail: "关闭后不会处理 Claude Hook，也不会在 Notch 中显示 Claude 会话。",
+                    title: AppStrings.text(.enableClaudePlugin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableClaudePluginDetail, language: store.interfaceLanguage),
                     isOn: $store.claudePluginEnabled
                 )
             }
 
-            SettingsGroupSection(title: "Claude Code") {
+            SettingsGroupSection(title: AppStrings.text(.claudeCode, language: store.interfaceLanguage)) {
                 SettingsStatusRow(
-                    title: "集成状态",
+                    title: AppStrings.text(.integrationStatus, language: store.interfaceLanguage),
                     value: claudeStatusText.value,
                     valueColor: claudeStatusColor
                 )
@@ -211,7 +219,7 @@ struct ClaudePluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsActionRow(
-                    title: "操作",
+                    title: AppStrings.text(.actions, language: store.interfaceLanguage),
                     detail: claudeActionDetail,
                     buttonTitle: claudeActionTitle,
                     isEnabled: store.claudePluginEnabled && store.claudeCodeDetected && isWorking == false
@@ -233,7 +241,8 @@ struct ClaudePluginSettingsView: View {
         ClaudeSettingsStatusText(
             detected: store.claudeCodeDetected,
             installed: store.claudeHookInstalled,
-            needsUpdate: store.claudeHooksNeedUpdate
+            needsUpdate: store.claudeHooksNeedUpdate,
+            language: store.interfaceLanguage
         )
     }
 
@@ -250,13 +259,15 @@ struct ClaudePluginSettingsView: View {
 
     private var claudeActionTitle: String {
         if store.claudeHookInstalled {
-            return store.claudeHooksNeedUpdate ? "更新集成" : "移除集成"
+            return store.claudeHooksNeedUpdate
+                ? AppStrings.text(.updateIntegration, language: store.interfaceLanguage)
+                : AppStrings.text(.removeIntegration, language: store.interfaceLanguage)
         }
-        return "安装集成"
+        return AppStrings.text(.installIntegration, language: store.interfaceLanguage)
     }
 
     private var claudeActionDetail: String? {
-        store.claudeCodeDetected ? nil : "请先安装 Claude Code。"
+        store.claudeCodeDetected ? nil : AppStrings.text(.claudeCodeMissingDetail, language: store.interfaceLanguage)
     }
 
     private func claudeAction() {
@@ -313,7 +324,9 @@ struct ClaudePluginSettingsView: View {
             .appendingPathComponent(".notchpilot/notch-bridge.py")
             .path
         guard FileManager.default.fileExists(atPath: fallbackPath) else {
-            throw HookInstallError.writeError("未找到 Claude 集成所需脚本，无法完成安装。")
+            throw HookInstallError.writeError(
+                AppStrings.text(.missingClaudeBridgeScriptError, language: store.interfaceLanguage)
+            )
         }
 
         store.bridgeScriptPath = fallbackPath
@@ -330,17 +343,17 @@ struct CodexPluginSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "Codex") {
-            SettingsGroupSection(title: "插件") {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "启用 Codex 插件",
-                    detail: "关闭后不再监听 Codex Desktop 会话，也不会出现在 Notch。",
+                    title: AppStrings.text(.enableCodexPlugin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableCodexPluginDetail, language: store.interfaceLanguage),
                     isOn: $store.codexPluginEnabled
                 )
             }
 
-            SettingsGroupSection(title: "Codex Desktop") {
+            SettingsGroupSection(title: AppStrings.text(.codexDesktop, language: store.interfaceLanguage)) {
                 SettingsStatusRow(
-                    title: "连接状态",
+                    title: AppStrings.text(.connectionStatus, language: store.interfaceLanguage),
                     value: codexStatusText.value,
                     valueColor: codexStatusColor
                 )
@@ -361,7 +374,8 @@ struct CodexPluginSettingsView: View {
     private var codexStatusText: CodexSettingsStatusText {
         CodexSettingsStatusText(
             detected: store.codexDetected,
-            connection: store.codexDesktopConnection
+            connection: store.codexDesktopConnection,
+            language: store.interfaceLanguage
         )
     }
 
@@ -374,18 +388,18 @@ struct SystemMonitorPluginSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
 
     var body: some View {
-        SettingsPage(title: "System") {
-            SettingsGroupSection(title: "插件") {
+        SettingsPage(title: AppStrings.text(.system, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "启用系统监控插件",
-                    detail: "关闭后停止采样 CPU、内存、网络等指标，并从 Notch 中移除。",
+                    title: AppStrings.text(.enableSystemMonitorPlugin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableSystemMonitorPluginDetail, language: store.interfaceLanguage),
                     isOn: $store.systemMonitorEnabled
                 )
             }
 
-            SettingsGroupSection(title: "预览") {
+            SettingsGroupSection(title: AppStrings.text(.preview, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "在 Notch 闭合态显示系统监控",
+                    title: AppStrings.text(.showSystemMonitorPreview, language: store.interfaceLanguage),
                     isEnabled: store.systemMonitorEnabled,
                     isOn: $store.systemMonitorSneakPreviewEnabled
                 )
@@ -393,7 +407,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: "左侧槽位 1",
+                    title: AppStrings.text(.leftSlot1, language: store.interfaceLanguage),
                     selection: metricBinding(side: .left, index: 0),
                     isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
@@ -403,7 +417,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: "左侧槽位 2",
+                    title: AppStrings.text(.leftSlot2, language: store.interfaceLanguage),
                     selection: metricBinding(side: .left, index: 1),
                     isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
@@ -413,7 +427,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: "右侧槽位 1",
+                    title: AppStrings.text(.rightSlot1, language: store.interfaceLanguage),
                     selection: metricBinding(side: .right, index: 0),
                     isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
@@ -423,7 +437,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: "右侧槽位 2",
+                    title: AppStrings.text(.rightSlot2, language: store.interfaceLanguage),
                     selection: metricBinding(side: .right, index: 1),
                     isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
                 ) {
@@ -435,11 +449,11 @@ struct SystemMonitorPluginSettingsView: View {
 
     @ViewBuilder
     private var metricOptions: some View {
-        Text("隐藏")
+        Text(AppStrings.text(.hidden, language: store.interfaceLanguage))
             .tag(SystemMonitorMetric?.none)
 
         ForEach(SystemMonitorMetric.allCases, id: \.self) { metric in
-            Text(metric.settingsTitle)
+            Text(metric.settingsTitle(language: store.interfaceLanguage))
                 .tag(Optional(metric))
         }
     }
@@ -512,20 +526,7 @@ private enum SystemMonitorSneakSide {
 }
 
 private extension SystemMonitorMetric {
-    var settingsTitle: String {
-        switch self {
-        case .cpu:
-            return "CPU"
-        case .memory:
-            return "内存"
-        case .network:
-            return "网络"
-        case .disk:
-            return "磁盘剩余"
-        case .temperature:
-            return "温度"
-        case .battery:
-            return "电量"
-        }
+    func settingsTitle(language: AppLanguage) -> String {
+        AppStrings.systemMonitorMetricTitle(self, language: language)
     }
 }

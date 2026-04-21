@@ -5,20 +5,33 @@ struct GeneralSettingsTab: View {
     @ObservedObject private var store = SettingsStore.shared
 
     var body: some View {
-        SettingsPage(title: "通用") {
-            SettingsGroupSection(title: "审批") {
+        SettingsPage(title: AppStrings.text(.general, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.language, language: store.interfaceLanguage)) {
+                SettingsPickerRow(
+                    title: AppStrings.text(.interfaceLanguage, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.interfaceLanguageDetail, language: store.interfaceLanguage),
+                    selection: $store.interfaceLanguage
+                ) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName)
+                            .tag(language)
+                    }
+                }
+            }
+
+            SettingsGroupSection(title: AppStrings.text(.approval, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
-                    title: "显示 Claude / Codex 审批弹窗",
-                    detail: "关闭后不主动弹出审批提示。",
+                    title: AppStrings.text(.displayApprovalSneakNotifications, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.displayApprovalSneakNotificationsDetail, language: store.interfaceLanguage),
                     isOn: $store.approvalSneakNotificationsEnabled
                 )
             }
 
-            SettingsGroupSection(title: "应用") {
+            SettingsGroupSection(title: AppStrings.text(.application, language: store.interfaceLanguage)) {
                 SettingsActionRow(
-                    title: "退出应用",
-                    detail: "结束 NotchPilot",
-                    buttonTitle: "退出应用",
+                    title: AppStrings.text(.quitAppTitle, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.quitAppDetail, language: store.interfaceLanguage),
+                    buttonTitle: AppStrings.text(.quitAppButton, language: store.interfaceLanguage),
                     role: .destructive
                 ) {
                     NSApp.terminate(nil)

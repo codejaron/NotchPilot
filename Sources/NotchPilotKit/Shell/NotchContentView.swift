@@ -10,6 +10,7 @@ public struct NotchContentView: View {
 
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager
+    @ObservedObject private var store = SettingsStore.shared
     @State private var previewRefreshTick = Date()
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
@@ -127,7 +128,7 @@ public struct NotchContentView: View {
                 pluginContentViewport(activePlugin, context: context)
             } else {
                 NotchPilotHUDPanel(cornerRadius: 28) {
-                    Text("No plugins enabled.")
+                    Text(AppStrings.text(.noPluginsEnabled, language: store.interfaceLanguage))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(NotchPilotTheme.islandTextSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -226,7 +227,18 @@ public struct NotchContentView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(plugin.title)
+        .accessibilityLabel(pluginTabAccessibilityLabel(plugin))
+    }
+
+    private func pluginTabAccessibilityLabel(_ plugin: any NotchPlugin) -> String {
+        switch plugin.id {
+        case SettingsPluginID.media.rawValue:
+            return AppStrings.text(.media, language: store.interfaceLanguage)
+        case SettingsPluginID.systemMonitor.rawValue:
+            return AppStrings.text(.system, language: store.interfaceLanguage)
+        default:
+            return plugin.title
+        }
     }
 
     private var shellSettingsButton: some View {
@@ -250,7 +262,7 @@ public struct NotchContentView: View {
                 }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open Settings")
+        .accessibilityLabel(AppStrings.text(.openSettings, language: store.interfaceLanguage))
     }
 
     private func activePlugin(from plugins: [any NotchPlugin]) -> (any NotchPlugin)? {

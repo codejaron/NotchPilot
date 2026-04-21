@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 public final class StatusItemController: NSObject, NSMenuItemValidation {
@@ -17,10 +18,17 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     private let setLyricsOffset: (Int) -> Void
     private let isActivitySneakPreviewsHidden: () -> Bool
     private let toggleActivitySneakPreviewsHandler: () -> Void
+    private let settingsStore: SettingsStore
     private let menu: NSMenu
+    private var searchLyricsItem: NSMenuItem!
+    private var ignoreCurrentTrackLyricsItem: NSMenuItem!
+    private var revealCurrentLyricsInFinderItem: NSMenuItem!
     private var hideActivitySneaksItem: NSMenuItem!
+    private var settingsItem: NSMenuItem!
+    private var quitItem: NSMenuItem!
     private var lyricsOffsetItem: NSMenuItem!
     private var offsetView: LyricsOffsetMenuView!
+    private var settingsCancellables: Set<AnyCancellable> = []
 
     public init(
         searchLyricsHandler: @escaping () -> Void,
@@ -34,6 +42,7 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         setLyricsOffset: @escaping (Int) -> Void,
         isActivitySneakPreviewsHidden: @escaping () -> Bool,
         toggleActivitySneakPreviewsHandler: @escaping () -> Void,
+        settingsStore: SettingsStore = .shared,
         settingsHandler: @escaping () -> Void,
         quitHandler: @escaping () -> Void
     ) {
@@ -48,6 +57,7 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         self.setLyricsOffset = setLyricsOffset
         self.isActivitySneakPreviewsHidden = isActivitySneakPreviewsHidden
         self.toggleActivitySneakPreviewsHandler = toggleActivitySneakPreviewsHandler
+        self.settingsStore = settingsStore
         self.settingsHandler = settingsHandler
         self.quitHandler = quitHandler
         self.menu = NSMenu()
@@ -61,21 +71,22 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
             button.toolTip = "NotchPilot"
         }
 
-        menu.addItem(NSMenuItem(title: "Search Lyrics…", action: #selector(searchLyrics), keyEquivalent: ""))
-        menu.addItem(
-            NSMenuItem(
-                title: "Mark Current Lyrics as Wrong",
-                action: #selector(ignoreCurrentTrackLyrics),
-                keyEquivalent: ""
-            )
+        searchLyricsItem = NSMenuItem(title: "", action: #selector(searchLyrics), keyEquivalent: "")
+        menu.addItem(searchLyricsItem)
+
+        ignoreCurrentTrackLyricsItem = NSMenuItem(
+            title: "",
+            action: #selector(ignoreCurrentTrackLyrics),
+            keyEquivalent: ""
         )
-        menu.addItem(
-            NSMenuItem(
-                title: "Reveal Lyrics Cache in Finder",
-                action: #selector(revealCurrentLyricsInFinder),
-                keyEquivalent: ""
-            )
+        menu.addItem(ignoreCurrentTrackLyricsItem)
+
+        revealCurrentLyricsInFinderItem = NSMenuItem(
+            title: "",
+            action: #selector(revealCurrentLyricsInFinder),
+            keyEquivalent: ""
         )
+        menu.addItem(revealCurrentLyricsInFinderItem)
 
         offsetView = LyricsOffsetMenuView(onChange: { [weak self] value in
             self?.setLyricsOffset(value)
@@ -86,18 +97,30 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
 
         menu.addItem(.separator())
         let hideActivitySneaksItem = NSMenuItem(
-            title: "Hide All Sneaks",
+            title: "",
             action: #selector(toggleActivitySneakPreviews),
             keyEquivalent: "s"
         )
         hideActivitySneaksItem.keyEquivalentModifierMask = [.command, .shift]
         self.hideActivitySneaksItem = hideActivitySneaksItem
         menu.addItem(hideActivitySneaksItem)
-        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(NSMenuItem(title: "Quit NotchPilot", action: #selector(quit), keyEquivalent: "q"))
+
+        settingsItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: ",")
+        menu.addItem(settingsItem)
+
+        quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "q")
+        menu.addItem(quitItem)
         menu.items.forEach { $0.target = self }
         menu.delegate = self
         statusItem.menu = menu
+        syncLocalizedMenuTitles(language: settingsStore.interfaceLanguage)
+
+        settingsStore.$interfaceLanguage
+            .removeDuplicates()
+            .sink { [weak self] language in
+                self?.syncLocalizedMenuTitles(language: language)
+            }
+            .store(in: &settingsCancellables)
     }
 
     @objc private func searchLyrics() {
@@ -148,6 +171,16 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
 
     private func syncActivitySneakPreviewMenuState() {
         hideActivitySneaksItem.state = isActivitySneakPreviewsHidden() ? .on : .off
+    }
+
+    private func syncLocalizedMenuTitles(language: AppLanguage) {
+        searchLyricsItem.title = AppStrings.text(.searchLyricsMenu, language: language)
+        ignoreCurrentTrackLyricsItem.title = AppStrings.text(.markLyricsWrongMenu, language: language)
+        revealCurrentLyricsInFinderItem.title = AppStrings.text(.revealLyricsCacheMenu, language: language)
+        hideActivitySneaksItem.title = AppStrings.text(.hideAllSneaksMenu, language: language)
+        settingsItem.title = AppStrings.text(.settingsMenu, language: language)
+        quitItem.title = AppStrings.text(.quitNotchPilotMenu, language: language)
+        offsetView.syncLocalizedText(language: language)
     }
 
     private static func makeNotchedComputerStatusImage() -> NSImage {
@@ -260,6 +293,10 @@ final class LyricsOffsetMenuView: NSView {
     func update(value: Int) {
         textField.integerValue = value
         stepper.integerValue = value
+    }
+
+    func syncLocalizedText(language: AppLanguage) {
+        label.stringValue = AppStrings.text(.lyricsOffsetLabel, language: language)
     }
 
     @objc private func stepperChanged(_ sender: NSStepper) {

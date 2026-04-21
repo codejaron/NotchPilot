@@ -22,6 +22,7 @@ public final class SettingsStore: ObservableObject {
         static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
+        static let interfaceLanguage = "app.interfaceLanguage"
     }
 
     private let defaults: UserDefaults
@@ -35,6 +36,12 @@ public final class SettingsStore: ObservableObject {
     @Published public var claudeHooksNeedUpdate: Bool
 
     @Published public var codexDesktopConnection: CodexDesktopConnectionState
+
+    @Published public var interfaceLanguage: AppLanguage {
+        didSet {
+            defaults.set(interfaceLanguage.rawValue, forKey: Key.interfaceLanguage)
+        }
+    }
 
     @Published public var autoStartSocket: Bool {
         didSet {
@@ -146,6 +153,8 @@ public final class SettingsStore: ObservableObject {
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
         self.claudeHooksNeedUpdate = false
         self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
+        self.interfaceLanguage = AppLanguage(rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? "")
+            ?? .zhHans
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
         self.bridgeScriptPath = defaults.string(forKey: Key.bridgeScriptPath) ?? ""
         self.approvalSneakNotificationsEnabled =

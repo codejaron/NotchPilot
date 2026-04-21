@@ -40,7 +40,7 @@ public final class SettingsWindowController {
     }
 
     private static func configure(window: NSWindow) {
-        window.title = "NotchPilot Settings"
+        window.title = AppStrings.text(.settingsWindowTitle, language: SettingsStore.shared.interfaceLanguage)
         window.styleMask.insert(.fullSizeContentView)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true

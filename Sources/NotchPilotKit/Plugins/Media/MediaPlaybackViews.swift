@@ -187,6 +187,8 @@ enum MediaPlaybackArtworkPalette {
 }
 
 private struct MediaPlaybackProgressScrubber: View {
+    @ObservedObject private var store = SettingsStore.shared
+
     let value: Double
     let range: ClosedRange<Double>
     let isSeekable: Bool
@@ -230,7 +232,7 @@ private struct MediaPlaybackProgressScrubber: View {
             .gesture(dragGesture(width: width))
         }
         .frame(height: MediaPlaybackProgressChrome.hitHeight)
-        .accessibilityLabel("Playback progress")
+        .accessibilityLabel(AppStrings.text(.playbackProgress, language: store.interfaceLanguage))
     }
 
     private func dragGesture(width: CGFloat) -> some Gesture {
@@ -433,6 +435,7 @@ struct MediaPlaybackExpandedView: View {
     let onNext: () -> Void
     let onSeek: (Double) -> Void
 
+    @ObservedObject private var store = SettingsStore.shared
     @State private var editingTime: Double?
     @State private var pendingSeek: PendingSeek?
 
@@ -475,7 +478,7 @@ struct MediaPlaybackExpandedView: View {
             }
 
         case .idle, .unavailable:
-            Text("No active media playback.")
+            Text(AppStrings.text(.noActiveMediaPlayback, language: store.interfaceLanguage))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(NotchPilotTheme.islandTextSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -541,7 +544,7 @@ struct MediaPlaybackExpandedView: View {
 
     private func metadataSection(_ snapshot: MediaPlaybackSnapshot) -> some View {
         VStack(alignment: .leading, spacing: MediaPlaybackExpandedLayout.metadataSpacing) {
-            Text(snapshot.title.isEmpty ? "Unknown Track" : snapshot.title)
+            Text(snapshot.title.isEmpty ? AppStrings.text(.unknownTrack, language: store.interfaceLanguage) : snapshot.title)
                 .font(.system(size: MediaPlaybackExpandedLayout.titleFontSize, weight: .bold))
                 .foregroundStyle(NotchPilotTheme.islandTextPrimary)
                 .lineLimit(2)

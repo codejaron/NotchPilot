@@ -56,6 +56,13 @@ public final class MediaPlaybackPlugin: NotchPlugin {
                 self?.objectWillChange.send()
             }
             .store(in: &settingsCancellables)
+
+        settingsStore.$interfaceLanguage
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &settingsCancellables)
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {

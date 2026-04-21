@@ -243,4 +243,38 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertTrue(reloadedStore.desktopLyricsEnabled)
     }
+
+    @MainActor
+    func testInterfaceLanguageDefaultsToChineseAndPersistsChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertEqual(store.interfaceLanguage, .zhHans)
+
+        store.interfaceLanguage = .english
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertEqual(reloadedStore.interfaceLanguage, .english)
+    }
+
+    @MainActor
+    func testInvalidPersistedInterfaceLanguageFallsBackToChinese() {
+        defaults.set("fr", forKey: "app.interfaceLanguage")
+
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertEqual(store.interfaceLanguage, .zhHans)
+    }
 }

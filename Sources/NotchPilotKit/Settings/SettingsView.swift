@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var store = SettingsStore.shared
     @State private var sidebarState: SettingsSidebarState
 
     public init(selectedPane: SettingsPane = .general) {
@@ -34,12 +35,16 @@ public struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
-            sidebarButton(title: "通用", systemImage: "gearshape", pane: .general)
+            sidebarButton(
+                title: AppStrings.text(.general, language: store.interfaceLanguage),
+                systemImage: "gearshape",
+                pane: .general
+            )
 
             ForEach(SettingsPluginID.allCases) { plugin in
                 sidebarButton(
                     plugin: plugin,
-                    title: plugin.title,
+                    title: plugin.title(language: store.interfaceLanguage),
                     pane: .plugin(plugin)
                 )
             }

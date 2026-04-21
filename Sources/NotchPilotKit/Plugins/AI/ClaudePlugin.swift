@@ -58,6 +58,14 @@ public final class ClaudePlugin: AIPluginRendering {
                 self?.handleApprovalSneakSettingChange(isEnabled: isEnabled)
             }
             .store(in: &settingsCancellables)
+
+        settingsStore.$interfaceLanguage
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+                self?.syncSneakPeek()
+            }
+            .store(in: &settingsCancellables)
     }
 
     public func activate(bus: EventBus) {

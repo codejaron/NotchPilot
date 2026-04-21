@@ -17,12 +17,13 @@ enum SystemMonitorSneakPreviewLayout {
 
     static func sideFrameWidth(
         snapshot: SystemMonitorSnapshot,
-        configuration: SystemMonitorSneakConfiguration
+        configuration: SystemMonitorSneakConfiguration,
+        language: AppLanguage
     ) -> CGFloat {
         max(
             minimumSideFrameWidth,
-            sideWidth(for: configuration.leftMetrics, snapshot: snapshot),
-            sideWidth(for: configuration.rightMetrics, snapshot: snapshot)
+            sideWidth(for: configuration.leftMetrics, snapshot: snapshot, language: language),
+            sideWidth(for: configuration.rightMetrics, snapshot: snapshot, language: language)
         )
     }
 
@@ -30,25 +31,33 @@ enum SystemMonitorSneakPreviewLayout {
         (outerPadding * 2) + compactNotchWidth + (sideFrameWidth * 2)
     }
 
-    private static func sideWidth(for metrics: [SystemMonitorMetric], snapshot: SystemMonitorSnapshot) -> CGFloat {
+    private static func sideWidth(
+        for metrics: [SystemMonitorMetric],
+        snapshot: SystemMonitorSnapshot,
+        language: AppLanguage
+    ) -> CGFloat {
         guard metrics.isEmpty == false else {
             return 0
         }
 
         let metricsWidth = metrics
-            .map { metricWidth(for: $0, snapshot: snapshot) }
+            .map { metricWidth(for: $0, snapshot: snapshot, language: language) }
             .reduce(0, +)
         return metricsWidth + (CGFloat(metrics.count - 1) * metricSpacing)
     }
 
-    private static func metricWidth(for metric: SystemMonitorMetric, snapshot: SystemMonitorSnapshot) -> CGFloat {
+    private static func metricWidth(
+        for metric: SystemMonitorMetric,
+        snapshot: SystemMonitorSnapshot,
+        language: AppLanguage
+    ) -> CGFloat {
         if metric == .network {
             return networkArrowColumnWidth(snapshot: snapshot)
                 + networkArrowValueSpacing
                 + networkValueColumnWidth(snapshot: snapshot)
         }
 
-        return textWidth(metric.compactLabel, font: labelFont)
+        return textWidth(metric.compactLabel(language: language), font: labelFont)
             + labelValueSpacing
             + textWidth(metric.compactValue(in: snapshot), font: valueFont)
     }
@@ -90,6 +99,8 @@ enum SystemMonitorSneakPreviewLayout {
 }
 
 struct SystemMonitorSneakPreviewView: View {
+    @ObservedObject private var store = SettingsStore.shared
+
     let snapshot: SystemMonitorSnapshot
     let configuration: SystemMonitorSneakConfiguration
     let context: NotchContext
@@ -129,7 +140,7 @@ struct SystemMonitorSneakPreviewView: View {
 
     private func textMetric(_ metric: SystemMonitorMetric) -> some View {
         HStack(spacing: 4) {
-            Text(metric.compactLabel)
+            Text(metric.compactLabel(language: store.interfaceLanguage))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(NotchPilotTheme.islandTextSecondary)
 
@@ -171,21 +182,8 @@ struct SystemMonitorSneakPreviewView: View {
 }
 
 private extension SystemMonitorMetric {
-    var compactLabel: String {
-        switch self {
-        case .cpu:
-            return "CPU"
-        case .memory:
-            return "MEM"
-        case .network:
-            return "NET"
-        case .temperature:
-            return "TMP"
-        case .disk:
-            return "DSK"
-        case .battery:
-            return "BAT"
-        }
+    func compactLabel(language: AppLanguage) -> String {
+        AppStrings.systemMonitorCompactMetricTitle(self, language: language)
     }
 
     func compactValue(in snapshot: SystemMonitorSnapshot) -> String {
@@ -295,6 +293,8 @@ enum SystemMonitorDashboardTypography {
 }
 
 private struct SystemMonitorBlockView: View {
+    @ObservedObject private var store = SettingsStore.shared
+
     let block: SystemMonitorBlockSnapshot
     let accentColor: Color
     var networkSummary: SystemMonitorDirectionalRateText? = nil
@@ -338,7 +338,7 @@ private struct SystemMonitorBlockView: View {
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(block.title)
+                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundStyle(accentColor)
                     .lineLimit(1)
@@ -366,7 +366,7 @@ private struct SystemMonitorBlockView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(block.topItems) { item in
                     HStack(spacing: 5) {
-                        Text(item.name)
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
                             .lineLimit(1)
                             .truncationMode(.tail)
 
@@ -404,7 +404,7 @@ private struct SystemMonitorBlockView: View {
     private var standardBody: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(block.title)
+                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundStyle(accentColor)
 
@@ -418,7 +418,7 @@ private struct SystemMonitorBlockView: View {
             }
 
             if block.detail.isEmpty == false {
-                Text(block.detail)
+                Text(AppStrings.systemMonitorDetail(block.detail, language: store.interfaceLanguage))
                     .font(.system(size: SystemMonitorDashboardTypography.detailFontSize, weight: .semibold, design: .rounded))
                     .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.92))
                     .lineLimit(1)
@@ -428,7 +428,7 @@ private struct SystemMonitorBlockView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(block.topItems) { item in
                     HStack(spacing: 5) {
-                        Text(item.name)
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
                             .lineLimit(1)
                             .truncationMode(.tail)
 
@@ -477,14 +477,14 @@ private struct SystemMonitorBlockView: View {
 
     private var systemStatusBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(block.title)
+            Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
                 .font(.system(size: 9, weight: .heavy, design: .rounded))
                 .foregroundStyle(accentColor)
 
             HStack(alignment: .top, spacing: 14) {
                 ForEach(block.topItems) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
                             .font(.system(size: 9, weight: .semibold, design: .rounded))
                             .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.9))
                             .lineLimit(1)
@@ -503,14 +503,14 @@ private struct SystemMonitorBlockView: View {
 
     private func inlineSystemBody(_ systemBlock: SystemMonitorBlockSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(systemBlock.title)
+            Text(AppStrings.systemMonitorBlockTitle(systemBlock.kind, language: store.interfaceLanguage))
                 .font(.system(size: 9, weight: .heavy, design: .rounded))
                 .foregroundStyle(accentColor)
 
             HStack(alignment: .top, spacing: 10) {
                 ForEach(systemBlock.topItems) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
                             .font(.system(size: 8, weight: .semibold, design: .rounded))
                             .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.88))
                             .lineLimit(1)
