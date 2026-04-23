@@ -5,6 +5,12 @@ public enum SneakPeekRequestKind: Equatable, Sendable {
     case attention
 }
 
+public enum SneakPeekRequestPriority {
+    public static let ai = 100
+    public static let mediaPlayback = 700
+    public static let systemMonitor = 2_000
+}
+
 public struct SneakPeekRequest: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let pluginID: String

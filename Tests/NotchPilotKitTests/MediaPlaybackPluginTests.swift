@@ -90,7 +90,7 @@ final class MediaPlaybackPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, plugin.id)
-        XCTAssertEqual(request.priority, 700)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertEqual(request.target, .activeScreen)
         XCTAssertFalse(request.isInteractive)
         XCTAssertNil(request.autoDismissAfter)

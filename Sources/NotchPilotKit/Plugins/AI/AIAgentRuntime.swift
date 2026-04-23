@@ -309,11 +309,16 @@ private struct SessionActivity {
                     "input_tokens",
                     "inputTokens",
                     "usage.input_tokens",
+                    "usage.inputTokens",
                     "token_usage.input_tokens",
+                    "token_usage.inputTokens",
                     "tokenUsage.inputTokens",
                     "tokens.input",
                     "prompt_tokens",
                     "promptTokens",
+                    "usage.prompt_tokens",
+                    "usage.promptTokens",
+                    "inputTokenCount",
                 ]
             )
             outputTokenCount = SessionActivity.resolveCount(
@@ -322,11 +327,16 @@ private struct SessionActivity {
                     "output_tokens",
                     "outputTokens",
                     "usage.output_tokens",
+                    "usage.outputTokens",
                     "token_usage.output_tokens",
+                    "token_usage.outputTokens",
                     "tokenUsage.outputTokens",
                     "tokens.output",
                     "completion_tokens",
                     "completionTokens",
+                    "usage.completion_tokens",
+                    "usage.completionTokens",
+                    "outputTokenCount",
                 ]
             )
         }
@@ -393,10 +403,25 @@ private struct SessionActivity {
 
     private static func resolveCount(in values: [String: String], keys: [String]) -> Int? {
         for key in keys {
-            if let raw = values[key], let count = Int(raw) {
+            if let count = integerValue(in: values, matching: key) {
                 return count
             }
         }
+        return nil
+    }
+
+    private static func integerValue(in values: [String: String], matching key: String) -> Int? {
+        if let raw = values[key], let count = Int(raw) {
+            return count
+        }
+
+        let suffix = ".\(key)"
+        for (candidate, raw) in values where candidate.hasSuffix(suffix) {
+            if let count = Int(raw) {
+                return count
+            }
+        }
+
         return nil
     }
 

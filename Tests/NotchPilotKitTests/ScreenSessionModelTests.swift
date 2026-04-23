@@ -101,6 +101,43 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertEqual(session.currentSneakPeek?.kind, .attention)
     }
 
+    func testAIRequestsOutrankMediaSneakPreviews() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "media-playback",
+                priority: SneakPeekRequestPriority.mediaPlayback,
+                target: .activeScreen,
+                kind: .activity,
+                isInteractive: false,
+                autoDismissAfter: nil
+            )
+        )
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "media-playback")
+
+        session.enqueue(
+            SneakPeekRequest(
+                pluginID: "claude",
+                priority: SneakPeekRequestPriority.ai,
+                target: .activeScreen,
+                kind: .attention,
+                isInteractive: true,
+                autoDismissAfter: nil
+            )
+        )
+
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
+        XCTAssertEqual(session.currentSneakPeek?.priority, SneakPeekRequestPriority.ai)
+        XCTAssertEqual(session.currentSneakPeek?.kind, .attention)
+    }
+
     func testWindowFrameUsesFixedExpandedWindowSizeAndStaysPinnedToTopCenter() {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(

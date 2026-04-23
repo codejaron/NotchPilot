@@ -266,17 +266,25 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     var currentCompactActivity: AIPluginCompactActivity? {
+        guard isEnabled else {
+            return nil
+        }
+
         if approvalSneakNotificationsEnabled, let approval = pendingApprovals.first {
             let matchingSession = sessions.first(where: { $0.id == approval.sessionID })
             return AIPluginCompactActivity(
                 host: approval.host,
-                label: "Approval",
+                label: "Action Needed",
                 inputTokenCount: matchingSession?.inputTokenCount,
                 outputTokenCount: matchingSession?.outputTokenCount,
-                approvalCount: pendingApprovals.count,
+                approvalCount: 0,
                 sessionTitle: matchingSession.flatMap(displayTitle(for:)),
                 runtimeDurationText: runtimeDurationText(forSessionID: approval.sessionID)
             )
+        }
+
+        guard activitySneakPreviewsHidden == false else {
+            return nil
         }
 
         guard let session = compactPreviewSession() else {
@@ -307,7 +315,7 @@ public final class ClaudePlugin: AIPluginRendering {
                     title: expandedSessionTitle(for: session),
                     subtitle: expandedSessionSubtitle(for: session, approval: firstApproval),
                     phase: expandedSessionPhase(for: session),
-                    approvalCount: sessionApprovals.count,
+                    approvalCount: 0,
                     approvalRequestID: firstApproval?.requestID,
                     codexSurfaceID: nil,
                     updatedAt: session.updatedAt,
@@ -356,13 +364,8 @@ public final class ClaudePlugin: AIPluginRendering {
         for session: AISession,
         approval: PendingApproval?
     ) -> String {
-        if let approval {
-            if approval.approvalKind == .networkAccess {
-                return "Network Access"
-            }
-            if approval.payload.toolName.isEmpty == false {
-                return approval.payload.toolName
-            }
+        if approval != nil {
+            return "Action Needed"
         }
 
         return session.activityLabel
@@ -417,7 +420,7 @@ public final class ClaudePlugin: AIPluginRendering {
 
         let request = SneakPeekRequest(
             pluginID: id,
-            priority: 1000,
+            priority: SneakPeekRequestPriority.ai,
             target: .activeScreen,
             kind: kind,
             isInteractive: true,

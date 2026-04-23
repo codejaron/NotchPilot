@@ -200,6 +200,29 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(session.outputTokenCount, 300)
     }
 
+    func testClaudeRuntimeParsesNestedCamelCaseUsageTokenCounts() throws {
+        let runtime = AIAgentRuntime()
+
+        let usageEnvelope = AIBridgeEnvelope(
+            host: .claude,
+            requestID: "req-camel-1",
+            sessionID: "session-camel-1",
+            eventType: .postToolUse,
+            capabilities: .none,
+            needsResponse: false,
+            payload: .generic([
+                "message.usage.inputTokens": "2100",
+                "message.usage.outputTokens": "450",
+            ])
+        )
+
+        _ = runtime.handle(envelope: usageEnvelope)
+
+        let session = try XCTUnwrap(runtime.sessions.first)
+        XCTAssertEqual(session.inputTokenCount, 2100)
+        XCTAssertEqual(session.outputTokenCount, 450)
+    }
+
     func testCodexSessionUpsertClearsTokenCountsWhenDesktopStreamOmitsThem() throws {
         let runtime = AIAgentRuntime()
 

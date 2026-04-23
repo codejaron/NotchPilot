@@ -399,7 +399,7 @@ public final class CodexPlugin: AIPluginRendering {
 
         let request = SneakPeekRequest(
             pluginID: id,
-            priority: 1000,
+            priority: SneakPeekRequestPriority.ai,
             target: .activeScreen,
             kind: kind,
             isInteractive: true,

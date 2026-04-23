@@ -510,7 +510,8 @@ final class CodexPluginTests: XCTestCase {
 
         XCTAssertEqual(request.pluginID, "codex")
         XCTAssertEqual(request.kind, .attention)
-        XCTAssertEqual(request.priority, 1000)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertTrue(request.isInteractive)
 
         await MainActor.run {
@@ -591,6 +592,8 @@ final class CodexPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "codex")
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertEqual(request.kind, .attention)
         XCTAssertTrue(request.isInteractive)
         let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }

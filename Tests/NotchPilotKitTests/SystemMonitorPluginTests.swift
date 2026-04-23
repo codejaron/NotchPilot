@@ -184,7 +184,7 @@ final class SystemMonitorPluginTests: XCTestCase {
             return
         }
         XCTAssertEqual(request.pluginID, plugin.id)
-        XCTAssertEqual(request.priority, 2_000)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.systemMonitor)
         XCTAssertEqual(request.target, .allScreens)
         XCTAssertFalse(request.isInteractive)
         XCTAssertNil(request.autoDismissAfter)

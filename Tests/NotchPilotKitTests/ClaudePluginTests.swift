@@ -92,13 +92,15 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "claude")
-        XCTAssertEqual(request.priority, 1000)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertEqual(request.kind, .attention)
         XCTAssertTrue(request.isInteractive)
 
         let activity = await MainActor.run { plugin.currentCompactActivity }
         XCTAssertEqual(activity?.host, .claude)
-        XCTAssertEqual(activity?.approvalCount, 1)
+        XCTAssertEqual(activity?.label, "Action Needed")
+        XCTAssertEqual(activity?.approvalCount, 0)
 
         await MainActor.run {
             bus.unsubscribe(token)
@@ -363,6 +365,49 @@ final class ClaudePluginTests: XCTestCase {
         XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
 
         bus.unsubscribe(token)
+    }
+
+    @MainActor
+    func testPendingApprovalUsesCodexStyleExpandedSummaryPresentation() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-summary-prompt",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-session-summary",
+                  "prompt": "Review the release notes"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-summary-approval",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-summary",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "git diff --stat" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        let summary = try! XCTUnwrap(plugin.expandedSessionSummaries.first)
+        XCTAssertEqual(summary.title, "Review the release notes")
+        XCTAssertEqual(summary.subtitle, "Action Needed")
+        XCTAssertEqual(summary.approvalCount, 0)
+        XCTAssertEqual(summary.approvalRequestID, "claude-summary-approval")
     }
 
     @MainActor

@@ -16,7 +16,7 @@ private actor SystemMonitorSamplerWorker {
 @MainActor
 public final class SystemMonitorPlugin: NotchPlugin {
     private enum SneakPreviewRequest {
-        static let priority = 2_000
+        static let priority = SneakPeekRequestPriority.systemMonitor
     }
 
     public let id = "system-monitor"

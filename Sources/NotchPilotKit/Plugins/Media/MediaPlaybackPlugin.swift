@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 public final class MediaPlaybackPlugin: NotchPlugin {
     private enum SneakPreviewRequest {
-        static let priority = 700
+        static let priority = SneakPeekRequestPriority.mediaPlayback
         static let pausedAutoDismiss: TimeInterval = 10
     }
 
