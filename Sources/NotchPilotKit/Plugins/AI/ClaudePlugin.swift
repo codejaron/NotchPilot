@@ -4,12 +4,18 @@ import SwiftUI
 
 @MainActor
 public final class ClaudePlugin: AIPluginRendering {
+    private enum SneakPeekKey {
+        static let activity = "claude-activity"
+    }
+
     public let id = "claude"
     public let title = "Claude"
     public let iconSystemName = "sparkles"
     public let accentColor: Color = NotchPilotTheme.claude
     public let dockOrder = 100
     public let previewPriority: Int? = 100
+
+    private static let claudeSessionActivityExpiry: TimeInterval = 24 * 60 * 60
 
     @Published public var isEnabled = true
     @Published public private(set) var sessions: [AISession] = []
@@ -29,7 +35,7 @@ public final class ClaudePlugin: AIPluginRendering {
     private var responders: [String: @Sendable (Data) -> Void] = [:]
     private var sneakPeekIDs: [String: UUID] = [:]
     private var settingsCancellables: Set<AnyCancellable> = []
-    private var activityTracker = ClaudeSessionActivityTracker()
+    private var activityTracker = ClaudeSessionActivityTracker(activityExpiry: ClaudePlugin.claudeSessionActivityExpiry)
 
     public init(
         settingsStore: SettingsStore = .shared,
@@ -56,6 +62,13 @@ public final class ClaudePlugin: AIPluginRendering {
             .removeDuplicates()
             .sink { [weak self] isEnabled in
                 self?.handleApprovalSneakSettingChange(isEnabled: isEnabled)
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$activitySneakPreviewsHidden
+            .removeDuplicates()
+            .sink { [weak self] isHidden in
+                self?.handleActivitySneakSettingChange(isHidden: isHidden)
             }
             .store(in: &settingsCancellables)
 
@@ -115,6 +128,7 @@ public final class ClaudePlugin: AIPluginRendering {
                sessionScopedApprovalStore.matches(sessionID: envelope.sessionID, payload: payload) {
                 _ = runtime.handle(envelope: bypass(envelope: envelope))
                 syncState()
+                syncSneakPeek()
                 do {
                     let data = try encoder.encode(
                         decision: .allowOnce,
@@ -128,19 +142,16 @@ public final class ClaudePlugin: AIPluginRendering {
                 return
             }
 
-            let resolvedExternalApprovals = resolveExternallyHandledApprovals(for: envelope)
+            _ = resolveExternallyHandledApprovals(for: envelope)
             let result = runtime.handle(envelope: envelope)
             syncState()
-            if resolvedExternalApprovals {
-                syncSneakPeek()
-            }
+            syncSneakPeek()
 
             switch result {
             case let .respondNow(data):
                 respond(data)
             case let .awaitDecision(requestID):
                 responders[requestID] = respond
-                syncSneakPeek()
             }
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
@@ -369,13 +380,28 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     private func syncState() {
-        sessions = runtime.sessions
         pendingApprovals = runtime.pendingApprovals
+        sessions = activityTracker.visibleSessions(
+            from: runtime.sessions,
+            pendingApprovals: pendingApprovals,
+            now: nowProvider()
+        )
     }
 
     private func handleApprovalSneakSettingChange(isEnabled: Bool) {
         objectWillChange.send()
-        syncSneakPeek(approvalSneakNotificationsEnabled: isEnabled)
+        syncSneakPeek(
+            approvalSneakNotificationsEnabled: isEnabled,
+            activitySneakPreviewsHidden: activitySneakPreviewsHidden
+        )
+    }
+
+    private func handleActivitySneakSettingChange(isHidden: Bool) {
+        objectWillChange.send()
+        syncSneakPeek(
+            approvalSneakNotificationsEnabled: approvalSneakNotificationsEnabled,
+            activitySneakPreviewsHidden: isHidden
+        )
     }
 
     private func handlePluginEnabledChange(_ isEnabled: Bool) {
@@ -384,7 +410,7 @@ public final class ClaudePlugin: AIPluginRendering {
         objectWillChange.send()
     }
 
-    private func presentSneakPeek(for requestID: String) {
+    private func presentSneakPeek(for requestID: String, kind: SneakPeekRequestKind) {
         guard sneakPeekIDs[requestID] == nil else {
             return
         }
@@ -393,7 +419,7 @@ public final class ClaudePlugin: AIPluginRendering {
             pluginID: id,
             priority: 1000,
             target: .activeScreen,
-            kind: .attention,
+            kind: kind,
             isInteractive: true,
             autoDismissAfter: nil
         )
@@ -410,25 +436,45 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     private func syncSneakPeek() {
-        syncSneakPeek(approvalSneakNotificationsEnabled: approvalSneakNotificationsEnabled)
+        syncSneakPeek(
+            approvalSneakNotificationsEnabled: approvalSneakNotificationsEnabled,
+            activitySneakPreviewsHidden: activitySneakPreviewsHidden
+        )
     }
 
-    private func syncSneakPeek(approvalSneakNotificationsEnabled: Bool) {
+    private func syncSneakPeek(
+        approvalSneakNotificationsEnabled: Bool,
+        activitySneakPreviewsHidden: Bool
+    ) {
         let pendingRequestIDs = Set(pendingApprovals.map(\.requestID))
+        let shouldShowApprovals = isEnabled
+            && approvalSneakNotificationsEnabled
+            && pendingRequestIDs.isEmpty == false
+        let shouldShowActivity = isEnabled
+            && shouldShowApprovals == false
+            && activitySneakPreviewsHidden == false
+            && compactPreviewSession() != nil
+        let desiredRequestIDs: Set<String>
+
+        if shouldShowApprovals {
+            desiredRequestIDs = pendingRequestIDs
+        } else if shouldShowActivity {
+            desiredRequestIDs = [SneakPeekKey.activity]
+        } else {
+            desiredRequestIDs = []
+        }
 
         for requestID in Array(sneakPeekIDs.keys)
-        where isEnabled == false
-            || approvalSneakNotificationsEnabled == false
-            || pendingRequestIDs.contains(requestID) == false {
+        where desiredRequestIDs.contains(requestID) == false {
             dismissSneakPeek(for: requestID)
         }
 
-        guard isEnabled, approvalSneakNotificationsEnabled else {
-            return
-        }
-
-        for requestID in pendingApprovals.map(\.requestID) {
-            presentSneakPeek(for: requestID)
+        if shouldShowApprovals {
+            for requestID in pendingApprovals.map(\.requestID) {
+                presentSneakPeek(for: requestID, kind: .attention)
+            }
+        } else if shouldShowActivity {
+            presentSneakPeek(for: SneakPeekKey.activity, kind: .activity)
         }
     }
 
@@ -444,9 +490,14 @@ public final class ClaudePlugin: AIPluginRendering {
 }
 
 struct ClaudeSessionActivityTracker {
+    private let activityExpiry: TimeInterval
     private var firstActiveAt: [String: Date] = [:]
     private var lastActiveAt: [String: Date] = [:]
     private var lastEventType: [String: AIBridgeEventType] = [:]
+
+    init(activityExpiry: TimeInterval = 24 * 60 * 60) {
+        self.activityExpiry = activityExpiry
+    }
 
     mutating func reset() {
         firstActiveAt.removeAll()
@@ -456,19 +507,41 @@ struct ClaudeSessionActivityTracker {
 
     mutating func observe(sessionID: String, eventType: AIBridgeEventType, at date: Date) {
         let previousWasTerminal = (lastEventType[sessionID] == .stop)
-        let nextIsActive = (eventType != .stop)
+        let nextIsActive = eventType.marksClaudeSessionActivity
 
-        if firstActiveAt[sessionID] == nil || (previousWasTerminal && nextIsActive) {
-            firstActiveAt[sessionID] = date
-        }
-
-        if let existing = lastActiveAt[sessionID] {
-            lastActiveAt[sessionID] = max(existing, date)
-        } else {
-            lastActiveAt[sessionID] = date
+        if nextIsActive {
+            if firstActiveAt[sessionID] == nil || previousWasTerminal {
+                firstActiveAt[sessionID] = date
+            }
+            updateLastActiveAt(sessionID: sessionID, date: date)
+        } else if eventType == .stop, firstActiveAt[sessionID] != nil {
+            updateLastActiveAt(sessionID: sessionID, date: date)
         }
 
         lastEventType[sessionID] = eventType
+    }
+
+    func visibleSessions(
+        from sessions: [AISession],
+        pendingApprovals: [PendingApproval],
+        now: Date
+    ) -> [AISession] {
+        let pendingSessionIDs = Set(pendingApprovals.map(\.sessionID))
+        let cutoff = now.addingTimeInterval(-activityExpiry)
+
+        return sessions.filter { session in
+            if pendingSessionIDs.contains(session.id) {
+                return true
+            }
+
+            guard firstActiveAt[session.id] != nil,
+                  let lastActiveAt = lastActiveAt[session.id]
+            else {
+                return false
+            }
+
+            return lastActiveAt >= cutoff
+        }
     }
 
     func duration(forSessionID sessionID: String, now: Date) -> TimeInterval? {
@@ -479,6 +552,25 @@ struct ClaudeSessionActivityTracker {
         let isTerminal = (lastEventType[sessionID] == .stop)
         let endedAt: Date = isTerminal ? (lastActiveAt[sessionID] ?? now) : now
         return max(0, endedAt.timeIntervalSince(start))
+    }
+
+    private mutating func updateLastActiveAt(sessionID: String, date: Date) {
+        if let existing = lastActiveAt[sessionID] {
+            lastActiveAt[sessionID] = max(existing, date)
+        } else {
+            lastActiveAt[sessionID] = date
+        }
+    }
+}
+
+private extension AIBridgeEventType {
+    var marksClaudeSessionActivity: Bool {
+        switch self {
+        case .permissionRequest, .preToolUse, .postToolUse, .userPromptSubmit, .unknown:
+            return true
+        case .sessionStart, .stop:
+            return false
+        }
     }
 }
 

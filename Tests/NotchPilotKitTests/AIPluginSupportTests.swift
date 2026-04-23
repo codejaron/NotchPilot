@@ -64,6 +64,38 @@ final class AIPluginSupportTests: XCTestCase {
     }
 
     @MainActor
+    func testCompactMetricsReserveFullWidthForApprovalBadgeText() throws {
+        let runtimeWidth = measuredWidth(
+            "12s",
+            font: .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        )
+        let badgeWidth = measuredWidth(
+            "1",
+            font: .systemFont(ofSize: 10, weight: .bold)
+        ) + 18
+        let plugin = CompactMetricsProbePlugin(
+            activity: AIPluginCompactActivity(
+                host: .claude,
+                label: "Approval",
+                inputTokenCount: nil,
+                outputTokenCount: nil,
+                approvalCount: 1,
+                sessionTitle: "Create temporary file",
+                runtimeDurationText: "12s"
+            )
+        )
+
+        let metrics = try XCTUnwrap(plugin.compactMetrics(context: Self.compactContext))
+
+        XCTAssertEqual(
+            metrics.leftWidth,
+            22 + 5 + badgeWidth + 5 + runtimeWidth,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(metrics.sideFrameWidth, metrics.leftWidth, accuracy: 0.5)
+    }
+
+    @MainActor
     func testCompactViewRefreshesRuntimeWithoutPluginEvents() throws {
         let plugin = CompactRuntimeRefreshProbePlugin()
         let metrics = try XCTUnwrap(plugin.compactMetrics(context: Self.compactContext))

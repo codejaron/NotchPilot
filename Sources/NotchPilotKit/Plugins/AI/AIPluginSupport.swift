@@ -208,8 +208,8 @@ extension AIPluginRendering {
     private func approvalBadgeWidth(count: Int) -> CGFloat {
         AICompactTextMeasurer.width(
             "\(count)",
-            font: .systemFont(ofSize: 10, weight: .semibold)
-        ) + 10
+            font: .systemFont(ofSize: 10, weight: .bold)
+        ) + 18
     }
 }
 
@@ -941,6 +941,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
                     color: hostColor(for: activity.host),
                     foreground: .white
                 )
+                .fixedSize(horizontal: true, vertical: false)
             }
 
             if let runtime = activity.runtimeDurationText, runtime.isEmpty == false {

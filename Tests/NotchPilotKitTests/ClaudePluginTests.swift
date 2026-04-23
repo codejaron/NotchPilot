@@ -93,11 +93,115 @@ final class ClaudePluginTests: XCTestCase {
 
         XCTAssertEqual(request.pluginID, "claude")
         XCTAssertEqual(request.priority, 1000)
+        XCTAssertEqual(request.kind, .attention)
         XCTAssertTrue(request.isInteractive)
+
+        let activity = await MainActor.run { plugin.currentCompactActivity }
+        XCTAssertEqual(activity?.host, .claude)
+        XCTAssertEqual(activity?.approvalCount, 1)
 
         await MainActor.run {
             bus.unsubscribe(token)
         }
+    }
+
+    @MainActor
+    func testActiveClaudeSessionEmitsActivitySneakPeekAndTracksRuntime() {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
+        let bus = EventBus()
+        let plugin = ClaudePlugin(nowProvider: { now.value })
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-active-sneak",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-active-sneak-session",
+                  "prompt": "Create temporary file"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+            XCTFail("expected Claude activity sneak peek request")
+            bus.unsubscribe(token)
+            return
+        }
+
+        now.value = Date(timeIntervalSince1970: 12)
+
+        let activity = plugin.currentCompactActivity
+        XCTAssertEqual(request.pluginID, "claude")
+        XCTAssertEqual(request.kind, .activity)
+        XCTAssertTrue(request.isInteractive)
+        XCTAssertEqual(activity?.host, .claude)
+        XCTAssertEqual(activity?.approvalCount, 0)
+        XCTAssertEqual(activity?.sessionTitle, "Create temporary file")
+        XCTAssertEqual(activity?.runtimeDurationText, "12s")
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
+    func testClaudeActivitySneakDismissesWhenSessionStops() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-active-before-stop",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-stop-activity-session",
+                  "prompt": "Create temporary file"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-stop-after-activity",
+                rawJSON: """
+                {
+                  "hook_event_name": "Stop",
+                  "session_id": "claude-stop-activity-session"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .sneakPeekRequested = event { return true }
+            return false
+        })
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+        XCTAssertNil(plugin.currentCompactActivity)
+
+        bus.unsubscribe(token)
     }
 
     @MainActor
@@ -219,7 +323,7 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
-    func testPreToolUseDoesNotCreateApprovalOrSneakPeek() {
+    func testPreToolUseCreatesActivitySneakPeekWithoutApproval() {
         let bus = EventBus()
         let plugin = ClaudePlugin()
         let recorder = SplitEventRecorder()
@@ -249,7 +353,13 @@ final class ClaudePluginTests: XCTestCase {
         )
 
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
-        XCTAssertTrue(recorder.events.isEmpty)
+        guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+            XCTFail("expected Claude activity sneak peek request")
+            bus.unsubscribe(token)
+            return
+        }
+        XCTAssertEqual(request.pluginID, "claude")
+        XCTAssertEqual(request.kind, .activity)
         XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
 
         bus.unsubscribe(token)
@@ -343,6 +453,96 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         XCTAssertFalse(hasPreview)
+    }
+
+    @MainActor
+    func testConnectedOnlyClaudeSessionsAreHiddenFromExpandedSummaries() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-connected-only-1",
+                rawJSON: """
+                {
+                  "hook_event_name": "SessionStart",
+                  "session_id": "claude-connected-only-1"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-connected-only-2",
+                rawJSON: """
+                {
+                  "hook_event_name": "SessionStart",
+                  "session_id": "claude-connected-only-2"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(plugin.sessions.isEmpty)
+        XCTAssertTrue(plugin.expandedSessionSummaries.isEmpty)
+    }
+
+    @MainActor
+    func testStoppedClaudeSessionWithUserActivityRemainsVisibleButConnectedOnlySessionsStayHidden() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-hidden-connected",
+                rawJSON: """
+                {
+                  "hook_event_name": "SessionStart",
+                  "session_id": "claude-hidden-connected"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-active-prompt",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-active-session",
+                  "prompt": "Run again"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-active-stop",
+                rawJSON: """
+                {
+                  "hook_event_name": "Stop",
+                  "session_id": "claude-active-session"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertEqual(plugin.sessions.map(\.id), ["claude-active-session"])
+        XCTAssertEqual(plugin.expandedSessionSummaries.map(\.id), ["claude-active-session"])
+        XCTAssertEqual(plugin.expandedSessionSummaries.first?.title, "Run again")
+        XCTAssertEqual(plugin.expandedSessionSummaries.first?.phase, .completed)
     }
 
     @MainActor
@@ -469,5 +669,13 @@ private final class RecordingAISessionFocuser: AISessionFocusing {
     func focusCodexThread(id: String, fallbackContext: AISessionLaunchContext?) -> Bool {
         focusedCodexThreads.append(id)
         return true
+    }
+}
+
+private final class MutableDateProvider: @unchecked Sendable {
+    var value: Date
+
+    init(_ value: Date) {
+        self.value = value
     }
 }
