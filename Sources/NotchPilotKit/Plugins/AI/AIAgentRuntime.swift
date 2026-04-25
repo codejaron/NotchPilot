@@ -369,7 +369,7 @@ private struct SessionActivity {
             case .preToolUse:
                 return toolName
             case .postToolUse:
-                return "\(toolName) Done"
+                return "Working"
             case .permissionRequest:
                 return "Waiting Approval"
             case .userPromptSubmit:
@@ -389,7 +389,7 @@ private struct SessionActivity {
         case .preToolUse:
             return "Running"
         case .postToolUse:
-            return "Done"
+            return "Working"
         case .sessionStart:
             return "Connected"
         case .stop:

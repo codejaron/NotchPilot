@@ -368,6 +368,85 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testPostToolUseKeepsActivitySneakPeekUntilStop() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-posttool-prompt",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-posttool-session",
+                  "prompt": "Run a command and continue"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .sneakPeekRequested = event { return true }
+            return false
+        })
+
+        recorder.events.removeAll()
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-posttool-finished",
+                rawJSON: """
+                {
+                  "hook_event_name": "PostToolUse",
+                  "session_id": "claude-posttool-session",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "ls -la" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertFalse(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+        XCTAssertNotNil(plugin.preview(context: Self.previewContext))
+        XCTAssertEqual(plugin.currentCompactActivity?.label, "Working")
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-posttool-stop",
+                rawJSON: """
+                {
+                  "hook_event_name": "Stop",
+                  "session_id": "claude-posttool-session"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+        XCTAssertNil(plugin.currentCompactActivity)
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
     func testPendingApprovalUsesCodexStyleExpandedSummaryPresentation() {
         let bus = EventBus()
         let plugin = ClaudePlugin()

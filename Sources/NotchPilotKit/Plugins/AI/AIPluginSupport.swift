@@ -243,9 +243,9 @@ enum AIRuntimeDurationFormatter {
 private extension AISession {
     var isLiveCompactPreviewCandidate: Bool {
         switch lastEventType {
-        case .preToolUse, .userPromptSubmit, .unknown:
+        case .preToolUse, .postToolUse, .userPromptSubmit, .unknown:
             return true
-        case .permissionRequest, .postToolUse, .sessionStart, .stop:
+        case .permissionRequest, .sessionStart, .stop:
             return false
         }
     }
