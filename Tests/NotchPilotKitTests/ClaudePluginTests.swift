@@ -447,6 +447,101 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testAskUserQuestionPreToolUseShowsQuestionAndReturnsUpdatedInputAnswer() throws {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+        let responseBox = SplitResponseBox()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-question",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-question-session",
+                  "tool_name": "AskUserQuestion",
+                  "tool_input": {
+                    "questions": [
+                      {
+                        "question": "这次重设计的覆盖范围是？",
+                        "header": "Scope",
+                        "options": [
+                          { "label": "全套 UI 一次性重做（推荐）" },
+                          { "label": "只做刘海展开面板" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+            XCTFail("expected AskUserQuestion sneak peek request")
+            bus.unsubscribe(token)
+            return
+        }
+
+        let approval = try XCTUnwrap(plugin.pendingApprovals.first)
+        XCTAssertEqual(request.pluginID, "claude")
+        XCTAssertEqual(request.kind, .attention)
+        XCTAssertEqual(approval.eventType, .preToolUse)
+        XCTAssertEqual(approval.payload.title, "Claude needs your input")
+        XCTAssertEqual(approval.payload.claudeQuestions.first?.question, "这次重设计的覆盖范围是？")
+        XCTAssertEqual(approval.payload.claudeQuestions.first?.options.map(\.label), [
+            "全套 UI 一次性重做（推荐）",
+            "只做刘海展开面板",
+        ])
+
+        let answerInput = approval.payload.updatedInput(answering: [
+            "这次重设计的覆盖范围是？": "只做刘海展开面板",
+        ])
+        let action = ApprovalAction(
+            id: "claude-question-answer",
+            title: "Submit",
+            style: .primary,
+            payload: .claude(
+                ApprovalDecision(
+                    behavior: .allow,
+                    updatedInput: answerInput
+                )
+            )
+        )
+
+        plugin.respond(to: "claude-question", with: action)
+
+        guard
+            let data = responseBox.data,
+            let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let output = parsed["hookSpecificOutput"] as? [String: Any],
+            let updatedInput = output["updatedInput"] as? [String: Any],
+            let answers = updatedInput["answers"] as? [String: String]
+        else {
+            XCTFail("expected AskUserQuestion updatedInput response")
+            bus.unsubscribe(token)
+            return
+        }
+
+        XCTAssertEqual(output["hookEventName"] as? String, "PreToolUse")
+        XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+        XCTAssertEqual(answers["这次重设计的覆盖范围是？"], "只做刘海展开面板")
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
     func testPendingApprovalUsesCodexStyleExpandedSummaryPresentation() {
         let bus = EventBus()
         let plugin = ClaudePlugin()

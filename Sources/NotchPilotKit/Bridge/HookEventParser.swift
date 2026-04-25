@@ -152,6 +152,7 @@ public struct HookEventParser {
         permissionMode: String?
     ) -> Bool {
         eventType == .permissionRequest
+            || (eventType == .preToolUse && toolName == "AskUserQuestion")
     }
 
     private func resolveEventType(from dictionary: [String: Any]) -> AIBridgeEventType {
@@ -209,7 +210,8 @@ public struct HookEventParser {
         permissionMode: String?
     ) -> AIBridgePayload {
         switch eventType {
-        case .permissionRequest:
+        case .permissionRequest,
+             .preToolUse where isAskUserQuestion(dictionary):
             let toolName = findString(in: dictionary, paths: [
                 ["tool_name"],
                 ["tool", "name"],
@@ -258,6 +260,8 @@ public struct HookEventParser {
                 ["tool_input", "url"],
                 ["tool", "input", "url"],
             ])
+            let toolInput = resolvedToolInput(from: dictionary)
+            let claudeQuestions = claudeQuestions(from: dictionary)
 
             let toolKind = Self.resolveToolKind(toolName: toolName)
             let bashPrefix = toolKind == .bash ? Self.extractBashCommandPrefix(from: command) : nil
@@ -267,6 +271,8 @@ public struct HookEventParser {
             let previewText = command
                 ?? filePath
                 ?? webFetchURL
+                ?? claudeQuestions.first?.question
+                ?? claudeQuestions.first?.header
                 ?? findString(in: dictionary, paths: [["prompt"]])
                 ?? "Review the requested action."
 
@@ -291,7 +297,9 @@ public struct HookEventParser {
                     mcpServer: mcpServer,
                     mcpTool: mcpTool,
                     permissionMode: permissionMode,
-                    permissionSuggestions: permissionSuggestions(from: dictionary)
+                    permissionSuggestions: permissionSuggestions(from: dictionary),
+                    toolInput: toolInput,
+                    claudeQuestions: claudeQuestions
                 )
             )
         case .userPromptSubmit:
@@ -324,11 +332,77 @@ public struct HookEventParser {
         return []
     }
 
+    private func isAskUserQuestion(_ dictionary: [String: Any]) -> Bool {
+        findString(in: dictionary, paths: [
+            ["tool_name"],
+            ["tool", "name"],
+            ["request", "tool"],
+        ]) == "AskUserQuestion"
+    }
+
+    private func resolvedToolInput(from dictionary: [String: Any]) -> JSONValue? {
+        for path in [
+            ["tool_input"],
+            ["tool", "input"],
+        ] {
+            guard let rawInput = value(in: dictionary, for: path),
+                  let jsonValue = try? JSONValue(jsonObject: rawInput)
+            else {
+                continue
+            }
+            return jsonValue
+        }
+
+        return nil
+    }
+
+    private func claudeQuestions(from dictionary: [String: Any]) -> [ClaudeUserQuestion] {
+        guard let rawQuestions = value(in: dictionary, for: ["tool_input", "questions"])
+            ?? value(in: dictionary, for: ["tool", "input", "questions"]),
+              let questionObjects = rawQuestions as? [[String: Any]]
+        else {
+            return []
+        }
+
+        return questionObjects.enumerated().compactMap { index, rawQuestion in
+            guard let question = normalizedString(rawQuestion["question"]) else {
+                return nil
+            }
+
+            let questionID = normalizedString(rawQuestion["id"]) ?? "question-\(index)"
+            let options = (rawQuestion["options"] as? [[String: Any]] ?? [])
+                .enumerated()
+                .compactMap { optionIndex, rawOption -> ClaudeQuestionOption? in
+                    guard let label = normalizedString(rawOption["label"]) else {
+                        return nil
+                    }
+
+                    return ClaudeQuestionOption(
+                        id: normalizedString(rawOption["id"]) ?? "\(questionID)-option-\(optionIndex)",
+                        label: label,
+                        description: normalizedString(rawOption["description"])
+                    )
+                }
+
+            return ClaudeUserQuestion(
+                id: questionID,
+                header: normalizedString(rawQuestion["header"]),
+                question: question,
+                options: options,
+                multiSelect: (rawQuestion["multiSelect"] as? Bool) ?? false
+            )
+        }
+    }
+
     private static func permissionTitle(
         toolName: String,
         toolKind: ClaudeToolKind,
         description: String?
     ) -> String {
+        if toolName == "AskUserQuestion" {
+            return "Claude needs your input"
+        }
+
         if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines),
            description.isEmpty == false {
             switch toolKind {
@@ -406,6 +480,15 @@ public struct HookEventParser {
 
         return current
     }
+
+    private func normalizedString(_ rawValue: Any?) -> String? {
+        guard let value = rawValue as? String else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private func fallbackOriginalContent(filePath: String?, newContent: String?) -> String? {
         guard let filePath, let newContent, newContent.isEmpty == false else {
             return nil

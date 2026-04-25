@@ -20,10 +20,15 @@ public struct HookResponseEncoder {
             response = try permissionRequestResponse(
                 behavior: decision.behavior,
                 reason: reason,
-                permissionUpdates: decision.permissionUpdates
+                permissionUpdates: decision.permissionUpdates,
+                updatedInput: decision.updatedInput
             )
         case (.claude, .preToolUse):
-            response = preToolUseResponse(behavior: decision.behavior, reason: reason)
+            response = try preToolUseResponse(
+                behavior: decision.behavior,
+                reason: reason,
+                updatedInput: decision.updatedInput
+            )
         default:
             response = "{}"
         }
@@ -34,12 +39,17 @@ public struct HookResponseEncoder {
     private func permissionRequestResponse(
         behavior: ApprovalDecision.Behavior,
         reason: String,
-        permissionUpdates: [JSONValue]
+        permissionUpdates: [JSONValue],
+        updatedInput: JSONValue?
     ) throws -> String {
         let behaviorString = behavior == .allow ? "allow" : "deny"
         var decision: [String: Any] = [
             "behavior": behaviorString,
         ]
+
+        if behavior == .allow, let updatedInput {
+            decision["updatedInput"] = updatedInput.jsonObject
+        }
 
         if behavior == .allow, permissionUpdates.isEmpty == false {
             decision["updatedPermissions"] = permissionUpdates.map(\.jsonObject)
@@ -59,8 +69,27 @@ public struct HookResponseEncoder {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    private func preToolUseResponse(behavior: ApprovalDecision.Behavior, reason: String) -> String {
+    private func preToolUseResponse(
+        behavior: ApprovalDecision.Behavior,
+        reason: String,
+        updatedInput: JSONValue?
+    ) throws -> String {
         let behaviorString = behavior == .allow ? "allow" : "deny"
+        if let updatedInput {
+            var output: [String: Any] = [
+                "hookEventName": "PreToolUse",
+                "permissionDecision": behaviorString,
+                "permissionDecisionReason": reason,
+            ]
+            output["updatedInput"] = updatedInput.jsonObject
+
+            let response: [String: Any] = [
+                "hookSpecificOutput": output,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+
         let escapedReason = escape(reason)
         return #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"\#(behaviorString)","permissionDecisionReason":"\#(escapedReason)"}}"#
     }

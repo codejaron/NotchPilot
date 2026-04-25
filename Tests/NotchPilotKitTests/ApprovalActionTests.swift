@@ -51,4 +51,18 @@ final class ApprovalActionTests: XCTestCase {
         XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once"])
         XCTAssertEqual(actions.map(\.style), [.outline, .primary])
     }
+
+    func testAskUserQuestionDoesNotUseGenericAllowDenyApprovalActions() {
+        let actions = ApprovalAction.claudeActions(
+            toolKind: .other,
+            toolName: "AskUserQuestion",
+            bashCommandPrefix: nil,
+            webFetchDomain: nil,
+            mcpServer: nil,
+            mcpTool: nil,
+            permissionSuggestions: []
+        )
+
+        XCTAssertTrue(actions.isEmpty)
+    }
 }

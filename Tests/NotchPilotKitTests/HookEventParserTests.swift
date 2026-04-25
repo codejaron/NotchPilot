@@ -165,6 +165,63 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertFalse(envelope.needsResponse)
     }
 
+    func testPreToolUseAskUserQuestionRequiresResponseAndExtractsQuestionOptions() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-question",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "AskUserQuestion",
+              "tool_input": {
+                "questions": [
+                  {
+                    "question": "这次重设计的覆盖范围是？",
+                    "header": "Scope",
+                    "options": [
+                      {
+                        "label": "全套 UI 一次性重做（推荐）",
+                        "description": "刘海展开面板 + sneak 紧凑态 + 设置窗口"
+                      },
+                      {
+                        "label": "只做刘海展开面板",
+                        "description": "先把 expanded notch 做好"
+                      }
+                    ],
+                    "multiSelect": false
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.eventType, .preToolUse)
+        XCTAssertTrue(envelope.needsResponse)
+
+        guard case let .permissionRequest(payload) = envelope.payload else {
+            return XCTFail("expected AskUserQuestion to become an interactive payload")
+        }
+
+        XCTAssertEqual(payload.title, "Claude needs your input")
+        XCTAssertEqual(payload.previewText, "这次重设计的覆盖范围是？")
+        XCTAssertEqual(payload.claudeQuestions.count, 1)
+        XCTAssertEqual(payload.claudeQuestions.first?.header, "Scope")
+        XCTAssertEqual(payload.claudeQuestions.first?.question, "这次重设计的覆盖范围是？")
+        XCTAssertEqual(payload.claudeQuestions.first?.options.map(\.label), [
+            "全套 UI 一次性重做（推荐）",
+            "只做刘海展开面板",
+        ])
+        XCTAssertEqual(
+            payload.claudeQuestions.first?.options.first?.description,
+            "刘海展开面板 + sneak 紧凑态 + 设置窗口"
+        )
+        XCTAssertEqual(payload.toolInput?.objectValue?["questions"]?.arrayValue?.count, 1)
+    }
+
     func testPermissionRequestWebFetchRequiresResponseAndExtractsDomain() throws {
         let frame = BridgeFrame(
             host: .claude,

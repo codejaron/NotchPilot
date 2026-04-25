@@ -120,6 +120,40 @@ public enum ClaudeToolKind: Equatable, Sendable {
     case other
 }
 
+public struct ClaudeQuestionOption: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let description: String?
+
+    public init(id: String, label: String, description: String? = nil) {
+        self.id = id
+        self.label = label
+        self.description = description
+    }
+}
+
+public struct ClaudeUserQuestion: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let header: String?
+    public let question: String
+    public let options: [ClaudeQuestionOption]
+    public let multiSelect: Bool
+
+    public init(
+        id: String,
+        header: String? = nil,
+        question: String,
+        options: [ClaudeQuestionOption],
+        multiSelect: Bool = false
+    ) {
+        self.id = id
+        self.header = header
+        self.question = question
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+}
+
 public struct ApprovalPayload: Equatable, Sendable {
     public let title: String
     public let toolName: String
@@ -137,6 +171,8 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let mcpTool: String?
     public let permissionMode: String?
     public let permissionSuggestions: [JSONValue]
+    public let toolInput: JSONValue?
+    public let claudeQuestions: [ClaudeUserQuestion]
 
     public init(
         title: String,
@@ -154,7 +190,9 @@ public struct ApprovalPayload: Equatable, Sendable {
         mcpServer: String? = nil,
         mcpTool: String? = nil,
         permissionMode: String? = nil,
-        permissionSuggestions: [JSONValue] = []
+        permissionSuggestions: [JSONValue] = [],
+        toolInput: JSONValue? = nil,
+        claudeQuestions: [ClaudeUserQuestion] = []
     ) {
         self.title = title
         self.toolName = toolName
@@ -172,6 +210,14 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.mcpTool = mcpTool
         self.permissionMode = permissionMode
         self.permissionSuggestions = permissionSuggestions
+        self.toolInput = toolInput
+        self.claudeQuestions = claudeQuestions
+    }
+
+    public func updatedInput(answering answers: [String: String]) -> JSONValue {
+        var object = toolInput?.objectValue ?? [:]
+        object["answers"] = .object(answers.mapValues { .string($0) })
+        return .object(object)
     }
 }
 
@@ -242,19 +288,22 @@ public struct ApprovalDecision: Equatable, Sendable {
     public var persistRule: ClaudePermissionRule?
     public var sessionRule: ClaudePermissionRule?
     public var permissionUpdates: [JSONValue]
+    public var updatedInput: JSONValue?
 
     public init(
         behavior: Behavior,
         feedbackText: String? = nil,
         persistRule: ClaudePermissionRule? = nil,
         sessionRule: ClaudePermissionRule? = nil,
-        permissionUpdates: [JSONValue] = []
+        permissionUpdates: [JSONValue] = [],
+        updatedInput: JSONValue? = nil
     ) {
         self.behavior = behavior
         self.feedbackText = feedbackText
         self.persistRule = persistRule
         self.sessionRule = sessionRule
         self.permissionUpdates = permissionUpdates
+        self.updatedInput = updatedInput
     }
 
     public static let allowOnce = ApprovalDecision(behavior: .allow)
@@ -288,6 +337,10 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         mcpTool: String?,
         permissionSuggestions: [JSONValue] = []
     ) -> [ApprovalAction] {
+        if toolName == "AskUserQuestion" {
+            return []
+        }
+
         let permissionSuggestion = bestAllowPermissionSuggestion(in: permissionSuggestions)
         var actions = [
             ApprovalAction(

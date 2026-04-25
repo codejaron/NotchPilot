@@ -95,6 +95,44 @@ final class HookResponseEncoderTests: XCTestCase {
         )
     }
 
+    func testClaudePreToolUseAllowCanReturnUpdatedAskUserQuestionInput() throws {
+        let decision = ApprovalDecision(
+            behavior: .allow,
+            updatedInput: .object([
+                "questions": .array([
+                    .object([
+                        "question": .string("这次重设计的覆盖范围是？"),
+                        "options": .array([
+                            .object(["label": .string("全套 UI 一次性重做（推荐）")]),
+                        ]),
+                    ]),
+                ]),
+                "answers": .object([
+                    "这次重设计的覆盖范围是？": .string("全套 UI 一次性重做（推荐）"),
+                ]),
+            ])
+        )
+
+        let data = try HookResponseEncoder().encode(
+            decision: decision,
+            for: .claude,
+            eventType: .preToolUse
+        )
+
+        guard
+            let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let output = parsed["hookSpecificOutput"] as? [String: Any],
+            let updatedInput = output["updatedInput"] as? [String: Any],
+            let answers = updatedInput["answers"] as? [String: String]
+        else {
+            return XCTFail("expected PreToolUse updatedInput")
+        }
+
+        XCTAssertEqual(output["hookEventName"] as? String, "PreToolUse")
+        XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+        XCTAssertEqual(answers["这次重设计的覆盖范围是？"], "全套 UI 一次性重做（推荐）")
+    }
+
     func testClaudePreToolUseDenyWithFeedbackPassesReasonThrough() throws {
         let decision = ApprovalDecision(behavior: .deny, feedbackText: "Please use ripgrep instead")
         let data = try HookResponseEncoder().encode(
