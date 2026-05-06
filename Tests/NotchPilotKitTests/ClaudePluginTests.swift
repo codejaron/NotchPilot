@@ -832,6 +832,157 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testPreToolUseWithNormalizedCommandStillClearsPendingApproval() {
+        let plugin = ClaudePlugin()
+        let permissionResponseBox = SplitResponseBox()
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-normalized-permission",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-normalized",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo normalized" }
+                }
+                """
+            ),
+            respond: { data in
+                permissionResponseBox.data = data
+            }
+        )
+
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-normalized-permission"])
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-normalized-pretool",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-normalized",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "  echo normalized\\n" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
+    }
+
+    @MainActor
+    func testPreToolUseWithDifferingCommandResolvesWhenSinglePendingForSession() {
+        let plugin = ClaudePlugin()
+        let permissionResponseBox = SplitResponseBox()
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-fallback-permission",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-fallback",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo original" }
+                }
+                """
+            ),
+            respond: { data in
+                permissionResponseBox.data = data
+            }
+        )
+
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-fallback-permission"])
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-fallback-pretool",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-fallback",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo rewritten-by-claude" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
+    }
+
+    @MainActor
+    func testStopEventReleasesHeldResponderAndClearsPendingApprovalForSession() {
+        let bus = EventBus()
+        let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
+        let permissionResponseBox = SplitResponseBox()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-stop-permission",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-stop-pending",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo deny-in-claude-desktop" }
+                }
+                """
+            ),
+            respond: { data in
+                permissionResponseBox.data = data
+            }
+        )
+
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-stop-permission"])
+        XCTAssertNil(permissionResponseBox.data)
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .sneakPeekRequested = event { return true }
+            return false
+        })
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-stop-event",
+                rawJSON: """
+                {
+                  "hook_event_name": "Stop",
+                  "session_id": "claude-session-stop-pending"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
     func testDenyReturnsDenyAndClearsPendingApproval() {
         let plugin = ClaudePlugin()
         let responseBox = SplitResponseBox()

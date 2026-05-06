@@ -18,7 +18,7 @@ public enum HookInstallError: LocalizedError {
 }
 
 public struct HookInstaller {
-    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 2"
+    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 3"
 
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
@@ -203,7 +203,7 @@ public struct HookInstaller {
                         [
                             "type": "command",
                             "command": command,
-                            "timeout": 300,
+                            "timeout": 30,
                         ],
                     ],
                 ],

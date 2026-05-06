@@ -2,8 +2,8 @@ import CoreGraphics
 
 @MainActor
 struct NotchLayoutMetrics {
-    static let closedInteractionHorizontalPadding: CGFloat = 30
-    static let closedInteractionBottomPadding: CGFloat = 10
+    static let closedInteractionHorizontalPadding: CGFloat = 0
+    static let closedInteractionBottomPadding: CGFloat = 0
 
     let displaySize: CGSize
     let interactionSize: CGSize

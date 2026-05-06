@@ -6,7 +6,7 @@ public struct NotchContentView: View {
     private let closeSpring = Animation.spring(response: 0.32, dampingFraction: 0.95, blendDuration: 0)
     private let closedCornerInsets = (top: CGFloat(6), bottom: CGFloat(14))
     private let openedCornerInsets = (top: CGFloat(19), bottom: CGFloat(24))
-    private let hoverClosedExpansion = CGSize(width: 22, height: 6)
+    private let hoverClosedExpansion = CGSize.zero
 
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager

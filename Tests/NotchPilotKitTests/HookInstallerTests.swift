@@ -134,6 +134,23 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(preToolEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
     }
 
+    func testInstallClaudeHooksUsesShortPermissionRequestTimeoutToBoundStuckApprovals() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installClaudeHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let json = try loadJSONObject(at: claudeDirectory.appendingPathComponent("settings.json"))
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let permissionEntries = try XCTUnwrap(hooks["PermissionRequest"] as? [[String: Any]])
+        let permissionHooks = permissionEntries
+            .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+        let timeouts = permissionHooks.compactMap { $0["timeout"] as? Int }
+
+        XCTAssertEqual(timeouts, [30])
+    }
+
     func testInstallClaudeHooksReplacesManagedPreToolUseEntries() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)

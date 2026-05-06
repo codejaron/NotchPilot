@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class NotchLayoutMetricsTests: XCTestCase {
-    func testIdleClosedInteractionSizeUsesMinimalShellWidth() {
+    func testIdleClosedInteractionSizeMatchesVisibleNotchFrame() {
         let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
 
         let metrics = NotchLayoutMetrics.resolve(
@@ -14,8 +14,8 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         XCTAssertEqual(metrics.displaySize.width, 236, accuracy: 0.1)
         XCTAssertEqual(metrics.displaySize.height, 38, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.width, 296, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.height, 48, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.width, 236, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.height, 38, accuracy: 0.1)
     }
 
     func testOpenInteractionSizeMatchesExpandedContent() {
@@ -49,8 +49,8 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         let interactionFrame = session.interactionFrame(for: metrics.interactionSize)
 
-        XCTAssertEqual(interactionFrame.width, 296, accuracy: 0.1)
-        XCTAssertEqual(interactionFrame.height, 48, accuracy: 0.1)
+        XCTAssertEqual(interactionFrame.width, 236, accuracy: 0.1)
+        XCTAssertEqual(interactionFrame.height, 38, accuracy: 0.1)
         XCTAssertEqual(interactionFrame.midX, session.windowFrame.midX, accuracy: 0.1)
         XCTAssertEqual(interactionFrame.maxY, session.windowFrame.maxY, accuracy: 0.1)
     }
@@ -77,7 +77,7 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         XCTAssertEqual(metrics.displaySize.width, 410, accuracy: 0.1)
         XCTAssertEqual(metrics.displaySize.height, 38, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.width, 470, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.width, 410, accuracy: 0.1)
     }
 
     func testPreviewClosedUsesWinningPluginPreviewHeight() {
@@ -101,7 +101,7 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         XCTAssertEqual(metrics.displaySize.width, 360, accuracy: 0.1)
         XCTAssertEqual(metrics.displaySize.height, 72, accuracy: 0.1)
-        XCTAssertEqual(metrics.interactionSize.height, 82, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.height, 72, accuracy: 0.1)
     }
 
     private func makeSession(closedNotchSize: CGSize) -> ScreenSessionModel {

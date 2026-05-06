@@ -13,8 +13,8 @@ public final class ScreenSessionModel: ObservableObject {
     private static let fallbackExpandedSize = CGSize(width: 720, height: 240)
     private static let hoverOpenDelay: Duration = .milliseconds(300)
     private static let hoverCloseDelay: Duration = .milliseconds(100)
-    private static let horizontalHoverPadding: CGFloat = 30
-    private static let bottomHoverPadding: CGFloat = 10
+    private static let horizontalHoverPadding: CGFloat = 0
+    private static let bottomHoverPadding: CGFloat = 0
     private static let shadowPadding: CGFloat = 20
 
     @Published public private(set) var descriptor: ScreenDescriptor

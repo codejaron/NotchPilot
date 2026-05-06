@@ -11,7 +11,7 @@ from typing import Optional
 import uuid
 
 
-NOTCHPILOT_BRIDGE_VERSION = 2
+NOTCHPILOT_BRIDGE_VERSION = 3
 DEFAULT_SOCKET_PATH = "/tmp/notchpilot.sock"
 TERMINAL_BUNDLE_IDS = {
     "Apple_Terminal": "com.apple.Terminal",

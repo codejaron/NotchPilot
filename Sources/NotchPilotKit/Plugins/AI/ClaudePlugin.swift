@@ -121,6 +121,7 @@ public final class ClaudePlugin: AIPluginRendering {
 
             if envelope.eventType == .stop {
                 sessionScopedApprovalStore.clearSession(envelope.sessionID)
+                expirePendingApprovals(forSessionID: envelope.sessionID)
             }
 
             if envelope.needsResponse,
@@ -191,12 +192,22 @@ public final class ClaudePlugin: AIPluginRendering {
             return false
         }
 
-        let requestIDs = runtime.pendingApprovals
-            .filter { approval in
-                approval.sessionID == envelope.sessionID
-                    && observedToolUse.matches(approval.payload)
-            }
+        let sessionApprovals = runtime.pendingApprovals.filter { approval in
+            approval.sessionID == envelope.sessionID
+        }
+
+        var requestIDs = sessionApprovals
+            .filter { observedToolUse.matches($0.payload) }
             .map(\.requestID)
+
+        if requestIDs.isEmpty,
+           let observedName = observedToolUse.toolName {
+            let sameToolApprovals = sessionApprovals
+                .filter { $0.payload.toolName == observedName }
+            if sameToolApprovals.count == 1 {
+                requestIDs = sameToolApprovals.map(\.requestID)
+            }
+        }
 
         guard requestIDs.isEmpty == false else {
             return false
@@ -210,6 +221,23 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         return true
+    }
+
+    private func expirePendingApprovals(forSessionID sessionID: String) {
+        let staleRequestIDs = runtime.pendingApprovals
+            .filter { $0.sessionID == sessionID }
+            .map(\.requestID)
+
+        guard staleRequestIDs.isEmpty == false else {
+            return
+        }
+
+        for requestID in staleRequestIDs {
+            if let responder = responders.removeValue(forKey: requestID) {
+                responder(Data("{}".utf8))
+            }
+            _ = runtime.expirePendingApproval(requestID: requestID)
+        }
     }
 
     private func isExternalApprovalCompletionEvent(_ eventType: AIBridgeEventType) -> Bool {
@@ -620,18 +648,33 @@ private struct ClaudeObservedToolUse {
         }
 
         if let command {
-            return payload.command == command || payload.previewText == command
+            return Self.fuzzyEquals(payload.command, command)
+                || Self.fuzzyEquals(payload.previewText, command)
         }
 
         if let filePath {
-            return payload.filePath == filePath || payload.previewText == filePath
+            return Self.fuzzyEquals(payload.filePath, filePath)
+                || Self.fuzzyEquals(payload.previewText, filePath)
         }
 
         if let webFetchURL {
-            return payload.webFetchURL == webFetchURL || payload.previewText == webFetchURL
+            return Self.fuzzyEquals(payload.webFetchURL, webFetchURL)
+                || Self.fuzzyEquals(payload.previewText, webFetchURL)
         }
 
         return toolName != nil
+    }
+
+    private static func fuzzyEquals(_ lhs: String?, _ rhs: String) -> Bool {
+        guard let lhs else {
+            return false
+        }
+        if lhs == rhs {
+            return true
+        }
+        let trimmedLHS = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRHS = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedLHS == trimmedRHS && trimmedRHS.isEmpty == false
     }
 
     private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {

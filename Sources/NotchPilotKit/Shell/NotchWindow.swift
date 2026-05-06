@@ -20,7 +20,7 @@ public final class NotchWindow: NSPanel {
     private let pluginManager: PluginManager
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
-    private var lastHoverState = false
+    private var lastHoverState: Bool?
     private var pluginObserver: AnyCancellable?
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
@@ -111,14 +111,14 @@ public final class NotchWindow: NSPanel {
         ]
 
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) { [weak self] event in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 self?.updateMouseInteraction()
             }
             return event
         }
 
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 self?.updateMouseInteraction()
             }
         }
@@ -148,13 +148,12 @@ public final class NotchWindow: NSPanel {
         let interactionFrame = session.interactionFrame(for: metrics.interactionSize)
         let hovering = interactionFrame.contains(NSEvent.mouseLocation)
 
-        ignoresMouseEvents = !hovering
-
         guard hovering != lastHoverState else {
             return
         }
 
         lastHoverState = hovering
+        ignoresMouseEvents = !hovering
         session.setHover(hovering, fallbackPluginID: pluginManager.enabledPlugins.first?.id)
     }
 }
