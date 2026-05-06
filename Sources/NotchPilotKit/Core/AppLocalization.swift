@@ -20,6 +20,9 @@ enum AppTextKey {
     case general
     case approval
     case application
+    case startup
+    case launchAtLogin
+    case launchAtLoginDetail
     case language
     case interfaceLanguage
     case interfaceLanguageDetail
@@ -441,6 +444,12 @@ enum AppStrings {
             return "审批"
         case .application:
             return "应用"
+        case .startup:
+            return "启动"
+        case .launchAtLogin:
+            return "开机自动启动"
+        case .launchAtLoginDetail:
+            return "登录到 Mac 时自动运行 NotchPilot。"
         case .language:
             return "语言"
         case .interfaceLanguage:
@@ -620,6 +629,12 @@ enum AppStrings {
             return "Approval"
         case .application:
             return "Application"
+        case .startup:
+            return "Startup"
+        case .launchAtLogin:
+            return "Launch at Login"
+        case .launchAtLoginDetail:
+            return "Automatically start NotchPilot when you log in to your Mac."
         case .language:
             return "Language"
         case .interfaceLanguage:

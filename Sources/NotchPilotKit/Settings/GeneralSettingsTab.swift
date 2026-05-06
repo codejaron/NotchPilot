@@ -19,6 +19,14 @@ struct GeneralSettingsTab: View {
                 }
             }
 
+            SettingsGroupSection(title: AppStrings.text(.startup, language: store.interfaceLanguage)) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.launchAtLogin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.launchAtLoginDetail, language: store.interfaceLanguage),
+                    isOn: $store.launchAtLoginEnabled
+                )
+            }
+
             SettingsGroupSection(title: AppStrings.text(.approval, language: store.interfaceLanguage)) {
                 SettingsToggleRow(
                     title: AppStrings.text(.displayApprovalSneakNotifications, language: store.interfaceLanguage),

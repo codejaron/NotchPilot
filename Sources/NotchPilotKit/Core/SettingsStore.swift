@@ -28,6 +28,8 @@ public final class SettingsStore: ObservableObject {
     private let defaults: UserDefaults
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
+    private let launchAtLoginController: LaunchAtLoginControlling
+    private var isSyncingLaunchAtLogin = false
 
     @Published public var claudeHookInstalled: Bool {
         didSet { defaults.set(claudeHookInstalled, forKey: Key.claudeHookInstalled) }
@@ -47,6 +49,20 @@ public final class SettingsStore: ObservableObject {
         didSet {
             defaults.set(autoStartSocket, forKey: Key.autoStartSocket)
             NotificationCenter.default.post(name: .bridgeSocketPreferenceChanged, object: autoStartSocket)
+        }
+    }
+
+    @Published public var launchAtLoginEnabled: Bool {
+        didSet {
+            guard isSyncingLaunchAtLogin == false else { return }
+            do {
+                try launchAtLoginController.setEnabled(launchAtLoginEnabled)
+            } catch {
+                NSLog("NotchPilot failed to update login item: \(error.localizedDescription)")
+                isSyncingLaunchAtLogin = true
+                launchAtLoginEnabled = oldValue
+                isSyncingLaunchAtLogin = false
+            }
         }
     }
 
@@ -140,7 +156,8 @@ public final class SettingsStore: ObservableObject {
     public init(
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
-        homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        launchAtLoginController: LaunchAtLoginControlling = SMAppServiceLaunchAtLoginController()
     ) {
         let codexInstalled = CodexDesktopAppDetector(
             fileManager: fileManager,
@@ -150,6 +167,8 @@ public final class SettingsStore: ObservableObject {
         self.defaults = defaults
         self.fileManager = fileManager
         self.homeDirectoryURL = homeDirectoryURL
+        self.launchAtLoginController = launchAtLoginController
+        self.launchAtLoginEnabled = launchAtLoginController.isEnabled()
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
         self.claudeHooksNeedUpdate = false
         self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
@@ -180,6 +199,14 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =
             defaults.object(forKey: Key.codexPluginEnabled) as? Bool ?? true
+    }
+
+    public func refreshLaunchAtLoginState() {
+        let actual = launchAtLoginController.isEnabled()
+        guard launchAtLoginEnabled != actual else { return }
+        isSyncingLaunchAtLogin = true
+        launchAtLoginEnabled = actual
+        isSyncingLaunchAtLogin = false
     }
 
     public func synchronizeInstallationState() {

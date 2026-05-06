@@ -122,6 +122,10 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
 #endif
     }
 
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        SettingsStore.shared.refreshLaunchAtLoginState()
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         if let settingsObserver {
             NotificationCenter.default.removeObserver(settingsObserver)

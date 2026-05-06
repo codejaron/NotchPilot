@@ -277,4 +277,93 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertEqual(store.interfaceLanguage, .zhHans)
     }
+
+    @MainActor
+    func testLaunchAtLoginInitialStateMirrorsController() {
+        let controller = FakeLaunchAtLoginController(enabled: true)
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            launchAtLoginController: controller
+        )
+
+        XCTAssertTrue(store.launchAtLoginEnabled)
+    }
+
+    @MainActor
+    func testLaunchAtLoginToggleForwardsRegistrationToController() {
+        let controller = FakeLaunchAtLoginController(enabled: false)
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            launchAtLoginController: controller
+        )
+
+        store.launchAtLoginEnabled = true
+
+        XCTAssertEqual(controller.setEnabledCalls, [true])
+        XCTAssertTrue(controller.enabled)
+
+        store.launchAtLoginEnabled = false
+
+        XCTAssertEqual(controller.setEnabledCalls, [true, false])
+        XCTAssertFalse(controller.enabled)
+    }
+
+    @MainActor
+    func testLaunchAtLoginRevertsOnControllerError() {
+        let controller = FakeLaunchAtLoginController(enabled: false)
+        controller.errorToThrow = NSError(domain: "test", code: 1)
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            launchAtLoginController: controller
+        )
+
+        store.launchAtLoginEnabled = true
+
+        XCTAssertFalse(store.launchAtLoginEnabled)
+        XCTAssertFalse(controller.enabled)
+    }
+
+    @MainActor
+    func testRefreshLaunchAtLoginStateSyncsFromControllerWithoutCallingSetter() {
+        let controller = FakeLaunchAtLoginController(enabled: false)
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            launchAtLoginController: controller
+        )
+
+        controller.enabled = true
+        store.refreshLaunchAtLoginState()
+
+        XCTAssertTrue(store.launchAtLoginEnabled)
+        XCTAssertTrue(controller.setEnabledCalls.isEmpty)
+    }
+}
+
+@MainActor
+private final class FakeLaunchAtLoginController: LaunchAtLoginControlling {
+    var enabled: Bool
+    var errorToThrow: Error?
+    private(set) var setEnabledCalls: [Bool] = []
+
+    init(enabled: Bool = false) {
+        self.enabled = enabled
+    }
+
+    func isEnabled() -> Bool { enabled }
+
+    func setEnabled(_ value: Bool) throws {
+        setEnabledCalls.append(value)
+        if let errorToThrow {
+            throw errorToThrow
+        }
+        enabled = value
+    }
 }
