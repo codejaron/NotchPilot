@@ -40,12 +40,6 @@ final class DesktopLyricsManager {
         )
         self.fileManager = fileManager
         self.lyricsSearchWindowController = lyricsSearchWindowController
-
-        provider.onUpgrade = { [weak self] lyrics, trackKey in
-            guard let self else { return }
-            self.controller.completeLyricsLoad(lyrics, for: trackKey)
-            self.refreshWindows()
-        }
     }
 
     func start() {

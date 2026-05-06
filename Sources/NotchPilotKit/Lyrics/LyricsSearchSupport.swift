@@ -80,22 +80,30 @@ private final class LyricsSearchCandidateLoader<Provider: _LyricsProvider>: @unc
     nonisolated(unsafe) private let provider: Provider
     nonisolated(unsafe) private let token: Provider.LyricsToken
     private let service: String
+    private let fallbackTitle: String
+    private let fallbackArtist: String
 
     init(
         provider: Provider,
         token: Provider.LyricsToken,
-        service: String
+        service: String,
+        fallbackTitle: String,
+        fallbackArtist: String
     ) {
         self.provider = provider
         self.token = token
         self.service = service
+        self.fallbackTitle = fallbackTitle
+        self.fallbackArtist = fallbackArtist
     }
 
     func load() async throws -> TimedLyrics {
         let lyrics = try await provider.fetch(with: token)
         guard let timedLyrics = TimedLyrics(
             lyricsKitLyrics: lyrics,
-            service: service
+            service: service,
+            fallbackTitle: fallbackTitle,
+            fallbackArtist: fallbackArtist
         ) else {
             throw LyricsSearchCandidateLoadingError.invalidLyrics
         }
@@ -255,7 +263,9 @@ enum LyricsKitSearchServices {
                 let loader = LyricsSearchCandidateLoader(
                     provider: unsafeProvider,
                     token: unsafeToken,
-                    service: service
+                    service: service,
+                    fallbackTitle: metadata.title,
+                    fallbackArtist: metadata.artist
                 )
 
                 results.append(

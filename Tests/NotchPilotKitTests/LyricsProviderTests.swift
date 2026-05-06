@@ -192,7 +192,102 @@ final class LyricsProviderTests: XCTestCase {
                 atPath: directoryURL.appendingPathComponent(key.cacheFileName).path
             )
         )
-        XCTAssertEqual(key.cacheFileName, "Artist - Song.json")
+        XCTAssertEqual(key.cacheFileName, "artist - song.json")
+    }
+
+    func testLyricsTrackKeyCacheFileNameIsStableAcrossCasingAndPadding() {
+        let canonical = LyricsTrackKey(title: "Yellow", artist: "Coldplay", album: "", duration: 200)
+        let variantCase = LyricsTrackKey(title: "YELLOW", artist: "coldplay", album: "", duration: 200)
+        let variantPadding = LyricsTrackKey(title: " Yellow ", artist: "  Coldplay ", album: "", duration: 200)
+        let variantPunctuation = LyricsTrackKey(title: "Yellow!", artist: "Coldplay.", album: "", duration: 200)
+
+        XCTAssertEqual(canonical.cacheFileName, variantCase.cacheFileName)
+        XCTAssertEqual(canonical.cacheFileName, variantPadding.cacheFileName)
+        XCTAssertEqual(canonical.cacheFileName, variantPunctuation.cacheFileName)
+    }
+
+    @MainActor
+    func testCachedLyricsProviderDoesNotInvokeRemoteOnCacheHit() async {
+        let cachedLyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [TimedLyricLine(timestamp: 0, text: "cached")]
+        )
+        let cache = TestLyricsCache(loadedLyrics: cachedLyrics)
+        let remote = TestLyricsProvider(result: nil)
+        let provider = CachedLyricsProvider(cache: cache, remoteProvider: remote)
+
+        _ = await provider.lyrics(for: Self.snapshot())
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(remote.requestedSnapshots.count, 0)
+        XCTAssertNil(cache.savedLyrics)
+    }
+
+    @MainActor
+    func testCachedLyricsProviderDoesNotOverwriteCacheAfterMissReturn() async {
+        let lyricsWithoutInlineTags = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "remote", inlineTags: nil)]
+        )
+        let cache = TestLyricsCache(loadedLyrics: nil)
+        let remote = TestLyricsProvider(result: lyricsWithoutInlineTags)
+        let provider = CachedLyricsProvider(cache: cache, remoteProvider: remote)
+
+        _ = await provider.lyrics(for: Self.snapshot())
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(remote.requestedSnapshots.count, 1)
+        XCTAssertEqual(cache.savedLyrics, lyricsWithoutInlineTags)
+        XCTAssertEqual(cache.saveCallCount, 1, "Cache must not be touched again after the initial save")
+    }
+
+    func testTimedLyricsFallsBackToProvidedTitleAndArtistWhenIdTagsAreMissing() throws {
+        let lyrics = Lyrics(
+            lines: [LyricsLine(content: "line", position: 1)],
+            idTags: [:]
+        )
+
+        let timedLyrics = try XCTUnwrap(
+            TimedLyrics(
+                lyricsKitLyrics: lyrics,
+                service: "NetEase",
+                fallbackTitle: "Fallback Song",
+                fallbackArtist: "Fallback Artist"
+            )
+        )
+
+        XCTAssertEqual(timedLyrics.title, "Fallback Song")
+        XCTAssertEqual(timedLyrics.artist, "Fallback Artist")
+    }
+
+    func testTimedLyricsPrefersIdTagsOverFallbackWhenPresent() throws {
+        let lyrics = Lyrics(
+            lines: [LyricsLine(content: "line", position: 1)],
+            idTags: [
+                .title: "Real Title",
+                .artist: "Real Artist",
+            ]
+        )
+
+        let timedLyrics = try XCTUnwrap(
+            TimedLyrics(
+                lyricsKitLyrics: lyrics,
+                service: "QQMusic",
+                fallbackTitle: "Fallback",
+                fallbackArtist: "Fallback"
+            )
+        )
+
+        XCTAssertEqual(timedLyrics.title, "Real Title")
+        XCTAssertEqual(timedLyrics.artist, "Real Artist")
     }
 
     func testLyricsCacheRemovesPersistedLyrics() throws {
@@ -339,6 +434,7 @@ final class LyricsProviderTests: XCTestCase {
 private final class TestLyricsCache: LyricsCaching {
     var loadedLyrics: TimedLyrics?
     private(set) var savedLyrics: TimedLyrics?
+    private(set) var saveCallCount: Int = 0
 
     init(loadedLyrics: TimedLyrics?) {
         self.loadedLyrics = loadedLyrics
@@ -350,6 +446,7 @@ private final class TestLyricsCache: LyricsCaching {
 
     func saveLyrics(_ lyrics: TimedLyrics, for key: LyricsTrackKey) throws {
         savedLyrics = lyrics
+        saveCallCount += 1
     }
 
     func fileURL(for key: LyricsTrackKey) -> URL {

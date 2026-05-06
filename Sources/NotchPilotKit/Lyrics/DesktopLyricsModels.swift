@@ -6,8 +6,6 @@ struct LyricsTrackKey: Sendable {
     let artist: String
     let album: String
     let roundedDuration: Int?
-    private let displayTitle: String
-    private let displayArtist: String
 
     init(title: String, artist: String, album: String, duration: TimeInterval?) {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,8 +15,6 @@ struct LyricsTrackKey: Sendable {
         self.artist = Self.normalize(trimmedArtist)
         self.album = Self.normalize(album)
         self.roundedDuration = duration.map { Int($0.rounded()) }
-        self.displayTitle = trimmedTitle
-        self.displayArtist = trimmedArtist
     }
 
     init(snapshot: MediaPlaybackSnapshot) {
@@ -31,14 +27,12 @@ struct LyricsTrackKey: Sendable {
     }
 
     var cacheFileName: String {
-        let readableStem = [displayArtist, displayTitle]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let stem = [artist, title]
             .filter { $0.isEmpty == false }
             .joined(separator: " - ")
             .sanitizedFileNameComponent
 
-        return (readableStem.isEmpty ? storageIdentifier.replacingOccurrences(of: "|", with: " - ") : readableStem)
-            + ".json"
+        return (stem.isEmpty ? "Lyrics" : stem) + ".json"
     }
 
     var storageIdentifier: String {
@@ -198,9 +192,20 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             .sorted { $0.timestamp < $1.timestamp }
     }
 
-    init?(lyricsKitLyrics lyrics: Lyrics, service: String) {
-        let title = lyrics.idTags[.title]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let artist = lyrics.idTags[.artist]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    init?(
+        lyricsKitLyrics lyrics: Lyrics,
+        service: String,
+        fallbackTitle: String = "",
+        fallbackArtist: String = ""
+    ) {
+        let rawTitle = lyrics.idTags[.title]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawArtist = lyrics.idTags[.artist]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = rawTitle.isEmpty
+            ? fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            : rawTitle
+        let artist = rawArtist.isEmpty
+            ? fallbackArtist.trimmingCharacters(in: .whitespacesAndNewlines)
+            : rawArtist
 
         guard title.isEmpty == false, artist.isEmpty == false else {
             return nil
