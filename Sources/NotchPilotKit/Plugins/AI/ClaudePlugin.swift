@@ -151,8 +151,12 @@ public final class ClaudePlugin: AIPluginRendering {
             switch result {
             case let .respondNow(data):
                 respond(data)
+                if envelope.eventType == .stop {
+                    SoundManager.shared.play(.taskComplete)
+                }
             case let .awaitDecision(requestID):
                 responders[requestID] = respond
+                SoundManager.shared.play(.inputRequired)
             }
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."

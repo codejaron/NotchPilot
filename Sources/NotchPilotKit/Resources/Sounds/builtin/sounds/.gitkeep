@@ -1,0 +1,5 @@
+# Placeholder so SwiftPM includes the empty sounds/ directory in the resource bundle.
+# User should place Kenney CC0 .wav files here:
+#   - confirmation_002.wav  (task.complete)
+#   - question_002.wav      (input.required)
+# Download: https://kenney.nl/assets/interface-sounds

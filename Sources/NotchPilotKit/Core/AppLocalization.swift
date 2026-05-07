@@ -126,6 +126,13 @@ enum AppTextKey {
     case skip
     case commandApprovalSummary
     case fileChangeApprovalSummary
+    case soundFeedback
+    case enableSounds
+    case enableSoundsDetail
+    case soundTaskCompleteVolume
+    case soundTaskCompleteVolumeDetail
+    case soundInputRequiredVolume
+    case soundInputRequiredVolumeDetail
 }
 
 enum AppConnectionStatus {
@@ -707,6 +714,20 @@ enum AppStrings {
             return "是否运行以下命令？"
         case .fileChangeApprovalSummary:
             return "是否应用以下编辑？"
+        case .soundFeedback:
+            return "声音反馈"
+        case .enableSounds:
+            return "启用声音"
+        case .enableSoundsDetail:
+            return "AI 任务完成或等待审批时播放声音。"
+        case .soundTaskCompleteVolume:
+            return "任务完成音量"
+        case .soundTaskCompleteVolumeDetail:
+            return "调整 AI 任务完成时提示音的音量。"
+        case .soundInputRequiredVolume:
+            return "等待审批音量"
+        case .soundInputRequiredVolumeDetail:
+            return "调整 AI 请求审批或输入时提示音的音量。"
         }
     }
 
@@ -925,9 +946,23 @@ enum AppStrings {
         case .skip:
             return "Skip"
         case .commandApprovalSummary:
-            return "Would you like to run the following command?"
+            return "Run the following command?"
         case .fileChangeApprovalSummary:
-            return "Would you like to make the following edits?"
+            return "Apply the following edits?"
+        case .soundFeedback:
+            return "Sound Feedback"
+        case .enableSounds:
+            return "Enable Sounds"
+        case .enableSoundsDetail:
+            return "Play a sound when an AI task completes or asks for approval."
+        case .soundTaskCompleteVolume:
+            return "Task Complete Volume"
+        case .soundTaskCompleteVolumeDetail:
+            return "Volume of the cue played when an AI task finishes."
+        case .soundInputRequiredVolume:
+            return "Approval Request Volume"
+        case .soundInputRequiredVolumeDetail:
+            return "Volume of the cue played when AI asks for approval or input."
         }
     }
 }

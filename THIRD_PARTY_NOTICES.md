@@ -61,6 +61,46 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Kenney Interface Sounds
+
+- Project: `Kenney's Interface Sounds`
+- Upstream: <https://kenney.nl/assets/interface-sounds>
+- License: `CC0-1.0` (Creative Commons Zero — public domain dedication)
+
+NotchPilot bundles a small subset of Kenney's Interface Sounds under
+`Sources/NotchPilotKit/Resources/Sounds/builtin/sounds/` to provide an
+out-of-the-box audio feedback experience. The full pack and license terms
+are available from the upstream URL above.
+
+CC0 does not require attribution, but Kenney explicitly invites credit, and
+NotchPilot is grateful for the work.
+
+### Creative Commons CC0 1.0 Universal Summary
+
+```text
+The person who associated a work with this deed has dedicated the work to the
+public domain by waiving all of their rights to the work worldwide under
+copyright law, including all related and neighboring rights, to the extent
+allowed by law.
+
+You can copy, modify, distribute and perform the work, even for commercial
+purposes, all without asking permission.
+
+Full text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+```
+
+## OpenPeon CESP Standard
+
+- Project: `PeonPing/openpeon`
+- Upstream: <https://github.com/PeonPing/openpeon>
+- Specification: <https://openpeon.com/spec>
+- License: `MIT`
+
+NotchPilot implements the OpenPeon CESP v1.0 sound pack specification so users
+can install third-party packs from the OpenPeon registry without modification.
+No OpenPeon source code is vendored; only the `openpeon.json` manifest format
+is consumed.
+
 ## MediaRemoteAdapter
 
 - Project: `ungive/mediaremote-adapter`

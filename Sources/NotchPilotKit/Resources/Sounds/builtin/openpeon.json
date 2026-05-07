@@ -1,0 +1,32 @@
+{
+  "cesp_version": "1.0",
+  "name": "notchpilot-builtin",
+  "display_name": "NotchPilot (Kenney UI)",
+  "version": "1.0.0",
+  "description": "Default sound pack bundled with NotchPilot, sourced from Kenney's Interface Sounds (CC0).",
+  "author": {
+    "name": "Kenney",
+    "github": "KenneyNL"
+  },
+  "license": "CC0-1.0",
+  "language": "en",
+  "homepage": "https://kenney.nl/assets/interface-sounds",
+  "categories": {
+    "task.complete": {
+      "sounds": [
+        {
+          "file": "sounds/confirmation_002.wav",
+          "label": "Confirmation"
+        }
+      ]
+    },
+    "input.required": {
+      "sounds": [
+        {
+          "file": "sounds/question_002.wav",
+          "label": "Question"
+        }
+      ]
+    }
+  }
+}

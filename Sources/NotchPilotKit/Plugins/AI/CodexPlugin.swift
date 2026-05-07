@@ -31,6 +31,13 @@ public final class CodexPlugin: AIPluginRendering {
     private var codexThreads: CodexThreadRegistry
     private var rawCodexActionableSurface: CodexActionableSurface?
     private var settingsCancellables: Set<AnyCancellable> = []
+    /// Tracks per-thread phase so we only fire `task.complete` on the
+    /// edge of a transition into `.completed` (not every refresh).
+    private var lastSeenPhasesByThreadID: [String: CodexThreadPhase] = [:]
+    /// Tracks the last actionable surface id so we only fire
+    /// `input.required` when a new surface appears (or replaces a different
+    /// one), not on every nil → nil refresh.
+    private var lastSeenSurfaceID: String?
 
     public init(
         settingsStore: SettingsStore = .shared,
@@ -111,6 +118,8 @@ public final class CodexPlugin: AIPluginRendering {
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
+        lastSeenPhasesByThreadID.removeAll()
+        lastSeenSurfaceID = nil
         bus = nil
     }
 
@@ -342,9 +351,18 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func handleCodexThreadContextChange(_ update: CodexThreadUpdate) {
+        let threadID = update.context.threadID
+        let previousPhase = lastSeenPhasesByThreadID[threadID]
+        let nextPhase = update.context.phase
+
         codexThreads.apply(update)
         syncState()
         syncSneakPeek()
+
+        lastSeenPhasesByThreadID[threadID] = nextPhase
+        if previousPhase != .completed, nextPhase == .completed {
+            SoundManager.shared.play(.taskComplete)
+        }
     }
 
     private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
@@ -352,9 +370,17 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func handleCodexSurfaceChange(_ surface: CodexActionableSurface?) {
+        let previousSurfaceID = lastSeenSurfaceID
+        let newSurfaceID = surface?.id
+
         rawCodexActionableSurface = surface
         syncState()
         syncSneakPeek()
+
+        lastSeenSurfaceID = newSurfaceID
+        if let newSurfaceID, newSurfaceID != previousSurfaceID {
+            SoundManager.shared.play(.inputRequired)
+        }
     }
 
     private func optimisticallyUpdateCodexSurface(

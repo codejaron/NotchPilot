@@ -31,6 +31,11 @@ public final class SettingsStore: ObservableObject {
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
         static let interfaceLanguage = "app.interfaceLanguage"
+        static let soundEnabled = "sound.enabled"
+        static let soundVolume = "sound.volume"
+        static let soundTaskCompleteVolume = "sound.taskCompleteVolume"
+        static let soundInputRequiredVolume = "sound.inputRequiredVolume"
+        static let soundActivePackID = "sound.activePackID"
     }
 
     private let defaults: UserDefaults
@@ -156,6 +161,30 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var soundEnabled: Bool {
+        didSet {
+            defaults.set(soundEnabled, forKey: Key.soundEnabled)
+        }
+    }
+
+    @Published public var soundTaskCompleteVolume: Double {
+        didSet {
+            defaults.set(soundTaskCompleteVolume, forKey: Key.soundTaskCompleteVolume)
+        }
+    }
+
+    @Published public var soundInputRequiredVolume: Double {
+        didSet {
+            defaults.set(soundInputRequiredVolume, forKey: Key.soundInputRequiredVolume)
+        }
+    }
+
+    @Published public var soundActivePackID: String {
+        didSet {
+            defaults.set(soundActivePackID, forKey: Key.soundActivePackID)
+        }
+    }
+
     public var claudeCodeDetected: Bool {
         fileManager.fileExists(atPath: homeDirectoryURL.appendingPathComponent(".claude", isDirectory: true).path)
     }
@@ -214,6 +243,22 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =
             defaults.object(forKey: Key.codexPluginEnabled) as? Bool ?? true
+        self.soundEnabled =
+            defaults.object(forKey: Key.soundEnabled) as? Bool ?? true
+        // Migrate the legacy unified `sound.volume` value: if the user had a
+        // single volume previously, reuse it as the default for both new
+        // sliders so their preference carries over on first launch.
+        let legacySoundVolume = defaults.object(forKey: Key.soundVolume) as? Double
+        self.soundTaskCompleteVolume =
+            defaults.object(forKey: Key.soundTaskCompleteVolume) as? Double
+            ?? legacySoundVolume
+            ?? 0.6
+        self.soundInputRequiredVolume =
+            defaults.object(forKey: Key.soundInputRequiredVolume) as? Double
+            ?? legacySoundVolume
+            ?? 0.6
+        self.soundActivePackID =
+            defaults.string(forKey: Key.soundActivePackID) ?? ""
     }
 
     public func refreshLaunchAtLoginState() {

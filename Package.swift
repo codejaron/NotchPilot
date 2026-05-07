@@ -27,6 +27,7 @@ let package = Package(
             resources: [
                 .copy("Resources/notch-bridge.py"),
                 .copy("Resources/MediaRemoteAdapter"),
+                .copy("Resources/Sounds"),
                 .process("Resources/Icons"),
             ]
         ),

@@ -35,6 +35,54 @@ struct GeneralSettingsTab: View {
                 )
             }
 
+            SettingsGroupSection(
+                title: AppStrings.text(.soundFeedback, language: store.interfaceLanguage)
+            ) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.enableSounds, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableSoundsDetail, language: store.interfaceLanguage),
+                    isOn: $store.soundEnabled
+                )
+
+                SettingsRowDivider()
+
+                SettingsRow(
+                    title: AppStrings.text(.soundTaskCompleteVolume, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.soundTaskCompleteVolumeDetail, language: store.interfaceLanguage),
+                    isEnabled: store.soundEnabled
+                ) {
+                    HStack(spacing: 8) {
+                        Slider(value: $store.soundTaskCompleteVolume, in: 0 ... 1)
+                            .frame(width: 130)
+                            .disabled(store.soundEnabled == false)
+
+                        Text("\(Int((store.soundTaskCompleteVolume * 100).rounded()))%")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, alignment: .trailing)
+                    }
+                }
+
+                SettingsRowDivider()
+
+                SettingsRow(
+                    title: AppStrings.text(.soundInputRequiredVolume, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.soundInputRequiredVolumeDetail, language: store.interfaceLanguage),
+                    isEnabled: store.soundEnabled
+                ) {
+                    HStack(spacing: 8) {
+                        Slider(value: $store.soundInputRequiredVolume, in: 0 ... 1)
+                            .frame(width: 130)
+                            .disabled(store.soundEnabled == false)
+
+                        Text("\(Int((store.soundInputRequiredVolume * 100).rounded()))%")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, alignment: .trailing)
+                    }
+                }
+            }
+
             SettingsGroupSection(title: AppStrings.text(.application, language: store.interfaceLanguage)) {
                 SettingsActionRow(
                     title: AppStrings.text(.quitAppTitle, language: store.interfaceLanguage),
@@ -47,4 +95,5 @@ struct GeneralSettingsTab: View {
             }
         }
     }
+
 }
