@@ -331,6 +331,274 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertEqual(plugin.sneakConfiguration.rightMetrics, [.battery, .network])
     }
 
+    // MARK: - Sneak mode integration
+
+    func testAmbientModeDoesNotEmitSneakRequestUntilAlertFires() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .ambient,
+            left: [],
+            right: [],
+            reactive: [.memory, .cpu]
+        )
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorStaticSampler(snapshot: Self.calmSnapshot),
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        XCTAssertTrue(
+            receivedEvents.allSatisfy {
+                if case .sneakPeekRequested = $0 { return false }
+                return true
+            },
+            "Ambient mode must not emit a sneak request before any alert fires"
+        )
+        XCTAssertNil(plugin.preview(context: Self.context))
+    }
+
+    func testAmbientModeEmitsSneakRequestWhenAlertFiresAndDismissesWhenCleared() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .ambient,
+            left: [],
+            right: [],
+            reactive: [.memory, .cpu]
+        )
+        let firingSampler = MutableSnapshotSampler(snapshot: Self.memoryHighSnapshot)
+        let plugin = SystemMonitorPlugin(
+            sampler: firingSampler,
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        await plugin.refresh()
+
+        let sneakRequests: [SneakPeekRequest] = receivedEvents.compactMap {
+            if case let .sneakPeekRequested(request) = $0 { return request }
+            return nil
+        }
+        XCTAssertEqual(sneakRequests.count, 1, "Ambient sneak should be emitted once a reactive alert is firing")
+        XCTAssertEqual(sneakRequests.first?.pluginID, plugin.id)
+
+        let preview = plugin.preview(context: Self.context)
+        XCTAssertNotNil(preview)
+
+        firingSampler.storedSnapshot = Self.calmSnapshot
+        await plugin.refresh()
+
+        let dismissals: [UUID] = receivedEvents.compactMap {
+            if case let .dismissSneakPeek(requestID, _) = $0 { return requestID }
+            return nil
+        }
+        XCTAssertEqual(dismissals.last, sneakRequests.first?.id)
+        XCTAssertNil(plugin.preview(context: Self.context))
+    }
+
+    func testPinnedReactiveModeInjectsFiringReactiveMetricIntoRightSlot() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.memory, .temperature]
+        )
+        let firingSampler = MutableSnapshotSampler(snapshot: Self.memoryHighSnapshot)
+        let plugin = SystemMonitorPlugin(
+            sampler: firingSampler,
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+
+        await plugin.refresh()
+
+        let composed = SystemMonitorSneakComposer.compose(
+            base: store.systemMonitorSneakConfiguration,
+            activeAlerts: plugin.activeAlerts
+        )
+        XCTAssertEqual(composed.leftMetrics, [.cpu], "Pinned left slot must remain stable")
+        XCTAssertEqual(composed.rightMetrics.first, .memory, "Firing reactive metric should take priority on the right slot")
+    }
+
+    func testPinnedReactiveModeRevertsRightSlotAfterAlertClears() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.memory]
+        )
+        let firingSampler = MutableSnapshotSampler(snapshot: Self.memoryHighSnapshot)
+        let plugin = SystemMonitorPlugin(
+            sampler: firingSampler,
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+
+        await plugin.refresh()
+        XCTAssertEqual(
+            SystemMonitorSneakComposer.compose(
+                base: store.systemMonitorSneakConfiguration,
+                activeAlerts: plugin.activeAlerts
+            ).rightMetrics.first,
+            .memory
+        )
+
+        firingSampler.storedSnapshot = Self.calmSnapshot
+        await plugin.refresh()
+        XCTAssertEqual(plugin.activeAlerts, [:])
+        XCTAssertEqual(
+            SystemMonitorSneakComposer.compose(
+                base: store.systemMonitorSneakConfiguration,
+                activeAlerts: plugin.activeAlerts
+            ).rightMetrics,
+            [.network],
+            "Right slot must revert to the pinned metric once the alert clears"
+        )
+    }
+
+    func testLoweringCpuThresholdViaSettingsStoreFiresAlertOnNextSnapshotApplication() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .ambient,
+            left: [],
+            right: [],
+            reactive: [.cpu]
+        )
+
+        let cpuHotSnapshot = SystemMonitorSnapshot(
+            cpuUsage: 0.6,
+            memoryPressure: 0.2,
+            memoryUsage: 0.2,
+            downloadBytesPerSecond: 0,
+            uploadBytesPerSecond: 0,
+            temperatureCelsius: 45,
+            diskFreeBytes: 100_000_000_000,
+            batteryPercent: 0.9,
+            blocks: SystemMonitorSnapshot.unavailable.blocks
+        )
+        let firingSampler = MutableSnapshotSampler(snapshot: cpuHotSnapshot)
+        let clock = TestPluginMutableClock(start: Date(timeIntervalSince1970: 0))
+        let engine = SystemMonitorAlertEngine(
+            rules: SystemMonitorAlertRuleCatalog.rules(for: store.systemMonitorAlertThresholds),
+            clock: clock
+        )
+        let plugin = SystemMonitorPlugin(
+            sampler: firingSampler,
+            settingsStore: store,
+            alertEngine: engine
+        )
+
+        // 60% CPU stays under the default 85% threshold even after the
+        // sustain window elapses.
+        clock.advance(by: 10)
+        await plugin.refresh()
+        XCTAssertTrue(plugin.activeAlerts.isEmpty)
+
+        // User drops the CPU threshold to 50%; the plugin rebuilds rules and
+        // re-evaluates against the latest snapshot, so the sustain timer
+        // starts ticking from "now". After the 5s window elapses and another
+        // sample arrives, the rule must fire.
+        store.systemMonitorAlertThresholds = store.systemMonitorAlertThresholds
+            .setting(50, for: .cpu)
+
+        clock.advance(by: 5)
+        await plugin.refresh()
+
+        XCTAssertEqual(plugin.activeAlerts[.cpu]?.metric, .cpu)
+    }
+
+    func testAlwaysOnModePreservesLegacyBehavior() {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .alwaysOn,
+            left: [.cpu, .memory],
+            right: [.network, .temperature]
+        )
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(rules: [], clock: SystemMonitorSystemClock())
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+
+        guard case .sneakPeekRequested = receivedEvents.first else {
+            XCTFail("Always-on mode should emit a sneak request as soon as the plugin activates")
+            return
+        }
+        let composed = SystemMonitorSneakComposer.compose(
+            base: store.systemMonitorSneakConfiguration,
+            activeAlerts: plugin.activeAlerts
+        )
+        XCTAssertEqual(composed.leftMetrics, [.cpu, .memory])
+        XCTAssertEqual(composed.rightMetrics, [.network, .temperature])
+    }
+
+    // MARK: - Fixtures
+
+    private static let memoryWarnRule = SystemMonitorAlertRule(
+        id: "memory.warn",
+        metric: .memory,
+        comparison: .greaterThan,
+        threshold: 70,
+        sustainSeconds: 0,
+        severity: .warn
+    )
+
+    private static let calmSnapshot = SystemMonitorSnapshot(
+        cpuUsage: 0.1,
+        memoryPressure: 0.2,
+        memoryUsage: 0.2,
+        downloadBytesPerSecond: 0,
+        uploadBytesPerSecond: 0,
+        temperatureCelsius: 45,
+        diskFreeBytes: 100_000_000_000,
+        batteryPercent: 0.9,
+        blocks: SystemMonitorSnapshot.unavailable.blocks
+    )
+
+    private static let memoryHighSnapshot = SystemMonitorSnapshot(
+        cpuUsage: 0.1,
+        memoryPressure: 0.92,
+        memoryUsage: 0.95,
+        downloadBytesPerSecond: 0,
+        uploadBytesPerSecond: 0,
+        temperatureCelsius: 50,
+        diskFreeBytes: 100_000_000_000,
+        batteryPercent: 0.9,
+        blocks: SystemMonitorSnapshot.unavailable.blocks
+    )
+
     private static let context = NotchContext(
         screenID: "test-screen",
         notchState: .previewClosed,
@@ -365,5 +633,52 @@ private struct SystemMonitorSlowSampler: SystemMonitorSampling {
     func snapshot() -> SystemMonitorSnapshot {
         Thread.sleep(forTimeInterval: delay)
         return storedSnapshot
+    }
+}
+
+private final class TestPluginMutableClock: SystemMonitorClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+
+    init(start: Date) {
+        self.current = start
+    }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(seconds)
+        lock.unlock()
+    }
+}
+
+private final class MutableSnapshotSampler: SystemMonitorSampling, @unchecked Sendable {
+    private let storage = NSLock()
+    private var current: SystemMonitorSnapshot
+
+    init(snapshot: SystemMonitorSnapshot) {
+        self.current = snapshot
+    }
+
+    var storedSnapshot: SystemMonitorSnapshot {
+        get {
+            storage.lock()
+            defer { storage.unlock() }
+            return current
+        }
+        set {
+            storage.lock()
+            current = newValue
+            storage.unlock()
+        }
+    }
+
+    func snapshot() -> SystemMonitorSnapshot {
+        storedSnapshot
     }
 }

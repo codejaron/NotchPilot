@@ -25,8 +25,107 @@ final class SystemMonitorModelsTests: XCTestCase {
     func testDefaultSneakConfigurationMatchesApprovedLayout() {
         let configuration = SystemMonitorSneakConfiguration.default
 
-        XCTAssertEqual(configuration.leftMetrics, [.cpu, .memory])
-        XCTAssertEqual(configuration.rightMetrics, [.network, .temperature])
+        XCTAssertEqual(configuration.mode, .pinnedReactive)
+        XCTAssertEqual(configuration.leftMetrics, [.cpu])
+        XCTAssertEqual(configuration.rightMetrics, [.network])
+        XCTAssertEqual(
+            configuration.reactiveMetrics,
+            [.memory, .temperature, .battery, .disk]
+        )
+    }
+
+    func testReactiveMetricsExcludePinnedMetricsAutomatically() {
+        let configuration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu, .memory],
+            right: [.network],
+            reactive: [.cpu, .memory, .temperature, .battery]
+        )
+
+        XCTAssertEqual(configuration.reactiveMetrics, [.temperature, .battery])
+    }
+
+    // MARK: - Slot editor regression coverage
+
+    /// Reproduces the user-reported bug: when slot 1 holds `.cpu` and slot 2
+    /// is hidden, replacing slot 1 with `.temperature` must leave slot 2
+    /// hidden instead of pushing `.cpu` into it.
+    func testSlotEditorReplacesSlotInPlaceWhenOtherSlotIsHidden() {
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu],
+            setting: .temperature,
+            at: 0
+        )
+
+        XCTAssertEqual(result, [.temperature])
+    }
+
+    func testSlotEditorReplacesFirstSlotWhenSecondSlotHasMetric() {
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu, .memory],
+            setting: .temperature,
+            at: 0
+        )
+
+        XCTAssertEqual(result, [.temperature, .memory])
+    }
+
+    func testSlotEditorAddsMetricToSecondSlotWhenFirstSlotIsOccupied() {
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu],
+            setting: .memory,
+            at: 1
+        )
+
+        XCTAssertEqual(result, [.cpu, .memory])
+    }
+
+    func testSlotEditorClearsRequestedSlotOnHidden() {
+        let firstSlotCleared = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu, .memory],
+            setting: nil,
+            at: 0
+        )
+        XCTAssertEqual(firstSlotCleared, [.memory])
+
+        let secondSlotCleared = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu, .memory],
+            setting: nil,
+            at: 1
+        )
+        XCTAssertEqual(secondSlotCleared, [.cpu])
+    }
+
+    func testSlotEditorIgnoresHiddenSelectionForUnoccupiedSlot() {
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu],
+            setting: nil,
+            at: 1
+        )
+
+        XCTAssertEqual(result, [.cpu])
+    }
+
+    func testSlotEditorVacatesDuplicateMetricFromOtherSlotOnSameSide() {
+        // Selecting `.cpu` for slot 2 while slot 1 already holds `.cpu` must
+        // remove the duplicate so the side never lists the same metric twice.
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu, .memory],
+            setting: .cpu,
+            at: 1
+        )
+
+        XCTAssertEqual(result, [.cpu])
+    }
+
+    func testSlotEditorIgnoresOutOfRangeIndex() {
+        let result = SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: [.cpu],
+            setting: .memory,
+            at: 5
+        )
+
+        XCTAssertEqual(result, [.cpu])
     }
 
     func testBlockSnapshotCapsTopItemsAtFive() {

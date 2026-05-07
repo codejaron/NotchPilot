@@ -131,13 +131,20 @@ final class SettingsStoreTests: XCTestCase {
         )
 
         XCTAssertTrue(store.systemMonitorSneakPreviewEnabled)
-        XCTAssertEqual(store.systemMonitorSneakConfiguration.leftMetrics, [.cpu, .memory])
-        XCTAssertEqual(store.systemMonitorSneakConfiguration.rightMetrics, [.network, .temperature])
+        XCTAssertEqual(store.systemMonitorSneakConfiguration.mode, .pinnedReactive)
+        XCTAssertEqual(store.systemMonitorSneakConfiguration.leftMetrics, [.cpu])
+        XCTAssertEqual(store.systemMonitorSneakConfiguration.rightMetrics, [.network])
+        XCTAssertEqual(
+            store.systemMonitorSneakConfiguration.reactiveMetrics,
+            [.memory, .temperature, .battery, .disk]
+        )
 
         store.systemMonitorSneakPreviewEnabled = false
         store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .alwaysOn,
             left: [.disk],
-            right: [.battery, .network]
+            right: [.battery, .network],
+            reactive: [.cpu, .temperature]
         )
 
         let reloadedStore = SettingsStore(
@@ -146,8 +153,61 @@ final class SettingsStoreTests: XCTestCase {
             homeDirectoryURL: tempHomeURL
         )
         XCTAssertFalse(reloadedStore.systemMonitorSneakPreviewEnabled)
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.mode, .alwaysOn)
         XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.leftMetrics, [.disk])
         XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.rightMetrics, [.battery, .network])
+        XCTAssertEqual(reloadedStore.systemMonitorSneakConfiguration.reactiveMetrics, [.cpu, .temperature])
+    }
+
+    @MainActor
+    func testSystemMonitorAlertThresholdsDefaultToCatalogAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertEqual(store.systemMonitorAlertThresholds, SystemMonitorAlertThresholds.default)
+
+        store.systemMonitorAlertThresholds = store.systemMonitorAlertThresholds
+            .setting(60, for: .cpu)
+            .setting(40, for: .battery)
+            .setting(75, for: .temperature)
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        XCTAssertEqual(reloadedStore.systemMonitorAlertThresholds.cpuPercent, 60)
+        XCTAssertEqual(reloadedStore.systemMonitorAlertThresholds.batteryPercent, 40)
+        XCTAssertEqual(reloadedStore.systemMonitorAlertThresholds.temperatureCelsius, 75)
+        // Untouched metrics still match the catalog default.
+        XCTAssertEqual(
+            reloadedStore.systemMonitorAlertThresholds.networkMBps,
+            SystemMonitorAlertThresholds.default.networkMBps
+        )
+    }
+
+    @MainActor
+    func testSystemMonitorAlertThresholdsClampOutOfRangeValuesOnReload() {
+        defaults.set(999, forKey: "systemMonitor.alertThreshold.cpu")
+        defaults.set(-50, forKey: "systemMonitor.alertThreshold.battery")
+
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertEqual(
+            store.systemMonitorAlertThresholds.cpuPercent,
+            SystemMonitorAlertThresholds.cpuPercentRange.upperBound
+        )
+        XCTAssertEqual(
+            store.systemMonitorAlertThresholds.batteryPercent,
+            SystemMonitorAlertThresholds.batteryPercentRange.lowerBound
+        )
     }
 
     @MainActor

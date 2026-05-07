@@ -407,9 +407,23 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
+                    title: AppStrings.text(.sneakPreviewMode, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.sneakPreviewModeDetail, language: store.interfaceLanguage),
+                    selection: modeBinding,
+                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                ) {
+                    modeOptions
+                }
+            }
+
+            SettingsGroupSection(
+                title: AppStrings.text(.pinnedSlots, language: store.interfaceLanguage),
+                footer: AppStrings.text(.pinnedSlotsFooter, language: store.interfaceLanguage)
+            ) {
+                SettingsPickerRow(
                     title: AppStrings.text(.leftSlot1, language: store.interfaceLanguage),
                     selection: metricBinding(side: .left, index: 0),
-                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                    isEnabled: arePinnedSlotsActive
                 ) {
                     metricOptions
                 }
@@ -419,7 +433,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: AppStrings.text(.leftSlot2, language: store.interfaceLanguage),
                     selection: metricBinding(side: .left, index: 1),
-                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                    isEnabled: arePinnedSlotsActive
                 ) {
                     metricOptions
                 }
@@ -429,7 +443,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: AppStrings.text(.rightSlot1, language: store.interfaceLanguage),
                     selection: metricBinding(side: .right, index: 0),
-                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                    isEnabled: arePinnedSlotsActive
                 ) {
                     metricOptions
                 }
@@ -439,12 +453,137 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsPickerRow(
                     title: AppStrings.text(.rightSlot2, language: store.interfaceLanguage),
                     selection: metricBinding(side: .right, index: 1),
-                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                    isEnabled: arePinnedSlotsActive
                 ) {
                     metricOptions
                 }
             }
+
+            SettingsGroupSection(
+                title: AppStrings.text(.reactiveMetrics, language: store.interfaceLanguage),
+                footer: AppStrings.text(.reactiveMetricsFooter, language: store.interfaceLanguage)
+            ) {
+                ForEach(Array(SystemMonitorMetric.allCases.enumerated()), id: \.element) { entry in
+                    let metric = entry.element
+                    if entry.offset > 0 {
+                        SettingsRowDivider()
+                    }
+                    SettingsToggleRow(
+                        title: metric.settingsTitle(language: store.interfaceLanguage),
+                        isEnabled: areReactiveMetricsActive && isMetricPinned(metric) == false,
+                        isOn: reactiveBinding(for: metric)
+                    )
+                }
+            }
+
+            SettingsGroupSection(
+                title: AppStrings.text(.reactiveThresholds, language: store.interfaceLanguage),
+                footer: AppStrings.text(.reactiveThresholdsFooter, language: store.interfaceLanguage)
+            ) {
+                ForEach(Array(SystemMonitorMetric.allCases.enumerated()), id: \.element) { entry in
+                    let metric = entry.element
+                    if entry.offset > 0 {
+                        SettingsRowDivider()
+                    }
+                    thresholdRow(for: metric)
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func thresholdRow(for metric: SystemMonitorMetric) -> some View {
+        let value = store.systemMonitorAlertThresholds.value(for: metric)
+        let detail = AppStrings.systemMonitorThresholdDetail(
+            metric: metric,
+            value: value,
+            language: store.interfaceLanguage
+        )
+        SettingsRow(
+            title: thresholdRowTitle(for: metric),
+            detail: detail,
+            isEnabled: areReactiveMetricsActive
+        ) {
+            HStack(spacing: 10) {
+                Text(AppStrings.systemMonitorThresholdValueText(metric: metric, value: value))
+                    .font(.system(size: 13, weight: .medium))
+                    .monospacedDigit()
+                    .frame(minWidth: 64, alignment: .trailing)
+
+                Stepper(
+                    "",
+                    value: thresholdBinding(for: metric),
+                    in: SystemMonitorAlertThresholds.range(for: metric),
+                    step: SystemMonitorAlertThresholds.step(for: metric)
+                )
+                .labelsHidden()
+                .disabled(areReactiveMetricsActive == false)
+            }
+        }
+    }
+
+    private func thresholdRowTitle(for metric: SystemMonitorMetric) -> String {
+        switch metric {
+        case .cpu:
+            return AppStrings.text(.cpuThresholdTitle, language: store.interfaceLanguage)
+        case .memory:
+            return AppStrings.text(.memoryThresholdTitle, language: store.interfaceLanguage)
+        case .temperature:
+            return AppStrings.text(.temperatureThresholdTitle, language: store.interfaceLanguage)
+        case .battery:
+            return AppStrings.text(.batteryThresholdTitle, language: store.interfaceLanguage)
+        case .disk:
+            return AppStrings.text(.diskThresholdTitle, language: store.interfaceLanguage)
+        case .network:
+            return AppStrings.text(.networkThresholdTitle, language: store.interfaceLanguage)
+        }
+    }
+
+    private func thresholdBinding(for metric: SystemMonitorMetric) -> Binding<Double> {
+        Binding(
+            get: { store.systemMonitorAlertThresholds.value(for: metric) },
+            set: { newValue in
+                store.systemMonitorAlertThresholds = store.systemMonitorAlertThresholds
+                    .setting(newValue, for: metric)
+            }
+        )
+    }
+
+    private var arePinnedSlotsActive: Bool {
+        store.systemMonitorEnabled
+            && store.systemMonitorSneakPreviewEnabled
+            && store.systemMonitorSneakConfiguration.mode != .ambient
+    }
+
+    private var areReactiveMetricsActive: Bool {
+        store.systemMonitorEnabled
+            && store.systemMonitorSneakPreviewEnabled
+            && store.systemMonitorSneakConfiguration.mode != .alwaysOn
+    }
+
+    private var modeBinding: Binding<SystemMonitorSneakMode> {
+        Binding(
+            get: { store.systemMonitorSneakConfiguration.mode },
+            set: { newMode in
+                let configuration = store.systemMonitorSneakConfiguration
+                store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                    mode: newMode,
+                    left: configuration.leftMetrics,
+                    right: configuration.rightMetrics,
+                    reactive: configuration.reactiveMetrics
+                )
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var modeOptions: some View {
+        Text(AppStrings.text(.sneakPreviewModeAlwaysOn, language: store.interfaceLanguage))
+            .tag(SystemMonitorSneakMode.alwaysOn)
+        Text(AppStrings.text(.sneakPreviewModePinnedReactive, language: store.interfaceLanguage))
+            .tag(SystemMonitorSneakMode.pinnedReactive)
+        Text(AppStrings.text(.sneakPreviewModeAmbient, language: store.interfaceLanguage))
+            .tag(SystemMonitorSneakMode.ambient)
     }
 
     @ViewBuilder
@@ -491,13 +630,17 @@ struct SystemMonitorPluginSettingsView: View {
         switch side {
         case .left:
             store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                mode: configuration.mode,
                 left: updatedMetrics(configuration.leftMetrics, setting: metric, at: index),
-                right: configuration.rightMetrics
+                right: configuration.rightMetrics,
+                reactive: configuration.reactiveMetrics
             )
         case .right:
             store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                mode: configuration.mode,
                 left: configuration.leftMetrics,
-                right: updatedMetrics(configuration.rightMetrics, setting: metric, at: index)
+                right: updatedMetrics(configuration.rightMetrics, setting: metric, at: index),
+                reactive: configuration.reactiveMetrics
             )
         }
     }
@@ -507,16 +650,42 @@ struct SystemMonitorPluginSettingsView: View {
         setting metric: SystemMonitorMetric?,
         at index: Int
     ) -> [SystemMonitorMetric] {
-        var updatedMetrics = Array(metrics.prefix(SystemMonitorSneakConfiguration.defaultLimit))
+        SystemMonitorSneakSlotEditor.metrics(
+            byUpdating: metrics,
+            setting: metric,
+            at: index
+        )
+    }
 
-        if let metric {
-            updatedMetrics.removeAll { $0 == metric }
-            updatedMetrics.insert(metric, at: min(index, updatedMetrics.count))
-        } else if updatedMetrics.indices.contains(index) {
-            updatedMetrics.remove(at: index)
-        }
+    private func isMetricPinned(_ metric: SystemMonitorMetric) -> Bool {
+        let configuration = store.systemMonitorSneakConfiguration
+        return configuration.leftMetrics.contains(metric)
+            || configuration.rightMetrics.contains(metric)
+    }
 
-        return Array(updatedMetrics.prefix(SystemMonitorSneakConfiguration.defaultLimit))
+    private func reactiveBinding(for metric: SystemMonitorMetric) -> Binding<Bool> {
+        Binding(
+            get: {
+                store.systemMonitorSneakConfiguration.reactiveMetrics.contains(metric)
+            },
+            set: { isOn in
+                let configuration = store.systemMonitorSneakConfiguration
+                var reactive = configuration.reactiveMetrics
+                if isOn {
+                    if reactive.contains(metric) == false {
+                        reactive.append(metric)
+                    }
+                } else {
+                    reactive.removeAll { $0 == metric }
+                }
+                store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                    mode: configuration.mode,
+                    left: configuration.leftMetrics,
+                    right: configuration.rightMetrics,
+                    reactive: reactive
+                )
+            }
+        )
     }
 }
 

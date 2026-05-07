@@ -26,23 +26,99 @@ enum SystemMonitorMetric: String, CaseIterable, Equatable, Hashable, Sendable {
     }
 }
 
+enum SystemMonitorSneakMode: String, Equatable, Sendable, Codable, CaseIterable {
+    /// Always show the configured left/right slots regardless of system state.
+    case alwaysOn
+    /// Show the configured left/right slots and additionally surface reactive
+    /// metrics that crossed an alert threshold.
+    case pinnedReactive
+    /// Hide the sneak preview entirely until any reactive metric fires; clear
+    /// the preview when nothing is firing.
+    case ambient
+}
+
 struct SystemMonitorSneakConfiguration: Equatable, Sendable {
     static let defaultLimit = 2
     static let `default` = SystemMonitorSneakConfiguration(
-        left: [.cpu, .memory],
-        right: [.network, .temperature]
+        mode: .pinnedReactive,
+        left: [.cpu],
+        right: [.network],
+        reactive: [.memory, .temperature, .battery, .disk]
     )
 
+    let mode: SystemMonitorSneakMode
     let leftMetrics: [SystemMonitorMetric]
     let rightMetrics: [SystemMonitorMetric]
+    /// Metrics allowed to surface in the sneak preview when their alert rule
+    /// fires. Pinned metrics are filtered out automatically because they are
+    /// already on screen.
+    let reactiveMetrics: [SystemMonitorMetric]
 
     init(
+        mode: SystemMonitorSneakMode = .pinnedReactive,
         left: [SystemMonitorMetric],
         right: [SystemMonitorMetric],
+        reactive: [SystemMonitorMetric] = SystemMonitorMetric.allCases,
         limit: Int = defaultLimit
     ) {
-        leftMetrics = Array(left.prefix(limit))
-        rightMetrics = Array(right.prefix(limit))
+        self.mode = mode
+        let trimmedLeft = Array(left.prefix(limit))
+        let trimmedRight = Array(right.prefix(limit))
+        leftMetrics = trimmedLeft
+        rightMetrics = trimmedRight
+
+        let pinned = Set(trimmedLeft + trimmedRight)
+        var seen: Set<SystemMonitorMetric> = []
+        reactiveMetrics = reactive.filter { metric in
+            guard pinned.contains(metric) == false else { return false }
+            return seen.insert(metric).inserted
+        }
+    }
+
+    /// Pinned metrics in their stable left-to-right ordering; useful when a
+    /// caller does not care about the slot split.
+    var pinnedMetrics: [SystemMonitorMetric] {
+        leftMetrics + rightMetrics
+    }
+}
+
+/// Pure helpers used by the settings UI to mutate one pinned slot at a time
+/// without disturbing the surrounding slots.
+enum SystemMonitorSneakSlotEditor {
+    /// Replaces the metric at `index` in a length-2 sparse slot view of
+    /// `metrics`, returning the dense array suitable for persistence.
+    ///
+    /// Behaviour:
+    /// - Setting `nil` clears that slot. Other slots stay untouched.
+    /// - Setting a metric that already lives in another slot vacates that
+    ///   other slot, so a metric appears at most once per side.
+    /// - Indexes outside the configuration's `defaultLimit` are ignored and
+    ///   the metrics array is returned trimmed to the limit.
+    static func metrics(
+        byUpdating metrics: [SystemMonitorMetric],
+        setting metric: SystemMonitorMetric?,
+        at index: Int
+    ) -> [SystemMonitorMetric] {
+        let limit = SystemMonitorSneakConfiguration.defaultLimit
+
+        var slots: [SystemMonitorMetric?] = Array(repeating: nil, count: limit)
+        for (slotIndex, slotMetric) in metrics.prefix(limit).enumerated() {
+            slots[slotIndex] = slotMetric
+        }
+
+        guard slots.indices.contains(index) else {
+            return Array(metrics.prefix(limit))
+        }
+
+        if let metric {
+            for otherIndex in slots.indices where otherIndex != index && slots[otherIndex] == metric {
+                slots[otherIndex] = nil
+            }
+        }
+
+        slots[index] = metric
+
+        return slots.compactMap { $0 }
     }
 }
 

@@ -63,6 +63,24 @@ enum AppTextKey {
     case enableSystemMonitorPluginDetail
     case preview
     case showSystemMonitorPreview
+    case sneakPreviewMode
+    case sneakPreviewModeDetail
+    case sneakPreviewModeAlwaysOn
+    case sneakPreviewModePinnedReactive
+    case sneakPreviewModeAmbient
+    case pinnedSlots
+    case pinnedSlotsFooter
+    case reactiveMetrics
+    case reactiveMetricsDetail
+    case reactiveMetricsFooter
+    case reactiveThresholds
+    case reactiveThresholdsFooter
+    case cpuThresholdTitle
+    case memoryThresholdTitle
+    case temperatureThresholdTitle
+    case batteryThresholdTitle
+    case diskThresholdTitle
+    case networkThresholdTitle
     case leftSlot1
     case leftSlot2
     case rightSlot1
@@ -169,6 +187,41 @@ enum AppStrings {
             return "当前歌词行文字大小（\(Int(size))pt）。"
         case .english:
             return "Current lyric line text size (\(Int(size)) pt)."
+        }
+    }
+
+    static func systemMonitorThresholdValueText(metric: SystemMonitorMetric, value: Double) -> String {
+        let intValue = Int(value.rounded())
+        switch metric {
+        case .cpu, .memory, .battery:
+            return "\(intValue)%"
+        case .temperature:
+            return "\(intValue)°C"
+        case .disk:
+            return "\(intValue) GB"
+        case .network:
+            return "\(intValue) MB/s"
+        }
+    }
+
+    static func systemMonitorThresholdDetail(
+        metric: SystemMonitorMetric,
+        value: Double,
+        language: AppLanguage
+    ) -> String {
+        let valueText = systemMonitorThresholdValueText(metric: metric, value: value)
+        let metricName = systemMonitorMetricTitle(metric, language: language)
+        let isLowTrigger = metric == .battery || metric == .disk
+
+        switch (language, isLowTrigger) {
+        case (.zhHans, true):
+            return "\(metricName)低于 \(valueText) 时进入 sneak"
+        case (.zhHans, false):
+            return "\(metricName)超过 \(valueText) 时进入 sneak"
+        case (.english, true):
+            return "Surfaces when \(metricName.lowercased()) drops below \(valueText)"
+        case (.english, false):
+            return "Surfaces when \(metricName.lowercased()) exceeds \(valueText)"
         }
     }
 
@@ -528,6 +581,42 @@ enum AppStrings {
             return "预览"
         case .showSystemMonitorPreview:
             return "在 Notch 闭合态显示系统监控"
+        case .sneakPreviewMode:
+            return "预览模式"
+        case .sneakPreviewModeDetail:
+            return "决定刘海闭合时何时显示系统监控数据。"
+        case .sneakPreviewModeAlwaysOn:
+            return "始终显示"
+        case .sneakPreviewModePinnedReactive:
+            return "常驻 + 异常扩展"
+        case .sneakPreviewModeAmbient:
+            return "仅异常时显示"
+        case .pinnedSlots:
+            return "常驻槽位"
+        case .pinnedSlotsFooter:
+            return "「仅异常时显示」模式下不会展示这些槽位。"
+        case .reactiveMetrics:
+            return "反应式指标"
+        case .reactiveMetricsDetail:
+            return "勾选的指标在阈值越界时自动出现在 sneak 中。"
+        case .reactiveMetricsFooter:
+            return "已选为常驻槽位的指标会自动从此列表中排除。"
+        case .reactiveThresholds:
+            return "反应阈值"
+        case .reactiveThresholdsFooter:
+            return "突破阈值后，对应指标会临时插入到 sneak 中；按需调高/调低敏感度。"
+        case .cpuThresholdTitle:
+            return "CPU 触发线"
+        case .memoryThresholdTitle:
+            return "内存触发线"
+        case .temperatureThresholdTitle:
+            return "温度触发线"
+        case .batteryThresholdTitle:
+            return "电量触发线"
+        case .diskThresholdTitle:
+            return "磁盘剩余触发线"
+        case .networkThresholdTitle:
+            return "网络突发触发线"
         case .leftSlot1:
             return "左侧槽位 1"
         case .leftSlot2:
@@ -713,6 +802,42 @@ enum AppStrings {
             return "Preview"
         case .showSystemMonitorPreview:
             return "Show System Monitor while Notch is Closed"
+        case .sneakPreviewMode:
+            return "Preview Mode"
+        case .sneakPreviewModeDetail:
+            return "Decide when the system monitor sneak appears while the notch is closed."
+        case .sneakPreviewModeAlwaysOn:
+            return "Always On"
+        case .sneakPreviewModePinnedReactive:
+            return "Pinned + Reactive"
+        case .sneakPreviewModeAmbient:
+            return "Only on Alert"
+        case .pinnedSlots:
+            return "Pinned Slots"
+        case .pinnedSlotsFooter:
+            return "Pinned slots are hidden when the preview mode is set to Only on Alert."
+        case .reactiveMetrics:
+            return "Reactive Metrics"
+        case .reactiveMetricsDetail:
+            return "Enabled metrics surface in the sneak only when their alert threshold fires."
+        case .reactiveMetricsFooter:
+            return "Metrics already pinned to a slot are removed from this list automatically."
+        case .reactiveThresholds:
+            return "Reactive Thresholds"
+        case .reactiveThresholdsFooter:
+            return "When a metric crosses its threshold, it temporarily appears in the sneak. Tune the sensitivity per metric."
+        case .cpuThresholdTitle:
+            return "CPU Trigger"
+        case .memoryThresholdTitle:
+            return "Memory Trigger"
+        case .temperatureThresholdTitle:
+            return "Temperature Trigger"
+        case .batteryThresholdTitle:
+            return "Battery Trigger"
+        case .diskThresholdTitle:
+            return "Disk Free Trigger"
+        case .networkThresholdTitle:
+            return "Network Spike Trigger"
         case .leftSlot1:
             return "Left Slot 1"
         case .leftSlot2:

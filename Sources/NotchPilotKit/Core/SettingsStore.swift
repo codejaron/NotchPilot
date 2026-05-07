@@ -20,6 +20,14 @@ public final class SettingsStore: ObservableObject {
         static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
         static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
         static let systemMonitorSneakRightMetrics = "systemMonitor.sneak.rightMetrics"
+        static let systemMonitorSneakMode = "systemMonitor.sneak.mode"
+        static let systemMonitorSneakReactiveMetrics = "systemMonitor.sneak.reactiveMetrics"
+        static let systemMonitorAlertCpuPercent = "systemMonitor.alertThreshold.cpu"
+        static let systemMonitorAlertMemoryPercent = "systemMonitor.alertThreshold.memory"
+        static let systemMonitorAlertTemperatureCelsius = "systemMonitor.alertThreshold.temperature"
+        static let systemMonitorAlertBatteryPercent = "systemMonitor.alertThreshold.battery"
+        static let systemMonitorAlertDiskFreeGB = "systemMonitor.alertThreshold.disk"
+        static let systemMonitorAlertNetworkMBps = "systemMonitor.alertThreshold.network"
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
         static let interfaceLanguage = "app.interfaceLanguage"
@@ -130,6 +138,12 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var systemMonitorAlertThresholds: SystemMonitorAlertThresholds {
+        didSet {
+            persistSystemMonitorAlertThresholds(systemMonitorAlertThresholds)
+        }
+    }
+
     @Published var claudePluginEnabled: Bool {
         didSet {
             defaults.set(claudePluginEnabled, forKey: Key.claudePluginEnabled)
@@ -195,6 +209,7 @@ public final class SettingsStore: ObservableObject {
         self.systemMonitorSneakPreviewEnabled =
             defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)
+        self.systemMonitorAlertThresholds = Self.systemMonitorAlertThresholds(from: defaults)
         self.claudePluginEnabled =
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =
@@ -228,6 +243,11 @@ public final class SettingsStore: ObservableObject {
     private static func systemMonitorSneakConfiguration(from defaults: UserDefaults) -> SystemMonitorSneakConfiguration {
         let defaultConfiguration = SystemMonitorSneakConfiguration.default
         return SystemMonitorSneakConfiguration(
+            mode: systemMonitorSneakMode(
+                from: defaults,
+                key: Key.systemMonitorSneakMode,
+                fallback: defaultConfiguration.mode
+            ),
             left: systemMonitorMetrics(
                 from: defaults,
                 key: Key.systemMonitorSneakLeftMetrics,
@@ -237,8 +257,26 @@ public final class SettingsStore: ObservableObject {
                 from: defaults,
                 key: Key.systemMonitorSneakRightMetrics,
                 fallback: defaultConfiguration.rightMetrics
+            ),
+            reactive: systemMonitorMetrics(
+                from: defaults,
+                key: Key.systemMonitorSneakReactiveMetrics,
+                fallback: defaultConfiguration.reactiveMetrics
             )
         )
+    }
+
+    private static func systemMonitorSneakMode(
+        from defaults: UserDefaults,
+        key: String,
+        fallback: SystemMonitorSneakMode
+    ) -> SystemMonitorSneakMode {
+        guard let raw = defaults.string(forKey: key),
+              let mode = SystemMonitorSneakMode(rawValue: raw)
+        else {
+            return fallback
+        }
+        return mode
     }
 
     private static func systemMonitorMetrics(
@@ -255,7 +293,72 @@ public final class SettingsStore: ObservableObject {
     }
 
     private func persistSystemMonitorSneakConfiguration(_ configuration: SystemMonitorSneakConfiguration) {
+        defaults.set(configuration.mode.rawValue, forKey: Key.systemMonitorSneakMode)
         defaults.set(configuration.leftMetrics.map(\.rawValue), forKey: Key.systemMonitorSneakLeftMetrics)
         defaults.set(configuration.rightMetrics.map(\.rawValue), forKey: Key.systemMonitorSneakRightMetrics)
+        defaults.set(configuration.reactiveMetrics.map(\.rawValue), forKey: Key.systemMonitorSneakReactiveMetrics)
+    }
+
+    private static func systemMonitorAlertThresholds(from defaults: UserDefaults) -> SystemMonitorAlertThresholds {
+        let fallback = SystemMonitorAlertThresholds.default
+        return SystemMonitorAlertThresholds(
+            cpuPercent: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertCpuPercent,
+                fallback: fallback.cpuPercent,
+                range: SystemMonitorAlertThresholds.cpuPercentRange
+            ),
+            memoryPercent: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertMemoryPercent,
+                fallback: fallback.memoryPercent,
+                range: SystemMonitorAlertThresholds.memoryPercentRange
+            ),
+            temperatureCelsius: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertTemperatureCelsius,
+                fallback: fallback.temperatureCelsius,
+                range: SystemMonitorAlertThresholds.temperatureCelsiusRange
+            ),
+            batteryPercent: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertBatteryPercent,
+                fallback: fallback.batteryPercent,
+                range: SystemMonitorAlertThresholds.batteryPercentRange
+            ),
+            diskFreeGB: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertDiskFreeGB,
+                fallback: fallback.diskFreeGB,
+                range: SystemMonitorAlertThresholds.diskFreeGBRange
+            ),
+            networkMBps: thresholdValue(
+                from: defaults,
+                key: Key.systemMonitorAlertNetworkMBps,
+                fallback: fallback.networkMBps,
+                range: SystemMonitorAlertThresholds.networkMBpsRange
+            )
+        )
+    }
+
+    private static func thresholdValue(
+        from defaults: UserDefaults,
+        key: String,
+        fallback: Double,
+        range: ClosedRange<Double>
+    ) -> Double {
+        guard let raw = defaults.object(forKey: key) as? Double else {
+            return fallback
+        }
+        return Swift.max(range.lowerBound, Swift.min(range.upperBound, raw))
+    }
+
+    private func persistSystemMonitorAlertThresholds(_ thresholds: SystemMonitorAlertThresholds) {
+        defaults.set(thresholds.cpuPercent, forKey: Key.systemMonitorAlertCpuPercent)
+        defaults.set(thresholds.memoryPercent, forKey: Key.systemMonitorAlertMemoryPercent)
+        defaults.set(thresholds.temperatureCelsius, forKey: Key.systemMonitorAlertTemperatureCelsius)
+        defaults.set(thresholds.batteryPercent, forKey: Key.systemMonitorAlertBatteryPercent)
+        defaults.set(thresholds.diskFreeGB, forKey: Key.systemMonitorAlertDiskFreeGB)
+        defaults.set(thresholds.networkMBps, forKey: Key.systemMonitorAlertNetworkMBps)
     }
 }

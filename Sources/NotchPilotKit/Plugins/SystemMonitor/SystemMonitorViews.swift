@@ -103,17 +103,36 @@ struct SystemMonitorSneakPreviewView: View {
 
     let snapshot: SystemMonitorSnapshot
     let configuration: SystemMonitorSneakConfiguration
+    let activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert]
     let context: NotchContext
     let sideFrameWidth: CGFloat
     let totalWidth: CGFloat
+
+    init(
+        snapshot: SystemMonitorSnapshot,
+        configuration: SystemMonitorSneakConfiguration,
+        activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert] = [:],
+        context: NotchContext,
+        sideFrameWidth: CGFloat,
+        totalWidth: CGFloat
+    ) {
+        self.snapshot = snapshot
+        self.configuration = configuration
+        self.activeAlerts = activeAlerts
+        self.context = context
+        self.sideFrameWidth = sideFrameWidth
+        self.totalWidth = totalWidth
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: SystemMonitorSneakPreviewLayout.metricSpacing) {
                 ForEach(configuration.leftMetrics, id: \.self) { metric in
                     compactMetric(metric)
+                        .transition(SystemMonitorSneakPreviewAnimation.metricTransition)
                 }
             }
+            .animation(SystemMonitorSneakPreviewAnimation.layoutSpring, value: configuration.leftMetrics)
             .frame(width: sideFrameWidth, alignment: .leading)
 
             Spacer(minLength: context.notchGeometry.compactSize.width)
@@ -121,33 +140,90 @@ struct SystemMonitorSneakPreviewView: View {
             HStack(spacing: SystemMonitorSneakPreviewLayout.metricSpacing) {
                 ForEach(configuration.rightMetrics, id: \.self) { metric in
                     compactMetric(metric)
+                        .transition(SystemMonitorSneakPreviewAnimation.metricTransition)
                 }
             }
+            .animation(SystemMonitorSneakPreviewAnimation.layoutSpring, value: configuration.rightMetrics)
             .frame(width: sideFrameWidth, alignment: .trailing)
         }
         .padding(.horizontal, SystemMonitorSneakPreviewLayout.outerPadding)
         .frame(width: totalWidth, height: context.notchGeometry.compactSize.height, alignment: .center)
+        .animation(SystemMonitorSneakPreviewAnimation.layoutSpring, value: totalWidth)
     }
 
     @ViewBuilder
     private func compactMetric(_ metric: SystemMonitorMetric) -> some View {
-        if metric == .network {
-            networkMetric
-        } else {
-            textMetric(metric)
+        SystemMonitorCompactMetricView(
+            metric: metric,
+            snapshot: snapshot,
+            alert: activeAlerts[metric],
+            language: store.interfaceLanguage
+        )
+    }
+}
+
+/// Coordinates the animation grammar for the sneak preview. Centralised so that
+/// every metric uses the same spring/curve set and tweaks stay in one place.
+@MainActor
+enum SystemMonitorSneakPreviewAnimation {
+    static let layoutSpring: Animation = .spring(response: 0.55, dampingFraction: 0.78)
+    static let pulseDuration: Double = 0.42
+    static let breathingDuration: Double = 1.6
+    static let pulseScalePeak: CGFloat = 1.12
+    static let breathingScaleAmplitude: CGFloat = 0.04
+    static let haloDuration: Double = 0.6
+
+    static let metricTransition: AnyTransition = .asymmetric(
+        insertion: .scale(scale: 0.6, anchor: .center).combined(with: .opacity),
+        removal: .scale(scale: 0.85, anchor: .center).combined(with: .opacity)
+    )
+}
+
+private struct SystemMonitorCompactMetricView: View {
+    let metric: SystemMonitorMetric
+    let snapshot: SystemMonitorSnapshot
+    let alert: SystemMonitorActiveAlert?
+    let language: AppLanguage
+
+    @State private var pulseTrigger = false
+    @State private var breathingPhase: CGFloat = 0
+    @State private var lastFiredID: String?
+
+    var body: some View {
+        Group {
+            if metric == .network {
+                networkMetric
+            } else {
+                textMetric
+            }
+        }
+        .scaleEffect(currentScale)
+        .background(haloBackground)
+        .onAppear { syncFireState(initial: true) }
+        .onChange(of: alert?.triggeringRuleID) { _, _ in
+            syncFireState(initial: false)
+        }
+        .onChange(of: alert?.severity) { _, _ in
+            syncFireState(initial: false)
         }
     }
 
-    private func textMetric(_ metric: SystemMonitorMetric) -> some View {
+    // MARK: - Subviews
+
+    private var textMetric: some View {
         HStack(spacing: 4) {
-            Text(metric.compactLabel(language: store.interfaceLanguage))
+            Text(metric.compactLabel(language: language))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(NotchPilotTheme.islandTextSecondary)
 
             Text(metric.compactValue(in: snapshot))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .foregroundStyle(valueColor)
                 .minimumScaleFactor(0.75)
+                .shadow(
+                    color: criticalGlowColor,
+                    radius: criticalGlowRadius
+                )
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
@@ -169,7 +245,7 @@ struct SystemMonitorSneakPreviewView: View {
 
                         Text(row.value)
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .foregroundStyle(valueColor)
                             .monospacedDigit()
                             .frame(width: valueWidth, alignment: .trailing)
                     }
@@ -178,6 +254,124 @@ struct SystemMonitorSneakPreviewView: View {
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+        .shadow(
+            color: criticalGlowColor,
+            radius: criticalGlowRadius
+        )
+    }
+
+    @ViewBuilder
+    private var haloBackground: some View {
+        if pulseTrigger, let alert {
+            Circle()
+                .fill(SystemMonitorAlertVisuals.color(for: alert.severity).opacity(0.55))
+                .blur(radius: 12)
+                .scaleEffect(pulseTrigger ? 1.45 : 0.5)
+                .opacity(pulseTrigger ? 0.0 : 0.7)
+                .animation(
+                    .easeOut(duration: SystemMonitorSneakPreviewAnimation.haloDuration),
+                    value: pulseTrigger
+                )
+                .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: - Severity-driven styling
+
+    private var valueColor: Color {
+        guard let alert else {
+            return NotchPilotTheme.islandTextPrimary
+        }
+        return SystemMonitorAlertVisuals.color(for: alert.severity)
+    }
+
+    private var criticalGlowColor: Color {
+        guard let alert, alert.severity == .critical else {
+            return .clear
+        }
+        return SystemMonitorAlertVisuals.color(for: .critical).opacity(0.45)
+    }
+
+    private var criticalGlowRadius: CGFloat {
+        guard let alert, alert.severity == .critical else {
+            return 0
+        }
+        // Subtle breathing-driven radius so the critical glow feels alive
+        // without becoming distracting.
+        return 5 + breathingPhase * 4
+    }
+
+    private var currentScale: CGFloat {
+        let pulse = pulseTrigger ? SystemMonitorSneakPreviewAnimation.pulseScalePeak : 1.0
+        let breathing: CGFloat
+        if alert?.severity == .critical {
+            breathing = 1 + breathingPhase * SystemMonitorSneakPreviewAnimation.breathingScaleAmplitude
+        } else {
+            breathing = 1
+        }
+        return pulse * breathing
+    }
+
+    // MARK: - State coordination
+
+    private func syncFireState(initial: Bool) {
+        let currentID = alert?.triggeringRuleID
+        let isNewFire = currentID != nil && currentID != lastFiredID
+        lastFiredID = currentID
+
+        if alert?.severity == .critical {
+            startBreathingIfNeeded()
+        } else {
+            stopBreathing()
+        }
+
+        if isNewFire && initial == false {
+            triggerPulse()
+        }
+    }
+
+    private func triggerPulse() {
+        // 1.0 → 1.12 spring up, then settle back to 1.0. Using a one-shot
+        // boolean so SwiftUI can drive the spring on both legs.
+        pulseTrigger = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + SystemMonitorSneakPreviewAnimation.pulseDuration) {
+            withAnimation(SystemMonitorSneakPreviewAnimation.layoutSpring) {
+                pulseTrigger = false
+            }
+        }
+    }
+
+    private func startBreathingIfNeeded() {
+        guard breathingPhase == 0 else { return }
+        withAnimation(
+            .easeInOut(duration: SystemMonitorSneakPreviewAnimation.breathingDuration)
+                .repeatForever(autoreverses: true)
+        ) {
+            breathingPhase = 1
+        }
+    }
+
+    private func stopBreathing() {
+        guard breathingPhase != 0 else { return }
+        withAnimation(.easeInOut(duration: 0.3)) {
+            breathingPhase = 0
+        }
+    }
+}
+
+/// Maps alert severities to the sneak preview's visual language. Kept as a
+/// flat enum so other UI surfaces (dashboard, future banners) can share the
+/// same palette without re-implementing the mapping.
+enum SystemMonitorAlertVisuals {
+    static func color(for severity: SystemMonitorAlertSeverity) -> Color {
+        switch severity {
+        case .info:
+            return Color(red: 0.40, green: 0.85, blue: 0.95)    // cyan/teal
+        case .warn:
+            return Color(red: 1.00, green: 0.74, blue: 0.27)    // amber
+        case .critical:
+            return Color(red: 1.00, green: 0.40, blue: 0.36)    // red
+        }
     }
 }
 
