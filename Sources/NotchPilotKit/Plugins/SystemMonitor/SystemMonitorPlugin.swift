@@ -8,8 +8,8 @@ private actor SystemMonitorSamplerWorker {
         self.sampler = sampler
     }
 
-    func snapshot() -> SystemMonitorSnapshot {
-        sampler.snapshot()
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
+        sampler.snapshot(demand: demand)
     }
 }
 
@@ -40,6 +40,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
     private var settingsCancellables: Set<AnyCancellable> = []
     private weak var bus: EventBus?
     private var sneakPeekRequestID: UUID?
+    private var dashboardMountCount: Int = 0
 
     public convenience init() {
         self.init(sampler: SystemMonitorDefaultSampler())
@@ -147,7 +148,20 @@ public final class SystemMonitorPlugin: NotchPlugin {
     }
 
     public func contentView(context: NotchContext) -> AnyView {
-        AnyView(SystemMonitorDashboardView(snapshot: snapshot, accentColor: accentColor))
+        AnyView(SystemMonitorDashboardView(plugin: self, accentColor: accentColor))
+    }
+
+    func dashboardDidAppear() {
+        dashboardMountCount += 1
+    }
+
+    func dashboardDidDisappear() {
+        dashboardMountCount = max(0, dashboardMountCount - 1)
+    }
+
+    private func currentSamplingDemand() -> SystemMonitorSamplingDemand {
+        let needsDetailed = sneakPeekRequestID != nil || dashboardMountCount > 0
+        return needsDetailed ? .detailed : .basic
     }
 
     public func activate(bus: EventBus) {
@@ -180,7 +194,8 @@ public final class SystemMonitorPlugin: NotchPlugin {
     }
 
     func refresh() async {
-        let latestSnapshot = await samplerWorker.snapshot()
+        let demand = currentSamplingDemand()
+        let latestSnapshot = await samplerWorker.snapshot(demand: demand)
         guard Task.isCancelled == false else {
             return
         }
@@ -193,13 +208,14 @@ public final class SystemMonitorPlugin: NotchPlugin {
         }
 
         let generation = refreshGeneration
+        let demand = currentSamplingDemand()
         refreshTask = Task { [weak self] in
-            await self?.completeScheduledRefresh(generation: generation)
+            await self?.completeScheduledRefresh(generation: generation, demand: demand)
         }
     }
 
-    private func completeScheduledRefresh(generation: UInt64) async {
-        let latestSnapshot = await samplerWorker.snapshot()
+    private func completeScheduledRefresh(generation: UInt64, demand: SystemMonitorSamplingDemand) async {
+        let latestSnapshot = await samplerWorker.snapshot(demand: demand)
         let wasCancelled = Task.isCancelled
 
         guard refreshGeneration == generation else {

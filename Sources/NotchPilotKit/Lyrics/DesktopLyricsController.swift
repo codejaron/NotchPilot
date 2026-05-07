@@ -54,16 +54,22 @@ final class DesktopLyricsController: ObservableObject {
               case let .active(snapshot) = currentPlaybackState,
               snapshot.isPlaying,
               DesktopLyricsPlaybackFilter.isEligible(snapshot) else {
-            presentation = .hidden
+            assignPresentation(.hidden)
             return
         }
 
-        presentation = DesktopLyricsPresentationResolver.resolve(
+        let nextPresentation = DesktopLyricsPresentationResolver.resolve(
             playbackState: .active(snapshot),
             lyrics: currentLyrics,
             offsetMilliseconds: currentOffsetMilliseconds,
             at: date
         )
+        assignPresentation(nextPresentation)
+    }
+
+    private func assignPresentation(_ next: DesktopLyricsPresentation) {
+        guard next != presentation else { return }
+        presentation = next
     }
 
     var canAdjustLyricsOffset: Bool {
@@ -113,7 +119,7 @@ final class DesktopLyricsController: ObservableObject {
         ignoredTrackStore.insert(currentTrackKey)
         try? cache.removeLyrics(for: currentTrackKey)
         currentLyrics = nil
-        presentation = .hidden
+        assignPresentation(.hidden)
     }
 
     func applyLyricsOverride(_ lyrics: TimedLyrics, for snapshot: MediaPlaybackSnapshot) {
@@ -156,7 +162,7 @@ final class DesktopLyricsController: ObservableObject {
         guard ignoredTrackStore.contains(trackKey) == false else {
             currentTrackKey = trackKey
             currentLyrics = nil
-            presentation = .hidden
+            assignPresentation(.hidden)
             loadTask?.cancel()
             loadTask = nil
             return
@@ -166,7 +172,7 @@ final class DesktopLyricsController: ObservableObject {
             currentTrackKey = trackKey
             currentLyrics = nil
             currentOffsetMilliseconds = offsetStore.offset(for: trackKey)
-            presentation = .hidden
+            assignPresentation(.hidden)
             loadTask?.cancel()
             loadTask = Task { @MainActor [weak self] in
                 guard let self else {
@@ -197,6 +203,6 @@ final class DesktopLyricsController: ObservableObject {
             currentLyrics = nil
             currentTrackKey = nil
         }
-        presentation = .hidden
+        assignPresentation(.hidden)
     }
 }

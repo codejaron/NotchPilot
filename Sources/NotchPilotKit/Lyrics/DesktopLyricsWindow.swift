@@ -33,31 +33,48 @@ enum ActiveDesktopLyricsScreenResolver {
     }
 }
 
+struct DesktopLyricsViewState: Equatable {
+    let presentation: DesktopLyricsPresentation
+    let isMouseHovering: Bool
+    let highlightColor: Color
+    let fontSize: CGFloat
+
+    static let hidden = DesktopLyricsViewState(
+        presentation: .hidden,
+        isMouseHovering: false,
+        highlightColor: .green,
+        fontSize: 28
+    )
+}
+
 @MainActor
 final class DesktopLyricsWindowModel: ObservableObject {
-    @Published var presentation: DesktopLyricsPresentation = .hidden
-    @Published var isMouseHovering: Bool = false
-    @Published var highlightColor: Color = .green
-    @Published var fontSize: CGFloat = 28
+    @Published private(set) var state: DesktopLyricsViewState = .hidden
+
+    func update(_ next: DesktopLyricsViewState) {
+        guard next != state else { return }
+        state = next
+    }
 }
 
 struct DesktopLyricsView: View {
     @ObservedObject var model: DesktopLyricsWindowModel
 
     private var nextLineFontSize: CGFloat {
-        round(model.fontSize * 0.72)
+        round(model.state.fontSize * 0.72)
     }
 
     var body: some View {
+        let state = model.state
         VStack(spacing: 6) {
-            karaokeCurrentLine
+            karaokeCurrentLine(state: state)
 
-            Text(model.presentation.nextLine ?? "")
+            Text(state.presentation.nextLine ?? "")
                 .font(.system(size: nextLineFontSize, weight: .medium, design: .rounded))
                 .foregroundStyle(NotchPilotTheme.islandTextSecondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .opacity(model.presentation.nextLine == nil ? 0 : 1)
+                .opacity(state.presentation.nextLine == nil ? 0 : 1)
         }
         .padding(.horizontal, DesktopLyricsWindowLayout.horizontalPadding)
         .padding(.vertical, 16)
@@ -68,56 +85,90 @@ struct DesktopLyricsView: View {
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
-        .opacity(model.isMouseHovering ? 0 : 1)
-        .animation(.easeInOut(duration: 0.2), value: model.isMouseHovering)
+        .opacity(state.isMouseHovering ? 0 : 1)
+        .animation(.easeInOut(duration: 0.2), value: state.isMouseHovering)
     }
 
     @ViewBuilder
-    private var karaokeCurrentLine: some View {
-        let text = model.presentation.currentLine ?? ""
-        let characterFraction = model.presentation.karaokeFraction
+    private func karaokeCurrentLine(state: DesktopLyricsViewState) -> some View {
+        let text = state.presentation.currentLine ?? ""
+        let fontSize = state.fontSize
 
         Text(text)
-            .font(.system(size: model.fontSize, weight: .semibold, design: .rounded))
+            .font(.system(size: fontSize, weight: .semibold, design: .rounded))
             .foregroundStyle(NotchPilotTheme.islandTextSecondary)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .overlay {
-                GeometryReader { geo in
-                    let pixelFraction = Self.pixelFraction(
-                        characterFraction: characterFraction,
-                        text: text,
-                        fontSize: model.fontSize
-                    )
-                    Text(text)
-                        .font(.system(size: model.fontSize, weight: .semibold, design: .rounded))
-                        .foregroundStyle(model.highlightColor)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
-                        .mask(alignment: .leading) {
-                            Rectangle()
-                                .frame(width: geo.size.width * pixelFraction)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                if let lineState = state.presentation.lineState, lineState.currentLine.isEmpty == false {
+                    karaokeHighlightOverlay(lineState: lineState, fontSize: fontSize, color: state.highlightColor)
                 }
             }
     }
 
-    private static func pixelFraction(
+    @ViewBuilder
+    private func karaokeHighlightOverlay(
+        lineState: DesktopLyricsLineState,
+        fontSize: CGFloat,
+        color: Color
+    ) -> some View {
+        GeometryReader { geo in
+            TimelineView(.animation) { context in
+                let elapsed = max(0, context.date.timeIntervalSince(lineState.lineStartDate))
+                let characterFraction = DesktopLyricsKaraokeMath.fraction(
+                    inlineTags: lineState.inlineTags,
+                    lineTimeOffset: elapsed,
+                    lineDuration: lineState.lineDuration,
+                    characterCount: lineState.currentLine.count
+                )
+                let pixelFraction = DesktopLyricsKaraokePixelMath.pixelFraction(
+                    characterFraction: characterFraction,
+                    text: lineState.currentLine,
+                    fontSize: fontSize
+                )
+
+                Text(lineState.currentLine)
+                    .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+                    .mask(alignment: .leading) {
+                        Rectangle()
+                            .frame(width: geo.size.width * pixelFraction)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+            }
+        }
+    }
+}
+
+@MainActor
+enum DesktopLyricsKaraokePixelMath {
+    private struct CacheKey: Hashable {
+        let text: String
+        let fontSize: CGFloat
+    }
+
+    private struct CachedLine {
+        let line: CTLine
+        let totalWidth: CGFloat
+    }
+
+    private static var cache: [CacheKey: CachedLine] = [:]
+    private static let cacheLimit = 32
+
+    static func pixelFraction(
         characterFraction: Double,
         text: String,
         fontSize: CGFloat
     ) -> Double {
-        guard !text.isEmpty, characterFraction > 0 else { return 0 }
+        guard text.isEmpty == false, characterFraction > 0 else { return 0 }
         guard characterFraction < 1.0 else { return 1.0 }
 
-        let baseFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
-        let font = baseFont.fontDescriptor.withDesign(.rounded)
-            .flatMap { NSFont(descriptor: $0, size: fontSize) } ?? baseFont
-        let attrString = NSAttributedString(string: text, attributes: [.font: font])
-        let line = CTLineCreateWithAttributedString(attrString)
-        let totalWidth = CTLineGetTypographicBounds(line, nil, nil, nil)
+        let cached = cachedLine(text: text, fontSize: fontSize)
+        let line = cached.line
+        let totalWidth = cached.totalWidth
         guard totalWidth > 0 else { return characterFraction }
 
         let charCount = text.count
@@ -131,7 +182,7 @@ struct DesktopLyricsView: View {
         let floorOffset = CTLineGetOffsetForStringIndex(line, floorUTF16, nil)
 
         if ceilCharIndex == floorCharIndex || interp < 0.001 {
-            return min(1.0, max(0.0, Double(floorOffset) / totalWidth))
+            return min(1.0, max(0.0, Double(floorOffset) / Double(totalWidth)))
         }
 
         let ceilStringIndex = text.index(text.startIndex, offsetBy: ceilCharIndex)
@@ -139,7 +190,28 @@ struct DesktopLyricsView: View {
         let ceilOffset = CTLineGetOffsetForStringIndex(line, ceilUTF16, nil)
 
         let pixelOffset = floorOffset + CGFloat(interp) * (ceilOffset - floorOffset)
-        return min(1.0, max(0.0, Double(pixelOffset) / totalWidth))
+        return min(1.0, max(0.0, Double(pixelOffset) / Double(totalWidth)))
+    }
+
+    private static func cachedLine(text: String, fontSize: CGFloat) -> CachedLine {
+        let key = CacheKey(text: text, fontSize: fontSize)
+        if let hit = cache[key] {
+            return hit
+        }
+
+        let baseFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let font = baseFont.fontDescriptor.withDesign(.rounded)
+            .flatMap { NSFont(descriptor: $0, size: fontSize) } ?? baseFont
+        let attrString = NSAttributedString(string: text, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attrString)
+        let totalWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let value = CachedLine(line: line, totalWidth: totalWidth)
+
+        if cache.count >= cacheLimit {
+            cache.removeAll(keepingCapacity: true)
+        }
+        cache[key] = value
+        return value
     }
 }
 
@@ -187,10 +259,13 @@ final class DesktopLyricsWindow: NSPanel {
         highlightColor: Color,
         fontSize: CGFloat
     ) {
-        model.presentation = presentation
-        model.isMouseHovering = isMouseHovering
-        model.highlightColor = highlightColor
-        model.fontSize = fontSize
+        let nextState = DesktopLyricsViewState(
+            presentation: presentation,
+            isMouseHovering: isMouseHovering,
+            highlightColor: highlightColor,
+            fontSize: fontSize
+        )
+        model.update(nextState)
 
         let intrinsicSize = hostingView.intrinsicContentSize
         let cardWidth = max(200, intrinsicSize.width)

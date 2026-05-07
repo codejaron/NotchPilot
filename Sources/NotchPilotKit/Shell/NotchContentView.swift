@@ -1,7 +1,6 @@
 import SwiftUI
 
 public struct NotchContentView: View {
-    private let previewRefreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
     private let closeSpring = Animation.spring(response: 0.32, dampingFraction: 0.95, blendDuration: 0)
     private let closedCornerInsets = (top: CGFloat(6), bottom: CGFloat(14))
@@ -11,7 +10,6 @@ public struct NotchContentView: View {
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager
     @ObservedObject private var store = SettingsStore.shared
-    @State private var previewRefreshTick = Date()
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.session = session
@@ -19,7 +17,6 @@ public struct NotchContentView: View {
     }
 
     public var body: some View {
-        let _ = previewRefreshTick
         let plugins = pluginManager.enabledPlugins
         let context = NotchContext(
             screenID: session.id,
@@ -31,7 +28,6 @@ public struct NotchContentView: View {
         let displaySize = visualDisplaySize(layoutMetrics.displaySize)
         let interactionSize = layoutMetrics.interactionSize
         let previewPlugin = pluginManager.previewPlugin(for: session.currentSneakPeek, context: context)
-        let preview = previewPlugin?.preview(context: context)
 
         ZStack(alignment: .top) {
             Color.clear
@@ -43,8 +39,8 @@ public struct NotchContentView: View {
                     expandedBody(plugins: plugins, context: context)
                         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                 } else if session.notchState == .previewClosed,
-                          let preview {
-                    previewBody(preview)
+                          let previewPlugin {
+                    previewClosedBody(previewPlugin: previewPlugin, context: context)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 } else {
                     idleBody
@@ -63,11 +59,16 @@ public struct NotchContentView: View {
         .animation(animationSpring, value: displaySize)
         .animation(animationSpring, value: session.hoverState)
         .sensoryFeedback(.alignment, trigger: session.hoverFeedbackTrigger)
-        .onReceive(previewRefreshTimer) { date in
-            guard session.notchState == .previewClosed else {
-                return
+    }
+
+    @ViewBuilder
+    private func previewClosedBody(previewPlugin: any NotchPlugin, context: NotchContext) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            if let preview = previewPlugin.preview(context: context) {
+                previewBody(preview)
+            } else {
+                idleBody
             }
-            previewRefreshTick = date
         }
     }
 

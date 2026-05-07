@@ -868,57 +868,54 @@ struct AIPluginCompactApprovalNoticeLayout: Equatable {
 }
 
 struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
-    private let runtimeRefreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
     @ObservedObject var plugin: Plugin
     @ObservedObject private var settingsStore = SettingsStore.shared
-    @State private var runtimeRefreshTick = Date()
 
     let context: NotchContext
     let approvalNotice: AIPluginApprovalSneakNotice?
     let noticeLayout: AIPluginCompactApprovalNoticeLayout
 
     var body: some View {
-        let _ = runtimeRefreshTick
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            content
+        }
+    }
 
-        Group {
-            if let activity = plugin.currentCompactActivity,
-               let metrics = plugin.compactMetrics(context: context) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        compactBrandCluster(activity)
-                            .frame(width: metrics.sideFrameWidth, alignment: .leading)
+    @ViewBuilder
+    private var content: some View {
+        if let activity = plugin.currentCompactActivity,
+           let metrics = plugin.compactMetrics(context: context) {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    compactBrandCluster(activity)
+                        .frame(width: metrics.sideFrameWidth, alignment: .leading)
 
-                        Spacer(minLength: context.notchGeometry.compactSize.width)
+                    Spacer(minLength: context.notchGeometry.compactSize.width)
 
-                        compactTokenCluster(activity)
-                            .frame(width: metrics.sideFrameWidth, alignment: .trailing)
-                    }
-                    .frame(height: context.notchGeometry.compactSize.height, alignment: .center)
-
-                    if let approvalNotice {
-                        approvalNoticeRow(approvalNotice)
-                    }
+                    compactTokenCluster(activity)
+                        .frame(width: metrics.sideFrameWidth, alignment: .trailing)
                 }
-                .padding(.horizontal, AIPluginCompactLayout.outerPadding)
-                .frame(
-                    width: noticeLayout.totalWidth,
-                    height: context.notchGeometry.compactSize.height + noticeLayout.height,
-                    alignment: .top
-                )
-            } else {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.gray)
-                        .frame(width: 10, height: 10)
-                    Text(AppStrings.text(.idle, language: settingsStore.interfaceLanguage))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
+                .frame(height: context.notchGeometry.compactSize.height, alignment: .center)
+
+                if let approvalNotice {
+                    approvalNoticeRow(approvalNotice)
                 }
             }
-        }
-        .onReceive(runtimeRefreshTimer) { date in
-            runtimeRefreshTick = date
+            .padding(.horizontal, AIPluginCompactLayout.outerPadding)
+            .frame(
+                width: noticeLayout.totalWidth,
+                height: context.notchGeometry.compactSize.height + noticeLayout.height,
+                alignment: .top
+            )
+        } else {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.gray)
+                    .frame(width: 10, height: 10)
+                Text(AppStrings.text(.idle, language: settingsStore.interfaceLanguage))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
         }
     }
 

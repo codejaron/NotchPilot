@@ -112,6 +112,89 @@ final class DesktopLyricsModelsTests: XCTestCase {
         XCTAssertEqual(presentation.nextLine, "line 3")
     }
 
+    func testDesktopLyricsPresentationResolverIsStableAcrossResolvesWithinSameLine() {
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "line 1"),
+                TimedLyricLine(timestamp: 15, text: "line 2"),
+                TimedLyricLine(timestamp: 30, text: "line 3"),
+            ]
+        )
+
+        let captureDate = Date(timeIntervalSince1970: 100)
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            artworkData: nil,
+            currentTime: 16,
+            duration: 200,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: captureDate
+        )
+
+        let early = DesktopLyricsPresentationResolver.resolve(
+            playbackState: .active(snapshot),
+            lyrics: lyrics,
+            at: captureDate
+        )
+        let later = DesktopLyricsPresentationResolver.resolve(
+            playbackState: .active(snapshot),
+            lyrics: lyrics,
+            at: captureDate.addingTimeInterval(3)
+        )
+
+        XCTAssertEqual(early, later)
+        XCTAssertEqual(early.currentLine, "line 2")
+        XCTAssertEqual(early.lineState?.lineStartDate, captureDate.addingTimeInterval(-1))
+    }
+
+    func testDesktopLyricsPresentationKaraokeFractionAdvancesWithDate() {
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "0123456789"),
+                TimedLyricLine(timestamp: 10, text: "next"),
+            ]
+        )
+        let captureDate = Date(timeIntervalSince1970: 200)
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            artworkData: nil,
+            currentTime: 0,
+            duration: 200,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: captureDate
+        )
+
+        let presentation = DesktopLyricsPresentationResolver.resolve(
+            playbackState: .active(snapshot),
+            lyrics: lyrics,
+            at: captureDate
+        )
+
+        XCTAssertEqual(presentation.karaokeFraction(at: captureDate), 0.0, accuracy: 0.0001)
+        let halfwayFraction = presentation.karaokeFraction(at: captureDate.addingTimeInterval(1.5))
+        XCTAssertGreaterThan(halfwayFraction, 0.0)
+        XCTAssertLessThan(halfwayFraction, 1.0)
+        XCTAssertEqual(presentation.karaokeFraction(at: captureDate.addingTimeInterval(20)), 1.0, accuracy: 0.0001)
+    }
+
     func testDesktopLyricsPresentationResolverPrefersTranslationOverNextLine() {
         let lyrics = TimedLyrics(
             title: "Song",

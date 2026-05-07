@@ -80,9 +80,9 @@ final class SystemMonitorSamplerTests: XCTestCase {
     func testBestEffortSamplerProducesRealMachineBackedSnapshot() {
         let sampler = SystemMonitorBestEffortSampler()
 
-        _ = sampler.snapshot()
+        _ = sampler.snapshot(demand: .detailed)
         Thread.sleep(forTimeInterval: 0.2)
-        let snapshot = sampler.snapshot()
+        let snapshot = sampler.snapshot(demand: .detailed)
 
         XCTAssertEqual(snapshot.blocks.map(\.kind), [.cpu, .memory, .network, .disk])
         XCTAssertEqual(snapshot.blocks.first(where: { $0.kind == .network })?.topItems.count, 3)
@@ -103,6 +103,38 @@ final class SystemMonitorSamplerTests: XCTestCase {
         XCTAssertNotNil(memoryBlock)
         XCTAssertTrue(memoryBlock?.detail.hasPrefix("Pressure \(memoryBlock?.summary ?? "")") == true)
         XCTAssertTrue(memoryBlock?.detail.contains("Memory ") == true)
+    }
+
+    func testMemoryPressureMapsKernelFreePercentToOneMinusFraction() throws {
+        let pressure = try XCTUnwrap(
+            SystemMonitorSampleMath.memoryPressure(rawPercent: 40)
+        )
+
+        XCTAssertEqual(pressure, 0.6, accuracy: 0.001)
+    }
+
+    func testMemoryPressureIsUnavailableWithoutRawPercent() {
+        XCTAssertNil(SystemMonitorSampleMath.memoryPressure(rawPercent: nil))
+    }
+
+    func testMemoryPressureClampsOutOfRangeRawPercents() throws {
+        let high = try XCTUnwrap(SystemMonitorSampleMath.memoryPressure(rawPercent: 150))
+        let low = try XCTUnwrap(SystemMonitorSampleMath.memoryPressure(rawPercent: -10))
+
+        XCTAssertEqual(high, 0)
+        XCTAssertEqual(low, 1)
+    }
+
+    func testBasicSamplingDemandSkipsPerProcessNetworkCollection() {
+        let sampler = SystemMonitorBestEffortSampler()
+
+        _ = sampler.snapshot(demand: .basic)
+        Thread.sleep(forTimeInterval: 0.2)
+        let snapshot = sampler.snapshot(demand: .basic)
+
+        let networkBlock = snapshot.blocks.first { $0.kind == .network }
+        let nonPlaceholderCount = networkBlock?.topItems.filter { $0.id.hasPrefix("network-placeholder-") == false }.count
+        XCTAssertEqual(nonPlaceholderCount, 0)
     }
 
     func testCPUUsageUsesMachTickDeltas() {

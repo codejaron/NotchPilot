@@ -110,10 +110,24 @@ final class AIPluginSupportTests: XCTestCase {
             noticeLayout: noticeLayout
         )
         let hostingView = NSHostingView(rootView: view)
-        hostingView.frame = CGRect(
+        let frame = CGRect(
             origin: .zero,
             size: CGSize(width: noticeLayout.totalWidth, height: Self.compactContext.notchGeometry.compactSize.height)
         )
+        hostingView.frame = frame
+
+        // TimelineView only schedules periodic updates while hosted in a real
+        // window, so attach the hosting view to an offscreen panel for the
+        // duration of the assertion.
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
 
         hostingView.layoutSubtreeIfNeeded()
         let initialReadCount = plugin.activityReadCount

@@ -272,18 +272,35 @@ struct TimedLyrics: Equatable, Codable, Sendable {
     }
 }
 
+struct DesktopLyricsLineState: Equatable, Sendable {
+    let currentLine: String
+    let nextLine: String?
+    let inlineTags: [TimedLyricLine.InlineTag]?
+    let lineStartDate: Date
+    let lineDuration: TimeInterval
+}
+
 struct DesktopLyricsPresentation: Equatable, Sendable {
     let isVisible: Bool
-    let currentLine: String?
-    let nextLine: String?
-    let karaokeFraction: Double
+    let lineState: DesktopLyricsLineState?
 
-    static let hidden = DesktopLyricsPresentation(
-        isVisible: false,
-        currentLine: nil,
-        nextLine: nil,
-        karaokeFraction: 1.0
-    )
+    var currentLine: String? { lineState?.currentLine }
+    var nextLine: String? { lineState?.nextLine }
+
+    func karaokeFraction(at date: Date = Date()) -> Double {
+        guard let lineState else {
+            return 1.0
+        }
+        let timeOffset = max(0, date.timeIntervalSince(lineState.lineStartDate))
+        return DesktopLyricsKaraokeMath.fraction(
+            inlineTags: lineState.inlineTags,
+            lineTimeOffset: timeOffset,
+            lineDuration: lineState.lineDuration,
+            characterCount: lineState.currentLine.count
+        )
+    }
+
+    static let hidden = DesktopLyricsPresentation(isVisible: false, lineState: nil)
 }
 
 enum DesktopLyricsPresentationResolver {
@@ -299,27 +316,27 @@ enum DesktopLyricsPresentationResolver {
             return .hidden
         }
 
-        let adjustedTime = snapshot.estimatedCurrentTime(at: date) + TimeInterval(offsetMilliseconds) / 1000.0
+        let offset = TimeInterval(offsetMilliseconds) / 1000.0
+        let adjustedTime = snapshot.estimatedCurrentTime(at: date) + offset
         guard let pair = lyrics.linePair(at: adjustedTime) else {
             return .hidden
         }
 
-        let fraction = computeKaraokeFraction(
-            inlineTags: pair.current.inlineTags,
-            lineTimeOffset: pair.lineTimeOffset,
-            lineDuration: pair.lineDuration,
-            characterCount: pair.current.text.count
-        )
-
-        return DesktopLyricsPresentation(
-            isVisible: true,
+        let lineStartDate = date.addingTimeInterval(-pair.lineTimeOffset)
+        let lineState = DesktopLyricsLineState(
             currentLine: pair.current.text,
             nextLine: pair.current.translation ?? pair.next?.text,
-            karaokeFraction: fraction
+            inlineTags: pair.current.inlineTags,
+            lineStartDate: lineStartDate,
+            lineDuration: pair.lineDuration
         )
-    }
 
-    private static func computeKaraokeFraction(
+        return DesktopLyricsPresentation(isVisible: true, lineState: lineState)
+    }
+}
+
+enum DesktopLyricsKaraokeMath {
+    static func fraction(
         inlineTags: [TimedLyricLine.InlineTag]?,
         lineTimeOffset: TimeInterval,
         lineDuration: TimeInterval,

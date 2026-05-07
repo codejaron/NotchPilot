@@ -12,11 +12,12 @@ final class DesktopLyricsManager {
     private let fileManager: FileManager
     private let lyricsSearchWindowController: LyricsSearchWindowController
 
+    private static let refreshInterval: TimeInterval = 0.25
+
     private var windows: [String: DesktopLyricsWindow] = [:]
     private var playbackCancellable: AnyCancellable?
     private var presentationCancellable: AnyCancellable?
     private var displayTimer: Timer?
-    private var isHighRefreshActive = false
     private var screenObserver: NSObjectProtocol?
 
     init(
@@ -56,7 +57,7 @@ final class DesktopLyricsManager {
             self?.refreshWindows()
         }
 
-        startSlowTimer()
+        scheduleTimer()
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -75,7 +76,6 @@ final class DesktopLyricsManager {
     func stop() {
         displayTimer?.invalidate()
         displayTimer = nil
-        isHighRefreshActive = false
         playbackCancellable = nil
         presentationCancellable = nil
         if let screenObserver {
@@ -140,25 +140,11 @@ final class DesktopLyricsManager {
                 window.orderOut(nil)
             }
         }
-
-        updateRefreshRate()
     }
 
-    private func updateRefreshRate() {
-        let needsHighRefresh = controller.presentation.isVisible
-        guard needsHighRefresh != isHighRefreshActive else { return }
-        isHighRefreshActive = needsHighRefresh
-        let interval: TimeInterval = needsHighRefresh ? 1.0 / 60.0 : 0.25
-        scheduleTimer(interval: interval)
-    }
-
-    private func startSlowTimer() {
-        scheduleTimer(interval: 0.25)
-    }
-
-    private func scheduleTimer(interval: TimeInterval) {
+    private func scheduleTimer() {
         displayTimer?.invalidate()
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.controller.refreshPresentation()
                 self?.refreshWindows()

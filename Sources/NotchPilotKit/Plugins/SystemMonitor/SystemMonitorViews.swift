@@ -399,10 +399,11 @@ private extension SystemMonitorMetric {
 }
 
 struct SystemMonitorDashboardView: View {
-    let snapshot: SystemMonitorSnapshot
+    @ObservedObject var plugin: SystemMonitorPlugin
     let accentColor: Color
 
     var body: some View {
+        let snapshot = plugin.snapshot
         let layout = SystemMonitorDashboardLayout(snapshot: snapshot)
 
         return GeometryReader { geometry in
@@ -427,6 +428,8 @@ struct SystemMonitorDashboardView: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { plugin.dashboardDidAppear() }
+        .onDisappear { plugin.dashboardDidDisappear() }
     }
 }
 

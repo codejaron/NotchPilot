@@ -4,8 +4,26 @@ import Foundation
 import IOKit.ps
 import SystemConfiguration
 
+struct SystemMonitorSamplingDemand: Sendable, Equatable {
+    let includesPerProcessNetwork: Bool
+
+    init(includesPerProcessNetwork: Bool = false) {
+        self.includesPerProcessNetwork = includesPerProcessNetwork
+    }
+
+    static let basic = SystemMonitorSamplingDemand(includesPerProcessNetwork: false)
+    static let detailed = SystemMonitorSamplingDemand(includesPerProcessNetwork: true)
+}
+
 protocol SystemMonitorSampling: Sendable {
     func snapshot() -> SystemMonitorSnapshot
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot
+}
+
+extension SystemMonitorSampling {
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
+        snapshot()
+    }
 }
 
 struct SystemMonitorUnavailableSampler: SystemMonitorSampling {
@@ -66,6 +84,7 @@ struct SystemMonitorCPUTicks: Equatable, Sendable {
 }
 
 struct SystemMonitorMemoryCounters: Equatable, Sendable {
+    let freeBytes: UInt64
     let activeBytes: UInt64
     let inactiveBytes: UInt64
     let speculativeBytes: UInt64
@@ -73,6 +92,26 @@ struct SystemMonitorMemoryCounters: Equatable, Sendable {
     let compressedBytes: UInt64
     let purgeableBytes: UInt64
     let externalBytes: UInt64
+
+    init(
+        freeBytes: UInt64 = 0,
+        activeBytes: UInt64,
+        inactiveBytes: UInt64,
+        speculativeBytes: UInt64,
+        wiredBytes: UInt64,
+        compressedBytes: UInt64,
+        purgeableBytes: UInt64,
+        externalBytes: UInt64
+    ) {
+        self.freeBytes = freeBytes
+        self.activeBytes = activeBytes
+        self.inactiveBytes = inactiveBytes
+        self.speculativeBytes = speculativeBytes
+        self.wiredBytes = wiredBytes
+        self.compressedBytes = compressedBytes
+        self.purgeableBytes = purgeableBytes
+        self.externalBytes = externalBytes
+    }
 
     var usedBytes: UInt64 {
         let grossUsed = activeBytes + inactiveBytes + speculativeBytes + wiredBytes + compressedBytes
@@ -184,7 +223,7 @@ enum SystemMonitorSampleMath {
             return nil
         }
 
-        return clamp(Double(rawPercent) / 100)
+        return clamp(1 - Double(rawPercent) / 100)
     }
 
     static func bytesPerSecond(previous: UInt64?, current: UInt64?, interval: TimeInterval?) -> Double? {
@@ -345,6 +384,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     private var previousNetworkCounter: NetworkCounter?
     private var previousNetworkProcessCounters: [String: SystemMonitorNetworkProcessCounter] = [:]
     private var previousNetworkProcessDate: Date?
+    private var cachedNetworkProcessActivities: [SystemMonitorNetworkProcessActivity] = []
     private var applicationDisplayNameCache: [String: String] = [:]
     private let sensorBridge: SystemMonitorSMCSensorBridge
 
@@ -353,6 +393,10 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     }
 
     func snapshot() -> SystemMonitorSnapshot {
+        snapshot(demand: .basic)
+    }
+
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
         let date = Date()
         let currentCPUTicks = systemCPUTicks()
         let cpuUsage = SystemMonitorSampleMath.cpuUsage(from: previousSystemCPUTicks, to: currentCPUTicks)
@@ -360,11 +404,16 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             previousSystemCPUTicks = currentCPUTicks
         }
 
+        let memoryCounters = memoryCounters()
+        let totalMemoryBytes = physicalMemoryBytes()
         let memoryUsage = SystemMonitorSampleMath.memoryUsage(
-            counters: memoryCounters(),
-            physicalMemoryBytes: physicalMemoryBytes()
+            counters: memoryCounters,
+            physicalMemoryBytes: totalMemoryBytes
         )
-        let memoryPressure = memoryPressure()
+        let memoryPressure = SystemMonitorSampleMath.memoryPressure(
+            rawPercent: memorystatusFreePercent()
+        )
+
         let processInterval = previousProcessDate.map { date.timeIntervalSince($0) }
         let processCounters = processCounters()
         let processActivities = SystemMonitorSampleMath.processActivities(
@@ -373,25 +422,16 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             interval: processInterval,
             processorCount: ProcessInfo.processInfo.activeProcessorCount
         )
-        let statsCPUTopItems = statsCPUTopItems()
-        let statsMemoryTopItems = statsMemoryTopItems()
         previousProcessCounters = processCounters.reduce(into: [:]) { result, counter in
             result[counter.pid] = counter
         }
         previousProcessDate = date
 
         let networkRates = networkByteRates()
-        let networkProcessInterval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
-        let networkProcessCounters = networkProcessCounters()
-        let networkProcessActivities = SystemMonitorSampleMath.networkProcessActivities(
-            previous: previousNetworkProcessCounters,
-            current: networkProcessCounters,
-            interval: networkProcessInterval
+        let networkProcessActivities = refreshNetworkProcessActivitiesIfNeeded(
+            demand: demand,
+            date: date
         )
-        previousNetworkProcessCounters = networkProcessCounters.reduce(into: [:]) { result, counter in
-            result[counter.key] = counter
-        }
-        previousNetworkProcessDate = date
 
         let diskFreeBytes = diskFreeBytes()
         let batteryPercent = batteryPercent()
@@ -415,12 +455,33 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 temperatureCelsius: temperatureCelsius,
                 diskFreeBytes: diskFreeBytes,
                 batteryPercent: batteryPercent,
-                statsCPUTopItems: statsCPUTopItems,
-                statsMemoryTopItems: statsMemoryTopItems,
                 processActivities: processActivities,
                 networkProcessActivities: networkProcessActivities
             )
         )
+    }
+
+    private func refreshNetworkProcessActivitiesIfNeeded(
+        demand: SystemMonitorSamplingDemand,
+        date: Date
+    ) -> [SystemMonitorNetworkProcessActivity] {
+        guard demand.includesPerProcessNetwork else {
+            return cachedNetworkProcessActivities
+        }
+
+        let interval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
+        let currentCounters = networkProcessCounters()
+        let activities = SystemMonitorSampleMath.networkProcessActivities(
+            previous: previousNetworkProcessCounters,
+            current: currentCounters,
+            interval: interval
+        )
+        previousNetworkProcessCounters = currentCounters.reduce(into: [:]) { result, counter in
+            result[counter.key] = counter
+        }
+        previousNetworkProcessDate = date
+        cachedNetworkProcessActivities = activities
+        return activities
     }
 
     private func systemCPUTicks() -> SystemMonitorCPUTicks? {
@@ -481,6 +542,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         let pageSizeBytes = UInt64(pageSize)
 
         return SystemMonitorMemoryCounters(
+            freeBytes: UInt64(statistics.free_count) * pageSizeBytes,
             activeBytes: UInt64(statistics.active_count) * pageSizeBytes,
             inactiveBytes: UInt64(statistics.inactive_count) * pageSizeBytes,
             speculativeBytes: UInt64(statistics.speculative_count) * pageSizeBytes,
@@ -507,9 +569,14 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         return UInt64(info.max_mem)
     }
 
-    private func memoryPressure() -> Double? {
-        runProcess(executable: "/usr/bin/memory_pressure", arguments: ["-Q"], timeout: 4)
-            .flatMap(Self.memoryPressure(fromMemoryPressureOutput:))
+    private func memorystatusFreePercent() -> Int32? {
+        var level: UInt32 = 0
+        var size = MemoryLayout<UInt32>.size
+        let result = sysctlbyname("kern.memorystatus_level", &level, &size, nil, 0)
+        guard result == 0 else {
+            return nil
+        }
+        return Int32(level)
     }
 
     static func memoryPressure(fromMemoryPressureOutput output: String) -> Double? {
@@ -531,61 +598,6 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
     private func processCounters() -> [SystemMonitorProcessCounter] {
         processIDs().compactMap(processCounter)
-    }
-
-    private func statsCPUTopItems() -> [SystemMonitorTopItem] {
-        guard let output = runProcess(
-            executable: "/bin/ps",
-            arguments: ["-Aceo", "pid,pcpu,comm", "-r"]
-        ) else {
-            return []
-        }
-
-        let groupedRows = Dictionary(grouping: Self.cpuProcessRows(fromPSOutput: output)) { row in
-            processDisplayName(pid: row.pid, command: row.command)
-        }
-
-        return groupedRows
-            .map { name, rows in
-                (name: name, cpuPercent: rows.reduce(0) { $0 + $1.cpuPercent })
-            }
-            .sorted { lhs, rhs in lhs.cpuPercent > rhs.cpuPercent }
-            .prefix(SystemMonitorBlockFactory.cpuTopItemCount)
-            .map { row in
-                SystemMonitorTopItem(
-                    id: "\(row.name)-stats-cpu",
-                    name: row.name,
-                    value: "\(Int(row.cpuPercent.rounded()))%"
-                )
-            }
-    }
-
-    private func statsMemoryTopItems() -> [SystemMonitorTopItem] {
-        guard let output = runProcess(
-            executable: "/usr/bin/top",
-            arguments: ["-l", "1", "-o", "mem", "-stats", "pid,command,mem"],
-            timeout: 4
-        ) else {
-            return []
-        }
-
-        let groupedRows = Dictionary(grouping: Self.memoryProcessRows(fromTopOutput: output)) { row in
-            processDisplayName(pid: row.pid, command: row.command)
-        }
-
-        return groupedRows
-            .map { name, rows in
-                (name: name, memoryBytes: rows.reduce(0) { total, row in Self.addClamped(total, row.memoryBytes) })
-            }
-            .sorted { lhs, rhs in lhs.memoryBytes > rhs.memoryBytes }
-            .prefix(SystemMonitorBlockSnapshot.defaultTopItemLimit)
-            .map { row in
-                SystemMonitorTopItem(
-                    id: "\(row.name)-stats-memory",
-                    name: row.name,
-                    value: SystemMonitorFormat.storage(row.memoryBytes)
-                )
-            }
     }
 
     static func cpuProcessRows(fromPSOutput output: String) -> [SystemMonitorCPUProcessRow] {
@@ -735,33 +747,6 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
         let fallbackName = procName(pid: pid) ?? "pid \(pid)"
         return (fallbackName, fallbackName)
-    }
-
-    private func processDisplayName(pid: pid_t, command: String) -> String {
-        let identity = processIdentity(pid: pid)
-        if identity.groupName.hasPrefix("pid ") == false {
-            return identity.groupName
-        }
-
-        if command.contains("com.apple.Virtua"), command.contains("Docker") {
-            return "Docker"
-        }
-
-        if command.hasPrefix("/") {
-            if let appName = Self.applicationGroupName(
-                fromProcessPath: command,
-                bundleDisplayName: applicationDisplayName(forApplicationBundlePath:)
-            ) {
-                return appName
-            }
-
-            let lastPathComponent = URL(fileURLWithPath: command).lastPathComponent
-            if lastPathComponent.isEmpty == false {
-                return lastPathComponent
-            }
-        }
-
-        return command.isEmpty ? "pid \(pid)" : command
     }
 
     private func processPath(pid: pid_t) -> String? {
@@ -967,8 +952,6 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
     private func batteryPercent() -> Double? {
         batteryPercentFromIOKit()
-            ?? runProcess(executable: "/usr/bin/pmset", arguments: ["-g", "batt"])
-            .flatMap(Self.batteryPercent(fromPMSetOutput:))
     }
 
     private func batteryPercentFromIOKit() -> Double? {
@@ -1004,14 +987,6 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         }
 
         return min(1, Double(currentCapacity) / Double(maximumCapacity))
-    }
-
-    private static func addClamped(_ lhs: Int64, _ rhs: Int64) -> Int64 {
-        guard rhs > 0 else {
-            return lhs
-        }
-
-        return lhs > Int64.max - rhs ? Int64.max : lhs + rhs
     }
 
     static func batteryPercent(fromPMSetOutput output: String) -> Double? {
@@ -1072,12 +1047,10 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         temperatureCelsius: Double?,
         diskFreeBytes: Int64?,
         batteryPercent: Double?,
-        statsCPUTopItems: [SystemMonitorTopItem],
-        statsMemoryTopItems: [SystemMonitorTopItem],
         processActivities: [SystemMonitorProcessActivity],
         networkProcessActivities: [SystemMonitorNetworkProcessActivity]
     ) -> [SystemMonitorBlockSnapshot] {
-        let fallbackTopCPU = processActivities
+        let topCPU = processActivities
             .compactMap { activity -> (SystemMonitorProcessActivity, Double)? in
                 guard let cpuPercent = activity.cpuPercent, cpuPercent > 0.01 else {
                     return nil
@@ -1093,9 +1066,8 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                     value: "\(Int(cpuPercent.rounded()))%"
                 )
             }
-        let topCPU = statsCPUTopItems.isEmpty ? fallbackTopCPU : statsCPUTopItems
 
-        let fallbackTopMemory = processActivities
+        let topMemory = processActivities
             .filter { $0.memoryBytes > 0 }
             .sorted { lhs, rhs in lhs.memoryBytes > rhs.memoryBytes }
             .prefix(SystemMonitorBlockSnapshot.defaultTopItemLimit)
@@ -1106,7 +1078,6 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                     value: SystemMonitorFormat.storage(activity.memoryBytes)
                 )
             }
-        let topMemory = statsMemoryTopItems.isEmpty ? fallbackTopMemory : statsMemoryTopItems
 
         let topNetwork = networkProcessActivities
             .sorted { lhs, rhs in lhs.totalBytesPerSecond > rhs.totalBytesPerSecond }
