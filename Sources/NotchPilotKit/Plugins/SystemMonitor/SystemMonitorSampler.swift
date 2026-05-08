@@ -422,6 +422,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             interval: processInterval,
             processorCount: ProcessInfo.processInfo.activeProcessorCount
         )
+        let statsCPUTopItems = statsCPUTopItems()
         previousProcessCounters = processCounters.reduce(into: [:]) { result, counter in
             result[counter.pid] = counter
         }
@@ -455,6 +456,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 temperatureCelsius: temperatureCelsius,
                 diskFreeBytes: diskFreeBytes,
                 batteryPercent: batteryPercent,
+                statsCPUTopItems: statsCPUTopItems,
                 processActivities: processActivities,
                 networkProcessActivities: networkProcessActivities
             )
@@ -598,6 +600,33 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
     private func processCounters() -> [SystemMonitorProcessCounter] {
         processIDs().compactMap(processCounter)
+    }
+
+    private func statsCPUTopItems() -> [SystemMonitorTopItem] {
+        guard let output = runProcess(
+            executable: "/bin/ps",
+            arguments: ["-Aceo", "pid,pcpu,comm", "-r"]
+        ) else {
+            return []
+        }
+
+        let groupedRows = Dictionary(grouping: Self.cpuProcessRows(fromPSOutput: output)) { row in
+            processDisplayName(pid: row.pid, command: row.command)
+        }
+
+        return groupedRows
+            .map { name, rows in
+                (name: name, cpuPercent: rows.reduce(0) { $0 + $1.cpuPercent })
+            }
+            .sorted { lhs, rhs in lhs.cpuPercent > rhs.cpuPercent }
+            .prefix(SystemMonitorBlockFactory.cpuTopItemCount)
+            .map { row in
+                SystemMonitorTopItem(
+                    id: "\(row.name)-stats-cpu",
+                    name: row.name,
+                    value: "\(Int(row.cpuPercent.rounded()))%"
+                )
+            }
     }
 
     static func cpuProcessRows(fromPSOutput output: String) -> [SystemMonitorCPUProcessRow] {
@@ -747,6 +776,33 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
         let fallbackName = procName(pid: pid) ?? "pid \(pid)"
         return (fallbackName, fallbackName)
+    }
+
+    private func processDisplayName(pid: pid_t, command: String) -> String {
+        let identity = processIdentity(pid: pid)
+        if identity.groupName.hasPrefix("pid ") == false {
+            return identity.groupName
+        }
+
+        if command.contains("com.apple.Virtua"), command.contains("Docker") {
+            return "Docker"
+        }
+
+        if command.hasPrefix("/") {
+            if let appName = Self.applicationGroupName(
+                fromProcessPath: command,
+                bundleDisplayName: applicationDisplayName(forApplicationBundlePath:)
+            ) {
+                return appName
+            }
+
+            let lastPathComponent = URL(fileURLWithPath: command).lastPathComponent
+            if lastPathComponent.isEmpty == false {
+                return lastPathComponent
+            }
+        }
+
+        return command.isEmpty ? "pid \(pid)" : command
     }
 
     private func processPath(pid: pid_t) -> String? {
@@ -1047,10 +1103,11 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         temperatureCelsius: Double?,
         diskFreeBytes: Int64?,
         batteryPercent: Double?,
+        statsCPUTopItems: [SystemMonitorTopItem],
         processActivities: [SystemMonitorProcessActivity],
         networkProcessActivities: [SystemMonitorNetworkProcessActivity]
     ) -> [SystemMonitorBlockSnapshot] {
-        let topCPU = processActivities
+        let fallbackTopCPU = processActivities
             .compactMap { activity -> (SystemMonitorProcessActivity, Double)? in
                 guard let cpuPercent = activity.cpuPercent, cpuPercent > 0.01 else {
                     return nil
@@ -1066,6 +1123,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                     value: "\(Int(cpuPercent.rounded()))%"
                 )
             }
+        let topCPU = statsCPUTopItems.isEmpty ? fallbackTopCPU : statsCPUTopItems
 
         let topMemory = processActivities
             .filter { $0.memoryBytes > 0 }
