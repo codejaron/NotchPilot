@@ -2,14 +2,26 @@ import XCTest
 @testable import NotchPilotKit
 
 final class SystemMonitorModelsTests: XCTestCase {
-    func testDashboardTypographyOnlyRaisesRowNumericValuesToTwelve() {
+    func testDashboardTypographyKeepsNetworkRowVisuallySubordinateToSummary() {
         XCTAssertEqual(SystemMonitorDashboardTypography.rowNameFontSize, 11, accuracy: 0.1)
         XCTAssertEqual(SystemMonitorDashboardTypography.standardRowValueFontSize, 12, accuracy: 0.1)
-        XCTAssertEqual(SystemMonitorDashboardTypography.networkRowValueFontSize, 12, accuracy: 0.1)
+        XCTAssertEqual(SystemMonitorDashboardTypography.networkRowValueFontSize, 10, accuracy: 0.1)
         XCTAssertEqual(SystemMonitorDashboardTypography.systemStatusRowValueFontSize, 12, accuracy: 0.1)
         XCTAssertFalse(SystemMonitorDashboardTypography.systemStatusUsesMonospacedRowValues)
         XCTAssertEqual(SystemMonitorDashboardTypography.standardSummaryFontSize, 18, accuracy: 0.1)
-        XCTAssertEqual(SystemMonitorDashboardTypography.networkSummaryFontSize, 13, accuracy: 0.1)
+        XCTAssertEqual(SystemMonitorDashboardTypography.networkSummaryFontSize, 15, accuracy: 0.1)
+
+        let networkSummaryToRowRatio =
+            SystemMonitorDashboardTypography.networkSummaryFontSize
+                / SystemMonitorDashboardTypography.networkRowValueFontSize
+        let standardSummaryToRowRatio =
+            SystemMonitorDashboardTypography.standardSummaryFontSize
+                / SystemMonitorDashboardTypography.standardRowValueFontSize
+        XCTAssertEqual(
+            networkSummaryToRowRatio,
+            standardSummaryToRowRatio,
+            accuracy: 0.05
+        )
     }
 
     func testSneakConfigurationCapsEachSideAtTwoMetrics() {

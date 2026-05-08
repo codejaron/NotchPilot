@@ -405,6 +405,68 @@ final class SystemMonitorSamplerTests: XCTestCase {
         XCTAssertEqual(counters[1].name, "Google Chrome H")
     }
 
+    func testPidExtractionFromNettopIdentifierKeepsDottedCommSegment() {
+        XCTAssertEqual(
+            SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "Google Chrome H.1538"),
+            1538
+        )
+        XCTAssertEqual(
+            SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "com.docker.backend.42"),
+            42
+        )
+        XCTAssertEqual(
+            SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "mDNSResponder.451"),
+            451
+        )
+    }
+
+    func testPidExtractionRejectsIdentifiersWithoutNumericPidSuffix() {
+        XCTAssertNil(SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "no-dot-here"))
+        XCTAssertNil(SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "trailing.dot."))
+        XCTAssertNil(SystemMonitorBestEffortSampler.pid(fromNettopIdentifier: "Chrome.notapid"))
+    }
+
+    func testResolvedDisplayNamePrefersInnermostAppBundle() {
+        let helperPath = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
+        let bundleDisplayName: (String) -> String? = { bundlePath in
+            switch bundlePath {
+            case let path where path.hasSuffix("/Google Chrome Helper.app"):
+                return "Google Chrome Helper"
+            case let path where path.hasSuffix("/Google Chrome.app"):
+                return "Google Chrome"
+            default:
+                return nil
+            }
+        }
+
+        let resolved = SystemMonitorBestEffortSampler.resolvedDisplayName(
+            fromProcessPath: helperPath,
+            bundleDisplayName: bundleDisplayName
+        )
+
+        XCTAssertEqual(resolved, "Google Chrome Helper")
+    }
+
+    func testResolvedDisplayNameFallsBackToExecutableForNonAppProcesses() {
+        let cliPath = "/usr/local/bin/verge-mihomo"
+        let resolved = SystemMonitorBestEffortSampler.resolvedDisplayName(
+            fromProcessPath: cliPath,
+            bundleDisplayName: { _ in nil }
+        )
+
+        XCTAssertEqual(resolved, "verge-mihomo")
+    }
+
+    func testResolvedDisplayNameFallsBackToExecutableWhenBundleHasNoDisplayName() {
+        let path = "/Applications/Mystery.app/Contents/MacOS/Mystery"
+        let resolved = SystemMonitorBestEffortSampler.resolvedDisplayName(
+            fromProcessPath: path,
+            bundleDisplayName: { _ in nil }
+        )
+
+        XCTAssertEqual(resolved, "Mystery")
+    }
+
     func testNetworkProcessActivitiesUseNettopCounterDeltas() {
         let previous = [
             "Google Chrome H.1538": SystemMonitorNetworkProcessCounter(

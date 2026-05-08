@@ -386,6 +386,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     private var previousNetworkProcessDate: Date?
     private var cachedNetworkProcessActivities: [SystemMonitorNetworkProcessActivity] = []
     private var applicationDisplayNameCache: [String: String] = [:]
+    private var networkProcessNameCache: [String: String] = [:]
     private let sensorBridge: SystemMonitorSMCSensorBridge
 
     init(sensorBridge: SystemMonitorSMCSensorBridge = SystemMonitorSMCSensorBridge()) {
@@ -467,10 +468,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         demand: SystemMonitorSamplingDemand,
         date: Date
     ) -> [SystemMonitorNetworkProcessActivity] {
-        guard demand.includesPerProcessNetwork else {
-            return cachedNetworkProcessActivities
-        }
-
+        _ = demand
         let interval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
         let currentCounters = networkProcessCounters()
         let activities = SystemMonitorSampleMath.networkProcessActivities(
@@ -939,12 +937,84 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     private func networkProcessCounters() -> [SystemMonitorNetworkProcessCounter] {
         guard let output = runProcess(
             executable: "/usr/bin/nettop",
-            arguments: ["-P", "-L", "1", "-n", "-x", "-t", "external", "-J", "bytes_in,bytes_out"]
+            arguments: ["-P", "-L", "1", "-n", "-x", "-J", "bytes_in,bytes_out"]
         ) else {
             return []
         }
 
-        return Self.networkProcessCounters(fromNettopCSV: output)
+        let parsed = Self.networkProcessCounters(fromNettopCSV: output)
+        let resolved = parsed.map { counter -> SystemMonitorNetworkProcessCounter in
+            guard let resolvedName = resolvedNetworkProcessName(forNettopIdentifier: counter.key),
+                  resolvedName != counter.name
+            else {
+                return counter
+            }
+            return SystemMonitorNetworkProcessCounter(
+                key: counter.key,
+                name: resolvedName,
+                receivedBytes: counter.receivedBytes,
+                sentBytes: counter.sentBytes
+            )
+        }
+
+        let liveIdentifiers = Set(resolved.map(\.key))
+        networkProcessNameCache = networkProcessNameCache.filter { liveIdentifiers.contains($0.key) }
+
+        return resolved
+    }
+
+    private func resolvedNetworkProcessName(forNettopIdentifier identifier: String) -> String? {
+        if let cached = networkProcessNameCache[identifier] {
+            return cached.isEmpty ? nil : cached
+        }
+
+        guard let pid = Self.pid(fromNettopIdentifier: identifier) else {
+            networkProcessNameCache[identifier] = ""
+            return nil
+        }
+
+        guard let path = processPath(pid: pid) else {
+            networkProcessNameCache[identifier] = ""
+            return nil
+        }
+
+        let resolved = Self.resolvedDisplayName(
+            fromProcessPath: path,
+            bundleDisplayName: { [unowned self] bundlePath in
+                self.applicationDisplayName(forApplicationBundlePath: bundlePath)
+            }
+        )
+        networkProcessNameCache[identifier] = resolved ?? ""
+        return resolved
+    }
+
+    static func pid(fromNettopIdentifier identifier: String) -> pid_t? {
+        guard let separatorIndex = identifier.lastIndex(of: ".") else {
+            return nil
+        }
+        let pidString = identifier[identifier.index(after: separatorIndex)...]
+        guard pidString.isEmpty == false,
+              pidString.allSatisfy(\.isNumber)
+        else {
+            return nil
+        }
+        return pid_t(pidString)
+    }
+
+    static func resolvedDisplayName(
+        fromProcessPath processPath: String,
+        bundleDisplayName: (String) -> String?
+    ) -> String? {
+        let pathComponents = URL(fileURLWithPath: processPath).pathComponents
+        if let appIndex = pathComponents.lastIndex(where: { $0.hasSuffix(".app") }) {
+            let bundlePath = NSString.path(withComponents: Array(pathComponents.prefix(appIndex + 1)))
+            if let bundleName = bundleDisplayName(bundlePath), bundleName.isEmpty == false {
+                return bundleName
+            }
+        }
+
+        let executable = URL(fileURLWithPath: processPath).lastPathComponent
+        return executable.isEmpty ? nil : executable
     }
 
     static func networkProcessCounters(fromNettopCSV output: String) -> [SystemMonitorNetworkProcessCounter] {

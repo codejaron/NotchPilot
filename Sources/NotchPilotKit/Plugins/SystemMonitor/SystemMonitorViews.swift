@@ -481,11 +481,11 @@ struct SystemMonitorDashboardLayout: Equatable {
 enum SystemMonitorDashboardTypography {
     static let rowNameFontSize: CGFloat = 11
     static let standardRowValueFontSize: CGFloat = 12
-    static let networkRowValueFontSize: CGFloat = 12
+    static let networkRowValueFontSize: CGFloat = 10
     static let systemStatusRowValueFontSize: CGFloat = 12
     static let systemStatusUsesMonospacedRowValues = false
     static let standardSummaryFontSize: CGFloat = 18
-    static let networkSummaryFontSize: CGFloat = 13
+    static let networkSummaryFontSize: CGFloat = 15
     static let detailFontSize: CGFloat = 10
 }
 
@@ -562,10 +562,12 @@ private struct SystemMonitorBlockView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(block.topItems) { item in
+                    let displayName = AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage)
                     HStack(spacing: 5) {
-                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
+                        Text(displayName)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .help(displayName)
 
                         Spacer(minLength: 4)
 
@@ -574,13 +576,15 @@ private struct SystemMonitorBlockView: View {
                                 symbolSystemName: "arrow.up.right",
                                 value: item.value,
                                 fontSize: SystemMonitorDashboardTypography.networkRowValueFontSize,
-                                width: valueLayout.uploadWidth
+                                width: valueLayout.uploadWidth,
+                                valueColor: NotchPilotTheme.islandTextSecondary
                             )
                             networkMetricValue(
                                 symbolSystemName: "arrow.down.left",
                                 value: item.secondaryValue ?? "--",
                                 fontSize: SystemMonitorDashboardTypography.networkRowValueFontSize,
-                                width: valueLayout.downloadWidth
+                                width: valueLayout.downloadWidth,
+                                valueColor: NotchPilotTheme.islandTextSecondary
                             )
                         }
                         .layoutPriority(1)
@@ -654,7 +658,8 @@ private struct SystemMonitorBlockView: View {
         symbolSystemName: String,
         value: String,
         fontSize: CGFloat,
-        width: CGFloat?
+        width: CGFloat?,
+        valueColor: Color = NotchPilotTheme.islandTextPrimary
     ) -> some View {
         HStack(spacing: 3) {
             Image(systemName: symbolSystemName)
@@ -664,7 +669,7 @@ private struct SystemMonitorBlockView: View {
 
             Text(value)
                 .font(.system(size: fontSize, weight: .bold, design: .monospaced))
-                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
                 .monospacedDigit()
@@ -756,7 +761,6 @@ private struct SystemMonitorBlockView: View {
 
 private struct SystemMonitorNetworkValueLayout {
     static let arrowWidth: CGFloat = 10
-    private static let reservedRateSample = "99.9 MB/s"
     private static let metricSpacing: CGFloat = 3
 
     let summaryUploadWidth: CGFloat
@@ -781,18 +785,18 @@ private struct SystemMonitorNetworkValueLayout {
             for: [summary.download],
             font: summaryFont
         )
-        self.uploadWidth = Self.metricWidth(for: topItems.map(\.value), font: rowFont)
+        self.uploadWidth = Self.metricWidth(
+            for: topItems.map(\.value) + [summary.upload],
+            font: rowFont
+        )
         self.downloadWidth = Self.metricWidth(
-            for: topItems.map { $0.secondaryValue ?? "--" },
+            for: topItems.map { $0.secondaryValue ?? "--" } + [summary.download],
             font: rowFont
         )
     }
 
     private static func metricWidth(for values: [String], font: NSFont) -> CGFloat {
-        let largestValueWidth = max(
-            textWidth(reservedRateSample, font: font),
-            values.map { textWidth($0, font: font) }.max() ?? 0
-        )
+        let largestValueWidth = values.map { textWidth($0, font: font) }.max() ?? 0
         return arrowWidth + metricSpacing + largestValueWidth
     }
 
