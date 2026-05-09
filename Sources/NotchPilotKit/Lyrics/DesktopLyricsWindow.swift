@@ -113,7 +113,7 @@ struct DesktopLyricsView: View {
         color: Color
     ) -> some View {
         GeometryReader { geo in
-            TimelineView(.animation) { context in
+            TimelineView(.periodic(from: lineState.lineStartDate, by: 1.0 / 30.0)) { context in
                 let elapsed = max(0, context.date.timeIntervalSince(lineState.lineStartDate))
                 let characterFraction = DesktopLyricsKaraokeMath.fraction(
                     inlineTags: lineState.inlineTags,

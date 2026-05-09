@@ -53,11 +53,12 @@ final class DesktopLyricsManager {
             self?.refreshWindows()
         }
 
-        presentationCancellable = controller.$presentation.sink { [weak self] _ in
+        presentationCancellable = controller.$presentation.sink { [weak self] presentation in
             self?.refreshWindows()
+            self?.updateTimerSchedule(isVisible: presentation.isVisible)
         }
 
-        scheduleTimer()
+        updateTimerSchedule(isVisible: controller.presentation.isVisible)
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -142,16 +143,21 @@ final class DesktopLyricsManager {
         }
     }
 
-    private func scheduleTimer() {
-        displayTimer?.invalidate()
-        let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.controller.refreshPresentation()
-                self?.refreshWindows()
+    private func updateTimerSchedule(isVisible: Bool) {
+        if isVisible {
+            guard displayTimer == nil else { return }
+            let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.controller.refreshPresentation()
+                    self?.refreshWindows()
+                }
             }
+            RunLoop.main.add(timer, forMode: .common)
+            displayTimer = timer
+        } else {
+            displayTimer?.invalidate()
+            displayTimer = nil
         }
-        RunLoop.main.add(timer, forMode: .common)
-        displayTimer = timer
     }
 
     private func screenDescriptor(for screen: NSScreen) -> ScreenDescriptor? {
