@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KeyboardShortcuts
 
 @MainActor
 public final class StatusItemController: NSObject, NSMenuItemValidation {
@@ -99,9 +100,9 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         let hideActivitySneaksItem = NSMenuItem(
             title: "",
             action: #selector(toggleActivitySneakPreviews),
-            keyEquivalent: "s"
+            keyEquivalent: ""
         )
-        hideActivitySneaksItem.keyEquivalentModifierMask = [.command, .shift]
+        hideActivitySneaksItem.setShortcut(for: .toggleHideAllPreviews)
         self.hideActivitySneaksItem = hideActivitySneaksItem
         menu.addItem(hideActivitySneaksItem)
 
@@ -223,6 +224,14 @@ extension StatusItemController: NSMenuDelegate {
         if enabled {
             offsetView.update(value: getLyricsOffset())
         }
+        // While the status menu is open, NSMenu enters tracking mode and
+        // buffers global keyboard events. Disable the global shortcut so it
+        // does not fire repeatedly when the menu closes.
+        KeyboardShortcuts.disable(.toggleHideAllPreviews)
+    }
+
+    public func menuDidClose(_ menu: NSMenu) {
+        KeyboardShortcuts.enable(.toggleHideAllPreviews)
     }
 }
 

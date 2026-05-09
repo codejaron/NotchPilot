@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import KeyboardShortcuts
 
 @MainActor
 public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
@@ -94,6 +95,12 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         )
 
         applySocketPreference()
+
+        KeyboardShortcuts.onKeyDown(for: .toggleHideAllPreviews) {
+            Task { @MainActor in
+                SettingsStore.shared.activitySneakPreviewsHidden.toggle()
+            }
+        }
 
         settingsObserver = NotificationCenter.default.addObserver(
             forName: .openSettings,

@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 
 struct GeneralSettingsTab: View {
@@ -25,6 +26,23 @@ struct GeneralSettingsTab: View {
                     detail: AppStrings.text(.launchAtLoginDetail, language: store.interfaceLanguage),
                     isOn: $store.launchAtLoginEnabled
                 )
+            }
+
+            SettingsGroupSection(title: AppStrings.text(.sneakPreviews, language: store.interfaceLanguage)) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.hideAllSneakPreviewsTitle, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.hideAllSneakPreviewsDetail, language: store.interfaceLanguage),
+                    isOn: $store.activitySneakPreviewsHidden
+                )
+
+                SettingsRowDivider()
+
+                SettingsRow(
+                    title: AppStrings.text(.toggleHideAllPreviewsShortcutTitle, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.toggleHideAllPreviewsShortcutDetail, language: store.interfaceLanguage)
+                ) {
+                    KeyboardShortcuts.Recorder(for: .toggleHideAllPreviews)
+                }
             }
 
             SettingsGroupSection(title: AppStrings.text(.approval, language: store.interfaceLanguage)) {

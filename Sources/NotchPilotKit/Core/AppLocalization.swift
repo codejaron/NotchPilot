@@ -28,6 +28,11 @@ enum AppTextKey {
     case interfaceLanguageDetail
     case displayApprovalSneakNotifications
     case displayApprovalSneakNotificationsDetail
+    case sneakPreviews
+    case hideAllSneakPreviewsTitle
+    case hideAllSneakPreviewsDetail
+    case toggleHideAllPreviewsShortcutTitle
+    case toggleHideAllPreviewsShortcutDetail
     case quitAppTitle
     case quitAppDetail
     case quitAppButton
@@ -519,7 +524,17 @@ enum AppStrings {
         case .displayApprovalSneakNotifications:
             return "显示 Claude / Codex 审批弹窗"
         case .displayApprovalSneakNotificationsDetail:
-            return "关闭后不主动弹出审批提示。"
+            return "关闭后审批不会主动弹出，但运行中的会话预览（含计时）仍会显示。"
+        case .sneakPreviews:
+            return "刘海预览"
+        case .hideAllSneakPreviewsTitle:
+            return "隐藏所有预览"
+        case .hideAllSneakPreviewsDetail:
+            return "关闭运行中的会话与播放预览（含计时）。审批弹窗不受此设置影响。"
+        case .toggleHideAllPreviewsShortcutTitle:
+            return "切换\"隐藏所有预览\"快捷键"
+        case .toggleHideAllPreviewsShortcutDetail:
+            return "全局快捷键，菜单栏菜单同步显示。点击右侧方框开始录制，按下 Delete 清除。"
         case .quitAppTitle, .quitAppButton:
             return "退出应用"
         case .quitAppDetail:
@@ -754,7 +769,17 @@ enum AppStrings {
         case .displayApprovalSneakNotifications:
             return "Show Claude / Codex Approval Popups"
         case .displayApprovalSneakNotificationsDetail:
-            return "When off, approval prompts will not pop up automatically."
+            return "When off, approval prompts will not pop up automatically. Running session previews (with timer) are still shown."
+        case .sneakPreviews:
+            return "Sneak Previews"
+        case .hideAllSneakPreviewsTitle:
+            return "Hide All Previews"
+        case .hideAllSneakPreviewsDetail:
+            return "Hide running session and playback previews (including the timer). Approval popups are not affected by this setting."
+        case .toggleHideAllPreviewsShortcutTitle:
+            return "\"Hide All Previews\" Shortcut"
+        case .toggleHideAllPreviewsShortcutDetail:
+            return "Global shortcut, also shown in the menu bar item. Click the field on the right to record; press Delete to clear."
         case .quitAppTitle, .quitAppButton:
             return "Quit App"
         case .quitAppDetail:
