@@ -95,15 +95,14 @@ final class LyricsProviderTests: XCTestCase {
     }
 
     @MainActor
-    func testLyricsKitProviderSearchAggregatesCandidatesWithoutLoadingLyrics() async {
+    func testLyricsKitProviderSearchAggregatesCandidatesAcrossServices() async {
         let candidateA = LyricsSearchCandidate(
             id: "qq|artist|song",
             title: "Song",
             artist: "Artist",
             service: "QQMusic",
             loadLyrics: {
-                XCTFail("Search should not eagerly load lyrics")
-                return Self.makeLyrics(service: "QQMusic")
+                Self.makeLyrics(service: "QQMusic")
             }
         )
         let candidateB = LyricsSearchCandidate(
@@ -112,8 +111,7 @@ final class LyricsProviderTests: XCTestCase {
             artist: "Artist",
             service: "NetEase",
             loadLyrics: {
-                XCTFail("Search should not eagerly load lyrics")
-                return Self.makeLyrics(service: "NetEase")
+                Self.makeLyrics(service: "NetEase")
             }
         )
 
@@ -471,8 +469,7 @@ private final class TestLyricsProvider: LyricsProviding {
     }
 }
 
-@MainActor
-private final class TestLyricsSearchService: LyricsSearchServicing {
+private final class TestLyricsSearchService: LyricsSearchServicing, @unchecked Sendable {
     private(set) var requests: [LyricsSearchRequest] = []
     let results: [LyricsSearchCandidate]
 

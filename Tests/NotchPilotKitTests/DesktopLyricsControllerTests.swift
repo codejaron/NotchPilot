@@ -270,6 +270,51 @@ final class DesktopLyricsControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testPreviewingLyricsOverrideUpdatesKTVWithoutSavingAndCanCancel() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let originalLyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [TimedLyricLine(timestamp: 0, text: "original line")]
+        )
+        let previewLyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "preview line")]
+        )
+        let provider = DesktopLyricsControllerTestProvider(result: originalLyrics)
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore
+        )
+        let bindingSnapshot = Self.activeSnapshot(currentTime: 5, isPlaying: true)
+
+        controller.handlePlaybackState(.active(bindingSnapshot))
+        await Task.yield()
+        controller.previewLyricsOverride(previewLyrics, for: bindingSnapshot)
+
+        XCTAssertEqual(controller.presentation.currentLine, "preview line")
+        XCTAssertTrue(cache.savedEntries.isEmpty)
+
+        controller.cancelLyricsOverridePreview(for: bindingSnapshot)
+
+        XCTAssertEqual(controller.presentation.currentLine, "original line")
+        XCTAssertTrue(cache.savedEntries.isEmpty)
+    }
+
+    @MainActor
     private func makeSettingsStore() -> SettingsStore {
         SettingsStore(
             defaults: defaults,

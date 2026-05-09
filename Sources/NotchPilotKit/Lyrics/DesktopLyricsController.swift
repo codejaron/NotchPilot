@@ -16,7 +16,13 @@ final class DesktopLyricsController: ObservableObject {
     private var currentLyrics: TimedLyrics?
     private(set) var currentOffsetMilliseconds: Int = 0
     private var loadTask: Task<Void, Never>?
+    private var activeLyricsPreview: LyricsPreview?
     private var settingsCancellables: Set<AnyCancellable> = []
+
+    private struct LyricsPreview {
+        let trackKey: LyricsTrackKey
+        var originalLyrics: TimedLyrics?
+    }
 
     init(
         settingsStore: SettingsStore = .shared,
@@ -116,6 +122,7 @@ final class DesktopLyricsController: ObservableObject {
 
         loadTask?.cancel()
         loadTask = nil
+        activeLyricsPreview = nil
         ignoredTrackStore.insert(currentTrackKey)
         try? cache.removeLyrics(for: currentTrackKey)
         currentLyrics = nil
@@ -124,6 +131,7 @@ final class DesktopLyricsController: ObservableObject {
 
     func applyLyricsOverride(_ lyrics: TimedLyrics, for snapshot: MediaPlaybackSnapshot) {
         let trackKey = LyricsTrackKey(snapshot: snapshot)
+        activeLyricsPreview = nil
         ignoredTrackStore.remove(trackKey)
         try? cache.saveLyrics(lyrics, for: trackKey)
 
@@ -134,6 +142,33 @@ final class DesktopLyricsController: ObservableObject {
 
         currentTrackKey = trackKey
         currentLyrics = lyrics
+        refreshPresentation()
+    }
+
+    func previewLyricsOverride(_ lyrics: TimedLyrics, for snapshot: MediaPlaybackSnapshot) {
+        let trackKey = LyricsTrackKey(snapshot: snapshot)
+        let currentSearchTrackKey = currentSearchSnapshot.map { LyricsTrackKey(snapshot: $0) }
+        guard currentTrackKey == trackKey || currentSearchTrackKey == trackKey else {
+            return
+        }
+
+        if activeLyricsPreview?.trackKey != trackKey {
+            activeLyricsPreview = LyricsPreview(trackKey: trackKey, originalLyrics: currentLyrics)
+        }
+
+        currentTrackKey = trackKey
+        currentLyrics = lyrics
+        refreshPresentation()
+    }
+
+    func cancelLyricsOverridePreview(for snapshot: MediaPlaybackSnapshot) {
+        let trackKey = LyricsTrackKey(snapshot: snapshot)
+        guard let preview = activeLyricsPreview, preview.trackKey == trackKey else {
+            return
+        }
+
+        currentLyrics = preview.originalLyrics
+        activeLyricsPreview = nil
         refreshPresentation()
     }
 
@@ -160,6 +195,7 @@ final class DesktopLyricsController: ObservableObject {
 
         let trackKey = LyricsTrackKey(snapshot: snapshot)
         guard ignoredTrackStore.contains(trackKey) == false else {
+            activeLyricsPreview = nil
             currentTrackKey = trackKey
             currentLyrics = nil
             assignPresentation(.hidden)
@@ -169,6 +205,7 @@ final class DesktopLyricsController: ObservableObject {
         }
 
         if currentTrackKey != trackKey {
+            activeLyricsPreview = nil
             currentTrackKey = trackKey
             currentLyrics = nil
             currentOffsetMilliseconds = offsetStore.offset(for: trackKey)
@@ -192,6 +229,11 @@ final class DesktopLyricsController: ObservableObject {
             return
         }
 
+        if activeLyricsPreview?.trackKey == trackKey {
+            activeLyricsPreview?.originalLyrics = lyrics
+            return
+        }
+
         currentLyrics = lyrics
         refreshPresentation()
     }
@@ -200,6 +242,7 @@ final class DesktopLyricsController: ObservableObject {
         loadTask?.cancel()
         loadTask = nil
         if clearLyrics {
+            activeLyricsPreview = nil
             currentLyrics = nil
             currentTrackKey = nil
         }

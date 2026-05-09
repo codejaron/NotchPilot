@@ -211,6 +211,14 @@ final class DesktopLyricsManager {
             applyHandler: { [weak self] lyrics in
                 self?.controller.applyLyricsOverride(lyrics, for: bindingSnapshot)
                 self?.refreshWindows()
+            },
+            previewHandler: { [weak self] lyrics in
+                self?.controller.previewLyricsOverride(lyrics, for: bindingSnapshot)
+                self?.refreshWindows()
+            },
+            cancelPreviewHandler: { [weak self] in
+                self?.controller.cancelLyricsOverridePreview(for: bindingSnapshot)
+                self?.refreshWindows()
             }
         )
     }

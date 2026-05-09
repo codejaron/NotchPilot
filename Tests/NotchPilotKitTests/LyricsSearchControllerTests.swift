@@ -34,10 +34,12 @@ final class LyricsSearchControllerTests: XCTestCase {
         )
         let provider = TestLyricsSearchProvider(results: [candidate])
         var appliedLyrics: TimedLyrics?
+        var previewedLyrics: TimedLyrics?
         let controller = LyricsSearchController(
             bindingSnapshot: Self.snapshot(title: "As If It's Your Last", artist: "BLACKPINK"),
             searchProvider: provider,
-            applyHandler: { appliedLyrics = $0 }
+            applyHandler: { appliedLyrics = $0 },
+            previewHandler: { previewedLyrics = $0 }
         )
 
         await controller.search()
@@ -49,6 +51,7 @@ final class LyricsSearchControllerTests: XCTestCase {
         XCTAssertEqual(provider.requests.first?.artist, "BLACKPINK")
         XCTAssertEqual(controller.results, [candidate])
         XCTAssertEqual(controller.selectedLyrics, searchedLyrics)
+        XCTAssertEqual(previewedLyrics, searchedLyrics)
         XCTAssertEqual(appliedLyrics, searchedLyrics)
     }
 

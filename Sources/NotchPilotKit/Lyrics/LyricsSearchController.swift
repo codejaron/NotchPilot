@@ -15,15 +15,23 @@ final class LyricsSearchController: ObservableObject {
 
     private let searchProvider: LyricsSearching
     private let applyHandler: (TimedLyrics) -> Void
+    private let previewHandler: (TimedLyrics) -> Void
+    private let cancelPreviewHandler: () -> Void
+    private var previewLoadTask: Task<Void, Never>?
+    private var didApplySelection = false
 
     init(
         bindingSnapshot: MediaPlaybackSnapshot,
         searchProvider: LyricsSearching,
-        applyHandler: @escaping (TimedLyrics) -> Void
+        applyHandler: @escaping (TimedLyrics) -> Void,
+        previewHandler: @escaping (TimedLyrics) -> Void = { _ in },
+        cancelPreviewHandler: @escaping () -> Void = {}
     ) {
         self.bindingSnapshot = bindingSnapshot
         self.searchProvider = searchProvider
         self.applyHandler = applyHandler
+        self.previewHandler = previewHandler
+        self.cancelPreviewHandler = cancelPreviewHandler
         self.searchTitle = bindingSnapshot.title
         self.searchArtist = bindingSnapshot.artist
     }
@@ -60,38 +68,78 @@ final class LyricsSearchController: ObservableObject {
     }
 
     func search() async {
+        previewLoadTask?.cancel()
+        cancelPreviewIfNeeded()
+        didApplySelection = false
         isSearching = true
         errorMessage = nil
+        selectedResultID = nil
+        selectedLyrics = nil
 
         let lyrics = await searchProvider.searchLyrics(
             title: searchTitle,
             artist: searchArtist,
             duration: bindingSnapshot.duration,
-            limit: 40
+            limit: 8
         )
 
         results = lyrics
-        selectedResultID = results.first?.id
-        selectedLyrics = nil
         isSearching = false
 
         if results.isEmpty {
             errorMessage = AppStrings.text(.noLyricsFound, language: SettingsStore.shared.interfaceLanguage)
         } else {
             errorMessage = nil
+            selectResult(results.first?.id)
         }
     }
 
     func loadSelectedLyrics() async {
-        guard let selectedCandidate else {
+        guard let selectedResultID, let selectedCandidate else {
             selectedLyrics = nil
             return
         }
 
+        await loadLyrics(selectedCandidate, for: selectedResultID)
+    }
+
+    func selectResult(_ id: LyricsSearchCandidate.ID?) {
+        guard id != selectedResultID else {
+            return
+        }
+
+        previewLoadTask?.cancel()
+        cancelPreviewIfNeeded()
+        selectedResultID = id
+        selectedLyrics = nil
+
+        guard let id, let selectedCandidate else {
+            return
+        }
+
+        errorMessage = nil
+        previewLoadTask = Task { [weak self] in
+            await Task.yield()
+            await self?.loadLyrics(selectedCandidate, for: id)
+        }
+    }
+
+    private func loadLyrics(
+        _ candidate: LyricsSearchCandidate,
+        for selectedResultID: LyricsSearchCandidate.ID
+    ) async {
         do {
-            selectedLyrics = try await selectedCandidate.loadLyrics()
+            let lyrics = try await candidate.loadLyrics()
+            guard self.selectedResultID == selectedResultID, Task.isCancelled == false else {
+                return
+            }
+            selectedLyrics = lyrics
+            previewHandler(lyrics)
             errorMessage = nil
         } catch {
+            guard self.selectedResultID == selectedResultID, Task.isCancelled == false else {
+                return
+            }
             selectedLyrics = nil
             errorMessage = AppStrings.text(.unableToLoadLyrics, language: SettingsStore.shared.interfaceLanguage)
         }
@@ -102,7 +150,21 @@ final class LyricsSearchController: ObservableObject {
             return
         }
 
+        didApplySelection = true
         applyHandler(selectedLyrics)
+    }
+
+    func cancelPreview() {
+        previewLoadTask?.cancel()
+        cancelPreviewIfNeeded()
+    }
+
+    private func cancelPreviewIfNeeded() {
+        guard didApplySelection == false else {
+            return
+        }
+
+        cancelPreviewHandler()
     }
 }
 
@@ -110,6 +172,19 @@ struct LyricsSearchView: View {
     @ObservedObject var controller: LyricsSearchController
     @ObservedObject private var store = SettingsStore.shared
     let closeWindow: () -> Void
+
+    private var selectedResultBinding: Binding<LyricsSearchCandidate.ID?> {
+        Binding(
+            get: {
+                controller.selectedResultID
+            },
+            set: { selectedResultID in
+                DispatchQueue.main.async {
+                    controller.selectResult(selectedResultID)
+                }
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -126,6 +201,7 @@ struct LyricsSearchView: View {
                 Spacer(minLength: 16)
 
                 Button(AppStrings.text(.close, language: store.interfaceLanguage)) {
+                    controller.cancelPreview()
                     closeWindow()
                 }
             }
@@ -166,7 +242,7 @@ struct LyricsSearchView: View {
 
                         Divider()
 
-                        List(selection: $controller.selectedResultID) {
+                        List(selection: selectedResultBinding) {
                             ForEach(controller.results) { result in
                                 HStack(spacing: 0) {
                                     Text(result.title)
@@ -227,33 +303,41 @@ struct LyricsSearchView: View {
                 await controller.search()
             }
         }
-        .task(id: controller.selectedResultID) {
-            if controller.selectedResultID != nil {
-                await controller.loadSelectedLyrics()
-            }
-        }
     }
 }
 
 @MainActor
 final class LyricsSearchWindowController {
     private var window: NSWindow?
+    private var controller: LyricsSearchController?
+    private var windowDelegate: LyricsSearchWindowDelegate?
 
     func showSearch(
         bindingSnapshot: MediaPlaybackSnapshot,
         searchProvider: LyricsSearching,
-        applyHandler: @escaping (TimedLyrics) -> Void
+        applyHandler: @escaping (TimedLyrics) -> Void,
+        previewHandler: @escaping (TimedLyrics) -> Void = { _ in },
+        cancelPreviewHandler: @escaping () -> Void = {}
     ) {
+        controller?.cancelPreview()
         let controller = LyricsSearchController(
             bindingSnapshot: bindingSnapshot,
             searchProvider: searchProvider,
-            applyHandler: applyHandler
+            applyHandler: applyHandler,
+            previewHandler: previewHandler,
+            cancelPreviewHandler: cancelPreviewHandler
         )
+        self.controller = controller
         let rootView = LyricsSearchView(controller: controller) { [weak self] in
             self?.window?.close()
         }
+        let delegate = LyricsSearchWindowDelegate {
+            controller.cancelPreview()
+        }
+        windowDelegate = delegate
 
         if let window {
+            window.delegate = delegate
             window.contentView = NSHostingView(rootView: rootView)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -269,9 +353,22 @@ final class LyricsSearchWindowController {
         window.title = AppStrings.text(.searchLyricsWindowTitle, language: SettingsStore.shared.interfaceLanguage)
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = delegate
         window.contentView = NSHostingView(rootView: rootView)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = window
+    }
+}
+
+private final class LyricsSearchWindowDelegate: NSObject, NSWindowDelegate {
+    private let closeHandler: () -> Void
+
+    init(closeHandler: @escaping () -> Void) {
+        self.closeHandler = closeHandler
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        closeHandler()
     }
 }

@@ -24,6 +24,9 @@ protocol LyricsCaching: AnyObject {
     func removeLyrics(for key: LyricsTrackKey) throws
 }
 
+extension LyricsSearchRequest: @retroactive @unchecked Sendable {}
+extension Lyrics: @retroactive @unchecked Sendable {}
+
 final class LyricsCache: LyricsCaching {
     private let directoryURL: URL
     private let fileManager: FileManager
@@ -105,6 +108,48 @@ final class CachedLyricsProvider: LyricsProviding {
     }
 }
 
+private final class ConcurrentLyricsProviderBox: @unchecked Sendable {
+    let provider: LyricsService.LyricsProvider
+
+    init(provider: LyricsService.LyricsProvider) {
+        self.provider = provider
+    }
+}
+
+private final class ConcurrentLyricsProvider: LyricsService.LyricsProvider {
+    private let providers: [ConcurrentLyricsProviderBox]
+
+    init(services: [LyricsProviders.Service]) {
+        self.providers = services.map { ConcurrentLyricsProviderBox(provider: $0.create()) }
+    }
+
+    func lyrics(for request: LyricsSearchRequest) -> AsyncThrowingStream<Lyrics, Error> {
+        AsyncThrowingStream { continuation in
+            let providers = providers
+            let task = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    for providerBox in providers {
+                        group.addTask {
+                            do {
+                                for try await lyric in providerBox.provider.lyrics(for: request) {
+                                    guard Task.isCancelled == false else { break }
+                                    continuation.yield(lyric)
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
 @MainActor
 final class LyricsKitProvider: LyricsProviding, LyricsSearching {
     private let provider: LyricsService.LyricsProvider
@@ -114,13 +159,7 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         provider: LyricsService.LyricsProvider? = nil,
         searchServices: [any LyricsSearchServicing]? = nil
     ) {
-        let provider = provider ?? LyricsProviders.Group(service: [
-            .qq,
-            .kugou,
-            .netease,
-            .musixmatch,
-            .lrclib,
-        ])
+        let provider = provider ?? ConcurrentLyricsProvider(services: LyricsKitServiceConfiguration.defaultServices)
         self.provider = provider
         self.searchServices = searchServices ?? LyricsKitSearchServices.default()
     }
@@ -175,7 +214,8 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         guard !title.isEmpty, !artist.isEmpty else { return nil }
         return LyricsSearchRequest(
             searchTerm: .info(title: title, artist: artist),
-            duration: snapshot.duration ?? 0
+            duration: snapshot.duration ?? 0,
+            limit: 5
         )
     }
 
@@ -197,19 +237,33 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
                 ? .keyword(normalizedTitle)
                 : .info(title: normalizedTitle, artist: normalizedArtist),
             duration: duration ?? 0,
-            limit: max(limit, 20)
+            limit: max(1, min(limit, 8))
         )
 
         var seenIdentifiers: Set<String> = []
         var results: [LyricsSearchCandidate] = []
-        let perServiceLimit = max(12, min(limit, 20))
+        let perServiceLimit = max(1, min(limit, 8))
+        let serviceResults = await withTaskGroup(of: (Int, [LyricsSearchCandidate]).self) { group in
+            for (index, service) in searchServices.enumerated() {
+                group.addTask {
+                    (
+                        index,
+                        await service.searchCandidates(
+                            for: request,
+                            limit: perServiceLimit
+                        )
+                    )
+                }
+            }
 
-        for service in searchServices {
-            let candidates = await service.searchCandidates(
-                for: request,
-                limit: perServiceLimit
-            )
+            var collected = Array(repeating: [LyricsSearchCandidate](), count: searchServices.count)
+            for await (index, candidates) in group {
+                collected[index] = candidates
+            }
+            return collected
+        }
 
+        for candidates in serviceResults {
             for candidate in candidates {
                 let identifier = [
                     candidate.service,
