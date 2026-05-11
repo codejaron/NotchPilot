@@ -237,6 +237,8 @@ public struct NotchContentView: View {
             return AppStrings.text(.media, language: store.interfaceLanguage)
         case SettingsPluginID.systemMonitor.rawValue:
             return AppStrings.text(.system, language: store.interfaceLanguage)
+        case SettingsPluginID.notifications.rawValue:
+            return AppStrings.text(.notifications, language: store.interfaceLanguage)
         default:
             return plugin.title
         }

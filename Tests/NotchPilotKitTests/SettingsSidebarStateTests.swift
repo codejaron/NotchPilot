@@ -25,7 +25,7 @@ final class SettingsSidebarStateTests: XCTestCase {
     }
 
     func testSettingsPluginIDsIncludeSystemMonitor() {
-        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .claude, .codex, .media])
+        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .notifications, .claude, .codex, .media])
     }
 
     func testPluginSidebarSubtitlesMatchNativeLayoutLabels() {

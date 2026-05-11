@@ -30,6 +30,14 @@ public final class SettingsStore: ObservableObject {
         static let systemMonitorAlertNetworkMBps = "systemMonitor.alertThreshold.network"
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
+        static let notificationsEnabled = "notifications.enabled"
+        static let notificationsSneakPreviewEnabled = "notifications.sneakPreviewEnabled"
+        static let notificationsWhitelistedBundleIDs = "notifications.whitelistedBundleIDs"
+        static let notificationsKnownAppsCache = "notifications.knownAppsCache"
+        static let notificationsRespectSystemDND = "notifications.respectSystemDND"
+        static let notificationsContentPrivacy = "notifications.contentPrivacy"
+        static let notificationsHistoryLimit = "notifications.historyLimit"
+        static let notificationsOpenOnClick = "notifications.openOnClick"
         static let interfaceLanguage = "app.interfaceLanguage"
         static let soundEnabled = "sound.enabled"
         static let soundVolume = "sound.volume"
@@ -161,6 +169,44 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var notificationsEnabled: Bool {
+        didSet { defaults.set(notificationsEnabled, forKey: Key.notificationsEnabled) }
+    }
+
+    @Published var notificationsSneakPreviewEnabled: Bool {
+        didSet { defaults.set(notificationsSneakPreviewEnabled, forKey: Key.notificationsSneakPreviewEnabled) }
+    }
+
+    @Published var notificationsWhitelistedBundleIDs: Set<String> {
+        didSet {
+            defaults.set(Array(notificationsWhitelistedBundleIDs).sorted(), forKey: Key.notificationsWhitelistedBundleIDs)
+        }
+    }
+
+    @Published var notificationsKnownAppsCache: [String: KnownApp] {
+        didSet {
+            if let data = try? JSONEncoder().encode(notificationsKnownAppsCache) {
+                defaults.set(data, forKey: Key.notificationsKnownAppsCache)
+            }
+        }
+    }
+
+    @Published var notificationsRespectSystemDND: Bool {
+        didSet { defaults.set(notificationsRespectSystemDND, forKey: Key.notificationsRespectSystemDND) }
+    }
+
+    @Published var notificationsContentPrivacy: NotificationContentPrivacy {
+        didSet { defaults.set(notificationsContentPrivacy.rawValue, forKey: Key.notificationsContentPrivacy) }
+    }
+
+    @Published var notificationsHistoryLimit: Int {
+        didSet { defaults.set(notificationsHistoryLimit, forKey: Key.notificationsHistoryLimit) }
+    }
+
+    @Published var notificationsOpenOnClick: Bool {
+        didSet { defaults.set(notificationsOpenOnClick, forKey: Key.notificationsOpenOnClick) }
+    }
+
     @Published public var soundEnabled: Bool {
         didSet {
             defaults.set(soundEnabled, forKey: Key.soundEnabled)
@@ -243,6 +289,28 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =
             defaults.object(forKey: Key.codexPluginEnabled) as? Bool ?? true
+        self.notificationsEnabled = defaults.object(forKey: Key.notificationsEnabled) as? Bool ?? false
+        self.notificationsSneakPreviewEnabled = defaults.object(forKey: Key.notificationsSneakPreviewEnabled) as? Bool ?? true
+        self.notificationsWhitelistedBundleIDs = Set(
+            (defaults.array(forKey: Key.notificationsWhitelistedBundleIDs) as? [String]) ?? []
+        )
+        self.notificationsKnownAppsCache = {
+            guard let data = defaults.data(forKey: Key.notificationsKnownAppsCache),
+                  let decoded = try? JSONDecoder().decode([String: KnownApp].self, from: data) else {
+                return [:]
+            }
+            return decoded
+        }()
+        self.notificationsRespectSystemDND = defaults.object(forKey: Key.notificationsRespectSystemDND) as? Bool ?? true
+        self.notificationsContentPrivacy = {
+            if let raw = defaults.string(forKey: Key.notificationsContentPrivacy),
+               let value = NotificationContentPrivacy(rawValue: raw) {
+                return value
+            }
+            return .full
+        }()
+        self.notificationsHistoryLimit = (defaults.object(forKey: Key.notificationsHistoryLimit) as? Int) ?? 100
+        self.notificationsOpenOnClick = defaults.object(forKey: Key.notificationsOpenOnClick) as? Bool ?? true
         self.soundEnabled =
             defaults.object(forKey: Key.soundEnabled) as? Bool ?? true
         // Migrate the legacy unified `sound.volume` value: if the user had a

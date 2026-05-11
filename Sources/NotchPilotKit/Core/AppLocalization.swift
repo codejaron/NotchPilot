@@ -138,6 +138,39 @@ enum AppTextKey {
     case soundTaskCompleteVolumeDetail
     case soundInputRequiredVolume
     case soundInputRequiredVolumeDetail
+    case notifications
+    case enableNotificationsPlugin
+    case enableNotificationsPluginDetail
+    case notificationsShowSneakPreview
+    case notificationsShowSneakPreviewDetail
+    case notificationsRespectDND
+    case notificationsRespectDNDDetail
+    case notificationsContentPrivacy
+    case notificationsContentPrivacyDetail
+    case notificationsContentPrivacyFull
+    case notificationsContentPrivacySenderOnly
+    case notificationsContentPrivacyHidden
+    case notificationsHistoryLimit
+    case notificationsHistoryLimitDetail
+    case notificationsLaunchAppOnClick
+    case notificationsLaunchAppOnClickDetail
+    case notificationsAllowedApps
+    case notificationsAllowedAppsEmpty
+    case notificationsDuplicateBannerInfo
+    case notificationsPermissionsTitle
+    case notificationsPermissionsGranted
+    case notificationsPermissionsMissing
+    case notificationsOpenSystemSettings
+    case notificationsDatabaseNotFound
+    case notificationsRecordedWhileMuted
+    case notificationsNewMessageRedactedTitle
+    case notificationsBurstSummary
+    case notificationsStateRunning
+    case notificationsStateDisabled
+    case notificationsStateNoFDA
+    case notificationsStateDBNotFound
+    case notificationsStateDBUnreadable
+    case notificationsUnreadLabel
 }
 
 enum AppConnectionStatus {
@@ -743,6 +776,72 @@ enum AppStrings {
             return "等待审批音量"
         case .soundInputRequiredVolumeDetail:
             return "调整 AI 请求审批或输入时提示音的音量。"
+        case .notifications:
+            return "通知"
+        case .enableNotificationsPlugin:
+            return "启用通知插件"
+        case .enableNotificationsPluginDetail:
+            return "通过读取 macOS 通知中心，把第三方 App 的通知显示在刘海。"
+        case .notificationsShowSneakPreview:
+            return "刘海预览"
+        case .notificationsShowSneakPreviewDetail:
+            return "新通知到达时在刘海上弹出一个紧凑提示。"
+        case .notificationsRespectDND:
+            return "遵循系统勿扰"
+        case .notificationsRespectDNDDetail:
+            return "勿扰开启时不在刘海弹通知（但仍记录到历史）。"
+        case .notificationsContentPrivacy:
+            return "内容隐私"
+        case .notificationsContentPrivacyDetail:
+            return "控制刘海上显示的通知正文细节。"
+        case .notificationsContentPrivacyFull:
+            return "完整内容"
+        case .notificationsContentPrivacySenderOnly:
+            return "仅显示发送者"
+        case .notificationsContentPrivacyHidden:
+            return "隐藏内容"
+        case .notificationsHistoryLimit:
+            return "历史保留条数"
+        case .notificationsHistoryLimitDetail:
+            return "重启后历史会清空。"
+        case .notificationsLaunchAppOnClick:
+            return "点击通知打开来源 App"
+        case .notificationsLaunchAppOnClickDetail:
+            return "在面板中点击一条通知时拉起对应应用。"
+        case .notificationsAllowedApps:
+            return "已允许的 App"
+        case .notificationsAllowedAppsEmpty:
+            return "还没有检测到任何 App 的通知。当应用首次发出通知时它会出现在这里。"
+        case .notificationsDuplicateBannerInfo:
+            return "NotchPilot 通过读取 macOS 通知中心来在刘海中呈现消息，不会替代或屏蔽系统原生的右上角横幅。如希望某个 App 只在刘海显示，请到 系统设置 → 通知 → [App 名称]，将\"横幅样式\"改为\"无\"，同时保持\"显示在通知中心\"为开。"
+        case .notificationsPermissionsTitle:
+            return "完整磁盘访问权限"
+        case .notificationsPermissionsGranted:
+            return "已授权"
+        case .notificationsPermissionsMissing:
+            return "未授权"
+        case .notificationsOpenSystemSettings:
+            return "打开系统设置"
+        case .notificationsDatabaseNotFound:
+            return "未找到通知数据库（macOS 版本可能不兼容）"
+        case .notificationsRecordedWhileMuted:
+            return "已静音"
+        case .notificationsNewMessageRedactedTitle:
+            return "新消息"
+        case .notificationsBurstSummary:
+            return "%d 条新消息"
+        case .notificationsStateRunning:
+            return "运行中"
+        case .notificationsStateDisabled:
+            return "已禁用"
+        case .notificationsStateNoFDA:
+            return "需要完整磁盘访问权限"
+        case .notificationsStateDBNotFound:
+            return "未找到通知数据库"
+        case .notificationsStateDBUnreadable:
+            return "数据库读取失败"
+        case .notificationsUnreadLabel:
+            return "未读"
         }
     }
 
@@ -988,6 +1087,72 @@ enum AppStrings {
             return "Approval Request Volume"
         case .soundInputRequiredVolumeDetail:
             return "Volume of the cue played when AI asks for approval or input."
+        case .notifications:
+            return "Notifications"
+        case .enableNotificationsPlugin:
+            return "Enable notifications plugin"
+        case .enableNotificationsPluginDetail:
+            return "Surface third-party app notifications in the notch by reading the macOS Notification Center."
+        case .notificationsShowSneakPreview:
+            return "Show notch preview"
+        case .notificationsShowSneakPreviewDetail:
+            return "Display a compact peek in the notch when a new notification arrives."
+        case .notificationsRespectDND:
+            return "Respect system Do Not Disturb"
+        case .notificationsRespectDNDDetail:
+            return "When Focus is on, suppress peeks (history is still recorded)."
+        case .notificationsContentPrivacy:
+            return "Content privacy"
+        case .notificationsContentPrivacyDetail:
+            return "Control how much of each notification is shown in the notch."
+        case .notificationsContentPrivacyFull:
+            return "Full content"
+        case .notificationsContentPrivacySenderOnly:
+            return "Sender only"
+        case .notificationsContentPrivacyHidden:
+            return "Hide content"
+        case .notificationsHistoryLimit:
+            return "History size"
+        case .notificationsHistoryLimitDetail:
+            return "History clears on restart."
+        case .notificationsLaunchAppOnClick:
+            return "Launch app when clicking a notification"
+        case .notificationsLaunchAppOnClickDetail:
+            return "Tapping a row in the panel opens the source application."
+        case .notificationsAllowedApps:
+            return "Allowed apps"
+        case .notificationsAllowedAppsEmpty:
+            return "No app notifications detected yet. Apps will appear here the first time they deliver a notification."
+        case .notificationsDuplicateBannerInfo:
+            return "NotchPilot reads the macOS Notification Center to render notifications in the notch — it does not replace or suppress the native top-right banner. To show a given app only in the notch, open System Settings → Notifications → [App], set Banner Style to None, and keep 'Show in Notification Center' on."
+        case .notificationsPermissionsTitle:
+            return "Full Disk Access"
+        case .notificationsPermissionsGranted:
+            return "Granted"
+        case .notificationsPermissionsMissing:
+            return "Not granted"
+        case .notificationsOpenSystemSettings:
+            return "Open System Settings"
+        case .notificationsDatabaseNotFound:
+            return "Notification database not found (macOS version may be incompatible)"
+        case .notificationsRecordedWhileMuted:
+            return "Muted"
+        case .notificationsNewMessageRedactedTitle:
+            return "New message"
+        case .notificationsBurstSummary:
+            return "%d new messages"
+        case .notificationsStateRunning:
+            return "Running"
+        case .notificationsStateDisabled:
+            return "Disabled"
+        case .notificationsStateNoFDA:
+            return "Full Disk Access required"
+        case .notificationsStateDBNotFound:
+            return "Notification DB not found"
+        case .notificationsStateDBUnreadable:
+            return "Notification DB unreadable"
+        case .notificationsUnreadLabel:
+            return "Unread"
         }
     }
 }

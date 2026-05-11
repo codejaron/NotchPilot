@@ -11,6 +11,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
     private let systemMonitorPlugin = SystemMonitorPlugin()
+    private let notificationsPlugin = NotificationsPlugin()
     private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
@@ -189,7 +190,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func initialPlugins() -> [any NotchPlugin] {
-        [systemMonitorPlugin, claudePlugin, codexPlugin, mediaPlaybackPlugin]
+        [systemMonitorPlugin, notificationsPlugin, claudePlugin, codexPlugin, mediaPlaybackPlugin]
     }
 
     var registeredPluginIDsForTesting: [String] {

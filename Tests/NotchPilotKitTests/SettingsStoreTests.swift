@@ -405,6 +405,57 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.launchAtLoginEnabled)
         XCTAssertTrue(controller.setEnabledCalls.isEmpty)
     }
+
+    @MainActor
+    func testNotificationsSettingsRoundTrip() throws {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        // Defaults
+        XCTAssertFalse(store.notificationsEnabled)
+        XCTAssertTrue(store.notificationsSneakPreviewEnabled)
+        XCTAssertTrue(store.notificationsWhitelistedBundleIDs.isEmpty)
+        XCTAssertTrue(store.notificationsRespectSystemDND)
+        XCTAssertEqual(store.notificationsContentPrivacy, .full)
+        XCTAssertEqual(store.notificationsHistoryLimit, 100)
+        XCTAssertTrue(store.notificationsOpenOnClick)
+        XCTAssertTrue(store.notificationsKnownAppsCache.isEmpty)
+
+        // Mutate
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = false
+        store.notificationsWhitelistedBundleIDs = ["com.tencent.xinWeChat", "com.apple.Mail"]
+        store.notificationsRespectSystemDND = false
+        store.notificationsContentPrivacy = .senderOnly
+        store.notificationsHistoryLimit = 250
+        store.notificationsOpenOnClick = false
+        store.notificationsKnownAppsCache = [
+            "com.tencent.xinWeChat": KnownApp(
+                bundleIdentifier: "com.tencent.xinWeChat",
+                displayName: "WeChat",
+                iconCachePath: nil
+            )
+        ]
+
+        // Reload from same defaults
+        let restored = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(restored.notificationsEnabled)
+        XCTAssertFalse(restored.notificationsSneakPreviewEnabled)
+        XCTAssertEqual(restored.notificationsWhitelistedBundleIDs, ["com.tencent.xinWeChat", "com.apple.Mail"])
+        XCTAssertFalse(restored.notificationsRespectSystemDND)
+        XCTAssertEqual(restored.notificationsContentPrivacy, .senderOnly)
+        XCTAssertEqual(restored.notificationsHistoryLimit, 250)
+        XCTAssertFalse(restored.notificationsOpenOnClick)
+        XCTAssertEqual(restored.notificationsKnownAppsCache["com.tencent.xinWeChat"]?.displayName, "WeChat")
+    }
 }
 
 @MainActor
