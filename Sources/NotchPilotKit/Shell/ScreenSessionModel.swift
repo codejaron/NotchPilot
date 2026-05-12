@@ -15,7 +15,6 @@ public final class ScreenSessionModel: ObservableObject {
     private static let hoverCloseDelay: Duration = .milliseconds(100)
     private static let horizontalHoverPadding: CGFloat = 0
     private static let bottomHoverPadding: CGFloat = 0
-    private static let shadowPadding: CGFloat = 20
 
     @Published public private(set) var descriptor: ScreenDescriptor
     @Published public private(set) var notchState: NotchState = .idleClosed
@@ -82,7 +81,7 @@ public final class ScreenSessionModel: ObservableObject {
     public var windowSize: CGSize {
         CGSize(
             width: geometry.expandedSize.width,
-            height: geometry.expandedSize.height + Self.shadowPadding
+            height: geometry.expandedSize.height
         )
     }
 

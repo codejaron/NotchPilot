@@ -48,7 +48,7 @@ public struct NotchContentView: View {
                 }
             }
             .frame(width: displaySize.width, height: displaySize.height)
-            .clipShape(currentNotchShape)
+            .clipShape(currentNotchShape, style: NotchRenderingStyle.edgeFillStyle)
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
         }
@@ -73,8 +73,7 @@ public struct NotchContentView: View {
     }
 
     private var background: some View {
-        currentNotchShape
-            .fill(Color.black)
+        Color.black
     }
 
     private var currentAnimation: Animation {

@@ -14,6 +14,14 @@ struct NotchWindowFrameRefreshPlan: Equatable {
     }
 }
 
+enum NotchWindowStyle {
+    static let defaultStyleMask: NSWindow.StyleMask = [
+        .borderless,
+        .nonactivatingPanel,
+        .utilityWindow,
+    ]
+}
+
 @MainActor
 public final class NotchWindow: NSPanel {
     private unowned let session: ScreenSessionModel
@@ -28,7 +36,7 @@ public final class NotchWindow: NSPanel {
         self.pluginManager = pluginManager
         super.init(
             contentRect: session.windowFrame,
-            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
+            styleMask: NotchWindowStyle.defaultStyleMask,
             backing: .buffered,
             defer: false
         )

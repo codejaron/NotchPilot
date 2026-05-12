@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum NotchRenderingStyle {
+    static let edgeFillStyle = FillStyle(eoFill: false, antialiased: false)
+}
+
 public struct NotchShape: Shape {
     public var topCornerRadius: CGFloat
     public var bottomCornerRadius: CGFloat

@@ -3,6 +3,12 @@ import XCTest
 @testable import NotchPilotKit
 
 final class NotchShapeTests: XCTestCase {
+    func testNotchRenderingUsesCrispEdges() {
+        let style = NotchRenderingStyle.edgeFillStyle
+
+        XCTAssertFalse(style.isAntialiased)
+    }
+
     func testShapeStartsWithConcaveTopCornersLikeDynamicIsland() {
         let path = NotchShape(topCornerRadius: 6, bottomCornerRadius: 14)
             .path(in: CGRect(x: 0, y: 0, width: 200, height: 32))

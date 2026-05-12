@@ -1,8 +1,18 @@
 import CoreGraphics
+import AppKit
 import XCTest
 @testable import NotchPilotKit
 
 final class NotchWindowTests: XCTestCase {
+    func testDefaultStyleMaskDoesNotRequestSystemHUDChrome() {
+        let styleMask = NotchWindowStyle.defaultStyleMask
+
+        XCTAssertTrue(styleMask.contains(.borderless))
+        XCTAssertTrue(styleMask.contains(.nonactivatingPanel))
+        XCTAssertTrue(styleMask.contains(.utilityWindow))
+        XCTAssertFalse(styleMask.contains(.hudWindow))
+    }
+
     func testFrameRefreshPlanSkipsWindowUpdateWhenTargetFrameIsUnchanged() {
         let frame = CGRect(x: 100, y: 200, width: 520, height: 340)
 
