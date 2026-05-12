@@ -62,6 +62,18 @@ struct GeneralSettingsTab: View {
                     isOn: $store.soundEnabled
                 )
 
+                if store.soundEnabled {
+                    SettingsRowDivider()
+
+                    SettingsActionRow(
+                        title: AppStrings.text(.avoidDuplicateSounds, language: store.interfaceLanguage),
+                        detail: AppStrings.text(.avoidDuplicateSoundsDetail, language: store.interfaceLanguage),
+                        buttonTitle: AppStrings.text(.openNotificationSettings, language: store.interfaceLanguage)
+                    ) {
+                        SystemNotificationSettingsOpener().openNotificationsPane()
+                    }
+                }
+
                 SettingsRowDivider()
 
                 SettingsRow(

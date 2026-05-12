@@ -138,6 +138,9 @@ enum AppTextKey {
     case soundFeedback
     case enableSounds
     case enableSoundsDetail
+    case avoidDuplicateSounds
+    case avoidDuplicateSoundsDetail
+    case openNotificationSettings
     case soundTaskCompleteVolume
     case soundTaskCompleteVolumeDetail
     case soundInputRequiredVolume
@@ -780,6 +783,12 @@ enum AppStrings {
             return "启用声音"
         case .enableSoundsDetail:
             return "AI 任务完成或等待审批时播放声音。"
+        case .avoidDuplicateSounds:
+            return "避免重复提示音"
+        case .avoidDuplicateSoundsDetail:
+            return "NotchPilot 不能直接修改 Claude / Codex 的系统通知声音。打开 macOS 通知设置后，请选择 Claude 或 Codex，并关闭「播放声音」。"
+        case .openNotificationSettings:
+            return "打开通知设置"
         case .soundTaskCompleteVolume:
             return "任务完成音量"
         case .soundTaskCompleteVolumeDetail:
@@ -1099,6 +1108,12 @@ enum AppStrings {
             return "Enable Sounds"
         case .enableSoundsDetail:
             return "Play a sound when an AI task completes or asks for approval."
+        case .avoidDuplicateSounds:
+            return "Avoid Duplicate Sounds"
+        case .avoidDuplicateSoundsDetail:
+            return "NotchPilot cannot directly change Claude or Codex system notification sounds. Open macOS Notifications settings, choose Claude or Codex, then turn off Play sound."
+        case .openNotificationSettings:
+            return "Open Notification Settings"
         case .soundTaskCompleteVolume:
             return "Task Complete Volume"
         case .soundTaskCompleteVolumeDetail:

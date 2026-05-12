@@ -7,6 +7,8 @@ final class AppLocalizationTests: XCTestCase {
         XCTAssertEqual(AppStrings.text(.general, language: .english), "General")
         XCTAssertEqual(AppStrings.text(.language, language: .zhHans), "语言")
         XCTAssertEqual(AppStrings.text(.language, language: .english), "Language")
+        XCTAssertEqual(AppStrings.text(.avoidDuplicateSounds, language: .zhHans), "避免重复提示音")
+        XCTAssertEqual(AppStrings.text(.avoidDuplicateSounds, language: .english), "Avoid Duplicate Sounds")
     }
 
     func testDynamicStatusStringsResolveInBothLanguages() {
