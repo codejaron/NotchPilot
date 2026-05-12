@@ -204,6 +204,13 @@ public final class SystemAISessionFocuser: AISessionFocusing {
             return [
                 "com.openai.codex",
             ]
+        case .devin:
+            // Devin Local ships inside the Windsurf application bundle. There is
+            // no first-party desktop app to fall back to, so we focus the
+            // hosting IDE if nothing else in the launch context matches.
+            return [
+                "com.exafunction.windsurf",
+            ]
         }
     }
 

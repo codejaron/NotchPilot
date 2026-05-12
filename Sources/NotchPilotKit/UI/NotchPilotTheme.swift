@@ -22,14 +22,21 @@ enum NotchPilotTheme {
     static let islandTextMuted = Color.white.opacity(0.4)
 
     static func brand(for host: AIHost) -> Color {
-        host == .claude ? claude : codex
+        switch host {
+        case .claude, .devin:
+            return claude
+        case .codex:
+            return codex
+        }
     }
 
     static func brand(for plugin: SettingsPluginID) -> Color {
         switch plugin {
         case .media:
             return mediaPlayback
-        case .claude:
+        case .claude, .devin:
+            // Devin is a member of the Claude family and shares the same brand
+            // accent at the UI layer.
             return claude
         case .codex:
             return codex
@@ -45,7 +52,7 @@ enum NotchPilotTheme {
         case "media-playback": return mediaPlayback
         case "system-monitor": return systemMonitor
         case "notifications":  return notifications
-        case "claude":         return claude
+        case "claude", "devin": return claude
         default:               return codex
         }
     }
@@ -141,6 +148,7 @@ enum NotchPilotTheme {
 enum NotchPilotBrandGlyph: String {
     case claude
     case codex
+    case devin
 
     init?(pluginID: String?) {
         switch pluginID {
@@ -148,13 +156,22 @@ enum NotchPilotBrandGlyph: String {
             self = .claude
         case "codex":
             self = .codex
+        case "devin":
+            self = .devin
         default:
             return nil
         }
     }
 
     init?(host: AIHost) {
-        self = host == .claude ? .claude : .codex
+        switch host {
+        case .claude:
+            self = .claude
+        case .codex:
+            self = .codex
+        case .devin:
+            self = .devin
+        }
     }
 
     init?(systemName: String) {
@@ -163,6 +180,8 @@ enum NotchPilotBrandGlyph: String {
             self = .claude
         case "terminal":
             self = .codex
+        case "wind":
+            self = .devin
         default:
             return nil
         }
@@ -174,6 +193,8 @@ enum NotchPilotBrandGlyph: String {
             return "claude-color"
         case .codex:
             return "codex-color"
+        case .devin:
+            return "devin-color"
         }
     }
 
@@ -183,6 +204,17 @@ enum NotchPilotBrandGlyph: String {
             return "sparkles"
         case .codex:
             return "terminal"
+        case .devin:
+            return "wind"
+        }
+    }
+
+    var fallbackTint: Color {
+        switch self {
+        case .claude, .devin:
+            return NotchPilotTheme.claude
+        case .codex:
+            return .white
         }
     }
 }
@@ -238,7 +270,7 @@ struct NotchPilotBrandIcon: View {
                 Image(systemName: glyph.fallbackSystemName)
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(glyph == .claude ? NotchPilotTheme.claude : .white)
+                    .foregroundStyle(glyph.fallbackTint)
             }
         }
         .frame(width: size, height: size)

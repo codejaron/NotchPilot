@@ -49,12 +49,39 @@ public final class ClaudePlugin: AIPluginRendering {
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
         self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
-        self.isEnabled = settingsStore.claudePluginEnabled
+        self.isEnabled = Self.aggregateEnabled(
+            claude: settingsStore.claudePluginEnabled,
+            devin: settingsStore.devinPluginEnabled
+        )
 
+        // The Claude plugin owns two distinct hosts (Claude Code and Devin
+        // Local). Either toggle being on means the plugin still has work to do;
+        // we publish a single aggregate `isEnabled` for UI compatibility but
+        // route incoming frames against the per-host flag inside `handle()`.
+        //
+        // We deliberately read the *publisher's emitted value* instead of
+        // re-reading `settingsStore.<flag>` inside the sink: `@Published` fires
+        // in `willSet`, so a synchronous re-read would observe the stale value
+        // and the aggregate would lag one tick behind.
         settingsStore.$claudePluginEnabled
             .removeDuplicates()
-            .sink { [weak self] isEnabled in
-                self?.handlePluginEnabledChange(isEnabled)
+            .sink { [weak self] claudeEnabled in
+                guard let self else { return }
+                self.applyAggregateEnabled(
+                    claude: claudeEnabled,
+                    devin: self.settingsStore.devinPluginEnabled
+                )
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$devinPluginEnabled
+            .removeDuplicates()
+            .sink { [weak self] devinEnabled in
+                guard let self else { return }
+                self.applyAggregateEnabled(
+                    claude: self.settingsStore.claudePluginEnabled,
+                    devin: devinEnabled
+                )
             }
             .store(in: &settingsCancellables)
 
@@ -101,12 +128,17 @@ public final class ClaudePlugin: AIPluginRendering {
     }
 
     public func handle(frame: BridgeFrame, respond: @escaping @Sendable (Data) -> Void) {
-        guard isEnabled else {
+        // Devin Local reuses the Claude Code hook protocol (payload shape,
+        // response schema, permission rule format). The bridge re-tags those
+        // frames as `.devin` when the ancestor process is a Devin CLI; both
+        // hosts are routed through this plugin and differentiated only at the
+        // display layer (and by their separate enable toggles below).
+        guard frame.host.isClaudeFamily else {
             respond(Data("{}".utf8))
             return
         }
 
-        guard frame.host == .claude else {
+        guard isEnabled(forHost: frame.host) else {
             respond(Data("{}".utf8))
             return
         }
@@ -372,7 +404,7 @@ public final class ClaudePlugin: AIPluginRendering {
 
         return sessionFocuser.focus(
             context: session.launchContext ?? AISessionLaunchContext(),
-            fallback: .host(.claude)
+            fallback: .host(session.host)
         )
     }
 
@@ -439,8 +471,31 @@ public final class ClaudePlugin: AIPluginRendering {
         )
     }
 
-    private func handlePluginEnabledChange(_ isEnabled: Bool) {
-        self.isEnabled = isEnabled
+    private static func aggregateEnabled(claude: Bool, devin: Bool) -> Bool {
+        claude || devin
+    }
+
+    /// Per-host enable check used inside `handle()`. Returns `false` for any
+    /// non-Claude-family host as a safety net even though `handle()` already
+    /// rejects them earlier. Reading directly from the settings store is safe
+    /// here because `handle()` is invoked from the socket layer well after any
+    /// `@Published` willSet has settled.
+    private func isEnabled(forHost host: AIHost) -> Bool {
+        switch host {
+        case .claude:
+            return settingsStore.claudePluginEnabled
+        case .devin:
+            return settingsStore.devinPluginEnabled
+        case .codex:
+            return false
+        }
+    }
+
+    private func applyAggregateEnabled(claude: Bool, devin: Bool) {
+        let aggregate = Self.aggregateEnabled(claude: claude, devin: devin)
+        if aggregate != isEnabled {
+            isEnabled = aggregate
+        }
         syncSneakPeek()
         objectWillChange.send()
     }

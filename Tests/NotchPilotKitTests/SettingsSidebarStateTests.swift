@@ -25,13 +25,14 @@ final class SettingsSidebarStateTests: XCTestCase {
     }
 
     func testSettingsPluginIDsIncludeSystemMonitor() {
-        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .notifications, .claude, .codex, .media])
+        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .notifications, .claude, .devin, .codex, .media])
     }
 
     func testPluginSidebarSubtitlesMatchNativeLayoutLabels() {
         XCTAssertEqual(SettingsPluginID.media.sidebarSubtitle, "媒体播放")
         XCTAssertEqual(SettingsPluginID.systemMonitor.sidebarSubtitle, "系统监控")
         XCTAssertEqual(SettingsPluginID.claude.sidebarSubtitle, "Claude 集成")
+        XCTAssertEqual(SettingsPluginID.devin.sidebarSubtitle, "Devin 集成")
         XCTAssertEqual(SettingsPluginID.codex.sidebarSubtitle, "连接状态")
     }
 
@@ -43,6 +44,8 @@ final class SettingsSidebarStateTests: XCTestCase {
         XCTAssertNil(SettingsPluginID.media.brandGlyph)
         XCTAssertEqual(SettingsPluginID.claude.brandGlyph, .claude)
         XCTAssertEqual(SettingsPluginID.codex.brandGlyph, .codex)
+        XCTAssertEqual(SettingsPluginID.devin.brandGlyph, .devin)
+        XCTAssertEqual(SettingsPluginID.devin.iconSystemName, "wind")
     }
 
     func testClaudeStatusTextUsesUserFacingLabels() {

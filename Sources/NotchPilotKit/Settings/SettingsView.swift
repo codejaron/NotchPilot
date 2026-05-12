@@ -108,6 +108,8 @@ public struct SettingsView: View {
                     MediaPluginSettingsView()
                 case .claude:
                     ClaudePluginSettingsView()
+                case .devin:
+                    DevinPluginSettingsView()
                 case .codex:
                     CodexPluginSettingsView()
                 case .systemMonitor:

@@ -60,6 +60,10 @@ enum AppTextKey {
     case removeIntegration
     case claudeCodeMissingDetail
     case missingClaudeBridgeScriptError
+    case enableDevinPlugin
+    case enableDevinPluginDetail
+    case devinIntegration
+    case devinIntegrationDetail
     case enableCodexPlugin
     case enableCodexPluginDetail
     case codexDesktop
@@ -620,6 +624,14 @@ enum AppStrings {
             return "请先安装 Claude Code。"
         case .missingClaudeBridgeScriptError:
             return "未找到 Claude 集成所需脚本，无法完成安装。"
+        case .enableDevinPlugin:
+            return "启用 Devin 插件"
+        case .enableDevinPluginDetail:
+            return "关闭后不会处理 Devin Local 的工具调用事件，也不会在 Notch 中显示 Devin 会话。"
+        case .devinIntegration:
+            return "Devin 集成"
+        case .devinIntegrationDetail:
+            return "Devin Local 会复用 Claude Code 的 Hook 配置，因此无需单独安装。请先在「Claude」标签里完成集成。"
         case .enableCodexPlugin:
             return "启用 Codex 插件"
         case .enableCodexPluginDetail:
@@ -931,6 +943,14 @@ enum AppStrings {
             return "Install Claude Code first."
         case .missingClaudeBridgeScriptError:
             return "The script required for Claude integration was not found, so installation cannot continue."
+        case .enableDevinPlugin:
+            return "Enable Devin Plugin"
+        case .enableDevinPluginDetail:
+            return "When off, Devin Local tool-use events are ignored and Devin sessions are removed from Notch."
+        case .devinIntegration:
+            return "Devin Integration"
+        case .devinIntegrationDetail:
+            return "Devin Local reuses Claude Code's hook configuration, so no separate install is required. Complete the integration on the Claude tab first."
         case .enableCodexPlugin:
             return "Enable Codex Plugin"
         case .enableCodexPluginDetail:

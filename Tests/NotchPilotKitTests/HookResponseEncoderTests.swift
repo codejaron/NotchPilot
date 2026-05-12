@@ -170,6 +170,67 @@ final class HookResponseEncoderTests: XCTestCase {
         XCTAssertTrue(json.contains(#""permissionDecision":"allow""#))
     }
 
+    // MARK: - Devin Local
+
+    /// Devin Local speaks the Claude Code hook protocol, so its PermissionRequest
+    /// response must be byte-identical to a Claude response — otherwise Devin
+    /// would reject NotchPilot's decision payload. Guard against future
+    /// divergence in `encode(decision:for:eventType:)`.
+    func testDevinPermissionRequestProducesSameJSONAsClaude() throws {
+        let decision = ApprovalDecision(behavior: .allow, feedbackText: "Approved")
+
+        let devinData = try HookResponseEncoder().encode(
+            decision: decision,
+            for: .devin,
+            eventType: .permissionRequest
+        )
+        let claudeData = try HookResponseEncoder().encode(
+            decision: decision,
+            for: .claude,
+            eventType: .permissionRequest
+        )
+
+        XCTAssertEqual(devinData, claudeData)
+    }
+
+    /// Same guarantee for the PreToolUse response surface.
+    func testDevinPreToolUseProducesSameJSONAsClaude() throws {
+        let decision = ApprovalDecision(behavior: .deny, feedbackText: "Use ripgrep instead")
+
+        let devinData = try HookResponseEncoder().encode(
+            decision: decision,
+            for: .devin,
+            eventType: .preToolUse
+        )
+        let claudeData = try HookResponseEncoder().encode(
+            decision: decision,
+            for: .claude,
+            eventType: .preToolUse
+        )
+
+        XCTAssertEqual(devinData, claudeData)
+    }
+
+    /// Devin Local imports `~/.claude/settings.json` and shares Claude Code's
+    /// permission-rule file. A persist-rule decision raised on a Devin frame
+    /// must therefore land in the same permissions store as a Claude one.
+    func testDevinPersistRuleAppendsToClaudeFamilyRuleStore() throws {
+        final class RuleRecorder: PermissionRuleWriting, @unchecked Sendable {
+            var recorded: [ClaudePermissionRule] = []
+            func appendAllowRule(_ rule: ClaudePermissionRule) throws {
+                recorded.append(rule)
+            }
+        }
+
+        let recorder = RuleRecorder()
+        let encoder = HookResponseEncoder(permissionRuleStore: recorder)
+        let decision = ApprovalDecision(behavior: .allow, persistRule: .bashPrefix("ls"))
+
+        _ = try encoder.encode(decision: decision, for: .devin, eventType: .preToolUse)
+
+        XCTAssertEqual(recorder.recorded, [.bashPrefix("ls")])
+    }
+
     func testFeedbackWithSpecialCharactersIsEscapedInJSON() throws {
         let decision = ApprovalDecision(
             behavior: .deny,

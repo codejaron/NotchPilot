@@ -4,6 +4,7 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     case systemMonitor = "system-monitor"
     case notifications = "notifications"
     case claude
+    case devin
     case codex
     case media = "media-playback"
 
@@ -19,6 +20,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return AppStrings.text(.media, language: language)
         case .claude:
             return "Claude"
+        case .devin:
+            return "Devin"
         case .codex:
             return "Codex"
         case .systemMonitor:
@@ -34,6 +37,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return "music.note"
         case .claude:
             return "sparkles"
+        case .devin:
+            return "wind"
         case .codex:
             return "terminal"
         case .systemMonitor:
@@ -47,6 +52,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         switch self {
         case .claude:
             return .claude
+        case .devin:
+            return .devin
         case .codex:
             return .codex
         case .media, .systemMonitor, .notifications:
@@ -64,6 +71,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return language == .zhHans ? "媒体播放" : "Media Playback"
         case .claude:
             return language == .zhHans ? "Claude 集成" : "Claude Integration"
+        case .devin:
+            return AppStrings.text(.devinIntegration, language: language)
         case .codex:
             return AppStrings.text(.connectionStatus, language: language)
         case .systemMonitor:
@@ -342,6 +351,55 @@ struct ClaudePluginSettingsView: View {
 
     private func refreshInstallationState() {
         store.synchronizeInstallationState()
+    }
+}
+
+/// Devin Local piggybacks on Claude Code's hook configuration (it auto-imports
+/// `~/.claude/settings.json`), so this page intentionally does *not* expose its
+/// own install/uninstall flow. The page is just a switch for whether NotchPilot
+/// should surface Devin sessions, plus a hint pointing users at the Claude tab
+/// when the underlying integration is missing or stale.
+struct DevinPluginSettingsView: View {
+    @ObservedObject private var store = SettingsStore.shared
+
+    var body: some View {
+        SettingsPage(title: "Devin") {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.enableDevinPlugin, language: store.interfaceLanguage),
+                    detail: AppStrings.text(.enableDevinPluginDetail, language: store.interfaceLanguage),
+                    isOn: $store.devinPluginEnabled
+                )
+            }
+
+            SettingsGroupSection(title: AppStrings.text(.devinIntegration, language: store.interfaceLanguage)) {
+                SettingsStatusRow(
+                    title: AppStrings.text(.integrationStatus, language: store.interfaceLanguage),
+                    value: devinStatusText,
+                    valueColor: .secondary
+                )
+            }
+
+            SettingsInlineMessage(
+                text: AppStrings.text(.devinIntegrationDetail, language: store.interfaceLanguage),
+                color: .secondary
+            )
+        }
+        .onAppear {
+            store.synchronizeInstallationState()
+        }
+    }
+
+    private var devinStatusText: String {
+        // Devin's "integration" is really the Claude hook bridge — surface
+        // whichever underlying state is most actionable for the user.
+        if store.claudeHookInstalled == false {
+            return AppStrings.connectionStatus(.notInstalled, language: store.interfaceLanguage)
+        }
+        if store.claudeHooksNeedUpdate {
+            return AppStrings.connectionStatus(.updateAvailable, language: store.interfaceLanguage)
+        }
+        return AppStrings.connectionStatus(.connected, language: store.interfaceLanguage)
     }
 }
 

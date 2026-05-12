@@ -331,6 +331,125 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: "/tmp/notch-bridge.py"))
     }
 
+    /// Real-world failure mode: a user installed Claude hooks under an older
+    /// NotchPilot that did not persist `bridge.scriptPath` in UserDefaults.
+    /// Their on-disk bridge is now stale, but `synchronizeInstallationState`
+    /// passes `bridgeScript: nil` to `claudeHooksNeedUpdate`, so the version
+    /// check used to silently bail out and the settings panel would offer only
+    /// "Remove Integration". The installer must look at the canonical path
+    /// (`~/.notchpilot/notch-bridge.py`) as a fallback.
+    func testClaudeHooksNeedUpdateFallsBackToCanonicalPathWhenScriptPathIsNil() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+
+        // Hooks were installed by an older NotchPilot — the command refers to
+        // the canonical location under ~/.notchpilot/, even though the script
+        // file there is now stale.
+        let canonicalBridgeURL = tempHomeURL.appendingPathComponent(".notchpilot/notch-bridge.py")
+        try FileManager.default.createDirectory(
+            at: canonicalBridgeURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 3\n".write(
+            to: canonicalBridgeURL, atomically: true, encoding: .utf8
+        )
+
+        let canonicalPath = canonicalBridgeURL.path.replacingOccurrences(of: "\"", with: "\\\"")
+        try Data(
+            """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude" } ] }
+                ],
+                "PermissionRequest": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude", "timeout": 30 } ] }
+                ],
+                "PostToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude" } ] }
+                ],
+                "SessionStart": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude" } ] }
+                ],
+                "Stop": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude" } ] }
+                ],
+                "UserPromptSubmit": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(canonicalPath)\\" --host claude" } ] }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+
+        // Caller passes `nil` because `store.bridgeScriptPath` was never set.
+        XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: nil))
+        XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: nil),
+                      "Stale bridge at canonical path must be detected even when bridgeScriptPath is nil")
+    }
+
+    /// Regression guard for the bridge-version bump. When we bump
+    /// `NOTCHPILOT_BRIDGE_VERSION` in the bundled `notch-bridge.py`, the
+    /// corresponding needle in `HookInstaller.bridgeVersionNeedle` must move
+    /// with it — otherwise the app would treat stale installed scripts as
+    /// up-to-date and never re-deploy them. We simulate an old bridge file on
+    /// disk and expect `claudeHooksNeedUpdate` to flag it.
+    func testClaudeHooksNeedUpdateFlagsStaleBridgeScript() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        let bridgeURL = tempHomeURL.appendingPathComponent("stale-notch-bridge.py")
+        let bridgePath = bridgeURL.path
+        let escapedBridgePath = bridgePath.replacingOccurrences(of: "\"", with: "\\\"")
+        try Data(
+            """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "PermissionRequest": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude", "timeout": 30 } ] }
+                ],
+                "PostToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "SessionStart": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "Stop": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "UserPromptSubmit": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        // Pretend the installed bridge script is still on the *previous* version.
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 3\n".write(
+            to: bridgeURL, atomically: true, encoding: .utf8
+        )
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: bridgePath))
+        XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: bridgePath),
+                      "An older bridge version on disk must be flagged for update")
+
+        // Now upgrade the on-disk bridge to the current version — should clear.
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 4\n".write(
+            to: bridgeURL, atomically: true, encoding: .utf8
+        )
+        XCTAssertFalse(installer.claudeHooksNeedUpdate(bridgeScript: bridgePath),
+                       "A current bridge version must not be flagged for update")
+    }
+
     private func loadJSONObject(at url: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: url)
         let object = try JSONSerialization.jsonObject(with: data)

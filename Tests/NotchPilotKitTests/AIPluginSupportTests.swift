@@ -37,7 +37,9 @@ final class AIPluginSupportTests: XCTestCase {
         let expectedTokenColumnWidth = max(inputTokenWidth, outputTokenWidth)
         let previousHorizontalTokenWidth = inputTokenWidth + 6 + outputTokenWidth
 
-        for host in [AIHost.claude, .codex] {
+        // .devin is included so we catch any future regression where the new
+        // Claude-family host triggers different compact-layout math.
+        for host in [AIHost.claude, .codex, .devin] {
             let plugin = CompactMetricsProbePlugin(
                 activity: AIPluginCompactActivity(
                     host: host,

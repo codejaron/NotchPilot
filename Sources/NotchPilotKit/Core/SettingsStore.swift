@@ -30,6 +30,7 @@ public final class SettingsStore: ObservableObject {
         static let systemMonitorAlertNetworkMBps = "systemMonitor.alertThreshold.network"
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
+        static let devinPluginEnabled = "devin.enabled"
         static let notificationsEnabled = "notifications.enabled"
         static let notificationsSneakPreviewEnabled = "notifications.sneakPreviewEnabled"
         static let notificationsWhitelistedBundleIDs = "notifications.whitelistedBundleIDs"
@@ -169,6 +170,16 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Controls whether NotchPilot processes Devin Local hook events. Devin is
+    /// a member of the Claude family (it speaks the same hook protocol), but is
+    /// surfaced as a distinct host in the UI and persisted under its own key so
+    /// users can disable it without losing their Claude Code integration.
+    @Published var devinPluginEnabled: Bool {
+        didSet {
+            defaults.set(devinPluginEnabled, forKey: Key.devinPluginEnabled)
+        }
+    }
+
     @Published var notificationsEnabled: Bool {
         didSet { defaults.set(notificationsEnabled, forKey: Key.notificationsEnabled) }
     }
@@ -289,6 +300,8 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =
             defaults.object(forKey: Key.codexPluginEnabled) as? Bool ?? true
+        self.devinPluginEnabled =
+            defaults.object(forKey: Key.devinPluginEnabled) as? Bool ?? true
         self.notificationsEnabled = defaults.object(forKey: Key.notificationsEnabled) as? Bool ?? false
         self.notificationsSneakPreviewEnabled = defaults.object(forKey: Key.notificationsSneakPreviewEnabled) as? Bool ?? true
         self.notificationsWhitelistedBundleIDs = Set(

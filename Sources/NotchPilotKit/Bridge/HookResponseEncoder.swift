@@ -8,7 +8,10 @@ public struct HookResponseEncoder {
     }
 
     public func encode(decision: ApprovalDecision, for host: AIHost, eventType: AIBridgeEventType) throws -> Data {
-        if host == .claude, decision.permissionUpdates.isEmpty, let rule = decision.persistRule {
+        // Persistent allow-rules are written to the Claude Code permissions file.
+        // Devin Local imports the same `~/.claude/settings.json`, so a rule
+        // appended for either host is honored by both — we treat them identically.
+        if host.isClaudeFamily, decision.permissionUpdates.isEmpty, let rule = decision.persistRule {
             try? permissionRuleStore?.appendAllowRule(rule)
         }
 
@@ -16,14 +19,14 @@ public struct HookResponseEncoder {
 
         let response: String
         switch (host, eventType) {
-        case (.claude, .permissionRequest):
+        case (.claude, .permissionRequest), (.devin, .permissionRequest):
             response = try permissionRequestResponse(
                 behavior: decision.behavior,
                 reason: reason,
                 permissionUpdates: decision.permissionUpdates,
                 updatedInput: decision.updatedInput
             )
-        case (.claude, .preToolUse):
+        case (.claude, .preToolUse), (.devin, .preToolUse):
             response = try preToolUseResponse(
                 behavior: decision.behavior,
                 reason: reason,

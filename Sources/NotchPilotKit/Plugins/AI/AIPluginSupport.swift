@@ -153,7 +153,14 @@ extension AIPluginRendering {
     func updateCodexText(_ text: String, surfaceID: String) -> Bool { false }
 
     func hostDisplayName(for host: AIHost) -> String {
-        host == .claude ? "Claude Code" : "OpenAI Codex"
+        switch host {
+        case .claude:
+            return "Claude Code"
+        case .codex:
+            return "OpenAI Codex"
+        case .devin:
+            return "Devin"
+        }
     }
 
     private var approvalDrivenCompactPreviewAvailable: Bool {

@@ -15,7 +15,10 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testDisabledPluginIgnoresBridgeFramesAndDoesNotRenderInNotch() {
         let store = Self.makeSettingsStore()
+        // The plugin's aggregate `isEnabled` is `claudeEnabled || devinEnabled`,
+        // so both flags must be off to disable the plugin end-to-end.
         store.claudePluginEnabled = false
+        store.devinPluginEnabled = false
         let bus = EventBus()
         let plugin = ClaudePlugin(settingsStore: store)
         let recorder = SplitEventRecorder()
@@ -54,6 +57,115 @@ final class ClaudePluginTests: XCTestCase {
         XCTAssertTrue(plugin.isEnabled)
 
         bus.unsubscribe(token)
+    }
+
+    /// When the user disables only the Claude toggle but keeps Devin on, the
+    /// plugin must keep processing Devin frames while silently dropping Claude
+    /// ones. This is the headline feature of the per-host enable split.
+    @MainActor
+    func testDevinFrameIsProcessedEvenWhenClaudeToggleIsOff() {
+        let store = Self.makeSettingsStore()
+        store.claudePluginEnabled = false
+        store.devinPluginEnabled = true
+        let bus = EventBus()
+        let plugin = ClaudePlugin(settingsStore: store)
+        let claudeResponse = SplitResponseBox()
+        let devinResponse = SplitResponseBox()
+
+        plugin.activate(bus: bus)
+
+        // Aggregate isEnabled is true because Devin is on.
+        XCTAssertTrue(plugin.isEnabled)
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-blocked",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo hi" }
+                }
+                """
+            ),
+            respond: { data in claudeResponse.data = data }
+        )
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .devin,
+                requestID: "devin-allowed",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "notchpilot-agent-pid-30716",
+                  "tool_name": "exec",
+                  "tool_input": { "command": "ls" }
+                }
+                """
+            ),
+            respond: { data in devinResponse.data = data }
+        )
+
+        // Claude frame must be dropped (empty JSON, no session created)…
+        XCTAssertEqual(String(data: claudeResponse.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertFalse(plugin.sessions.contains { $0.host == .claude })
+        // …while the Devin frame must surface as a tracked session.
+        XCTAssertTrue(plugin.sessions.contains { $0.host == .devin && $0.id == "notchpilot-agent-pid-30716" })
+    }
+
+    /// The reverse case — Devin off, Claude on — also has to keep Claude
+    /// flowing. This is the existing-user upgrade path.
+    @MainActor
+    func testClaudeFrameIsProcessedEvenWhenDevinToggleIsOff() {
+        let store = Self.makeSettingsStore()
+        store.claudePluginEnabled = true
+        store.devinPluginEnabled = false
+        let bus = EventBus()
+        let plugin = ClaudePlugin(settingsStore: store)
+        let claudeResponse = SplitResponseBox()
+        let devinResponse = SplitResponseBox()
+
+        plugin.activate(bus: bus)
+        XCTAssertTrue(plugin.isEnabled)
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .devin,
+                requestID: "devin-blocked",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "notchpilot-agent-pid-99",
+                  "tool_name": "exec",
+                  "tool_input": { "command": "pwd" }
+                }
+                """
+            ),
+            respond: { data in devinResponse.data = data }
+        )
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-allowed",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "ls" }
+                }
+                """
+            ),
+            respond: { data in claudeResponse.data = data }
+        )
+
+        XCTAssertEqual(String(data: devinResponse.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertFalse(plugin.sessions.contains { $0.host == .devin })
+        XCTAssertTrue(plugin.sessions.contains { $0.host == .claude && $0.id == "claude-session" })
     }
 
     func testPermissionRequestEmitsInteractiveSneakPeek() async {

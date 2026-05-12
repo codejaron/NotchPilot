@@ -3,6 +3,25 @@ import Foundation
 public enum AIHost: String, Codable, Equatable, Sendable {
     case claude
     case codex
+    /// Devin Local (Windsurf's Devin for Terminal). Hook payloads arrive through the
+    /// Claude-compatible hooks file at `~/.claude/settings.json` because Devin imports
+    /// Claude Code configuration. The bridge script re-tags those frames as `.devin`
+    /// when the ancestor process tree contains a `devin` CLI executable.
+    case devin
+}
+
+extension AIHost {
+    /// Hosts that share the Claude Code hooks protocol (payload shape, response
+    /// schema, permission rule format). Routing and response encoding for these
+    /// hosts is unified; only display attributes differ.
+    public var isClaudeFamily: Bool {
+        switch self {
+        case .claude, .devin:
+            return true
+        case .codex:
+            return false
+        }
+    }
 }
 
 public struct AISessionLaunchContext: Codable, Equatable, Sendable {

@@ -18,7 +18,7 @@ public enum HookInstallError: LocalizedError {
 }
 
 public struct HookInstaller {
-    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 3"
+    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 4"
 
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
@@ -172,14 +172,30 @@ public struct HookInstaller {
     }
 
     private func installedBridgeScriptNeedsUpdate(_ bridgeScript: String?) -> Bool {
-        guard let bridgeScript,
-              bridgeScript.isEmpty == false,
-              fileManager.fileExists(atPath: bridgeScript),
-              let script = try? String(contentsOfFile: bridgeScript, encoding: .utf8)
-        else {
+        // Older NotchPilot installs do not persist `bridge.scriptPath` in
+        // UserDefaults, so callers may pass `nil` even when there is a stale
+        // bridge sitting at the canonical install location. Fall back to that
+        // canonical path before declaring "no update needed" — otherwise the
+        // settings panel button stays on "Remove Integration" and the user can
+        // never trigger a re-deploy short of uninstalling first.
+        let canonicalFallback = homeDirectoryURL
+            .appendingPathComponent(".notchpilot/notch-bridge.py")
+            .path
+
+        let candidatePath: String
+        if let bridgeScript,
+           bridgeScript.isEmpty == false,
+           fileManager.fileExists(atPath: bridgeScript) {
+            candidatePath = bridgeScript
+        } else if fileManager.fileExists(atPath: canonicalFallback) {
+            candidatePath = canonicalFallback
+        } else {
             return false
         }
 
+        guard let script = try? String(contentsOfFile: candidatePath, encoding: .utf8) else {
+            return false
+        }
         return script.contains(Self.bridgeVersionNeedle) == false
     }
 

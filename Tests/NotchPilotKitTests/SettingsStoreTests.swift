@@ -264,11 +264,13 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.systemMonitorEnabled)
         XCTAssertTrue(store.claudePluginEnabled)
         XCTAssertTrue(store.codexPluginEnabled)
+        XCTAssertTrue(store.devinPluginEnabled)
         XCTAssertTrue(store.mediaPlaybackEnabled)
 
         store.systemMonitorEnabled = false
         store.claudePluginEnabled = false
         store.codexPluginEnabled = false
+        store.devinPluginEnabled = false
         store.mediaPlaybackEnabled = false
 
         let reloadedStore = SettingsStore(
@@ -280,6 +282,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloadedStore.systemMonitorEnabled)
         XCTAssertFalse(reloadedStore.claudePluginEnabled)
         XCTAssertFalse(reloadedStore.codexPluginEnabled)
+        XCTAssertFalse(reloadedStore.devinPluginEnabled)
         XCTAssertFalse(reloadedStore.mediaPlaybackEnabled)
     }
 

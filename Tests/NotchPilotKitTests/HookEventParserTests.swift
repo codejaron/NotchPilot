@@ -383,4 +383,60 @@ final class HookEventParserTests: XCTestCase {
 
         XCTAssertTrue(envelope.needsResponse)
     }
+
+    // MARK: - Devin Local
+
+    /// Devin Local hook payloads use the Claude-compatible schema but never include
+    /// a `session_id` field (verified empirically against `devin acp` running inside
+    /// Windsurf). The bridge script (`notch-bridge.py`) compensates by injecting
+    /// `session_id: notchpilot-agent-pid-<pid>` derived from the Devin acp main
+    /// process PID. This test guarantees the parser carries that fallback through.
+    func testDevinFrameKeepsBridgeInjectedSessionID() throws {
+        let frame = BridgeFrame(
+            host: .devin,
+            requestID: "req-devin-1",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "tool_name": "exec",
+              "tool_input": { "command": "ls" },
+              "tool_use_id": "toolu_bdrk_01Pk9yTFDRTeeawxwx12A41B",
+              "session_id": "notchpilot-agent-pid-30716"
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.host, .devin)
+        XCTAssertEqual(envelope.sessionID, "notchpilot-agent-pid-30716")
+        XCTAssertEqual(envelope.eventType, .preToolUse)
+        XCTAssertFalse(envelope.needsResponse)
+    }
+
+    /// If for some reason the bridge could not inject a session_id (e.g. malformed
+    /// JSON), the parser must still fall back to `frame.requestID` so each Devin
+    /// invocation does not crash the pipeline. We accept a per-tool-call grouping
+    /// in that pathological case — the bridge layer is responsible for stable
+    /// sessions, not the parser.
+    func testDevinFrameFallsBackToRequestIDWhenSessionIDMissing() throws {
+        let frame = BridgeFrame(
+            host: .devin,
+            requestID: "fallback-uuid",
+            rawJSON: """
+            {
+              "hook_event_name": "PostToolUse",
+              "tool_name": "exec",
+              "tool_input": { "command": "pwd" },
+              "tool_response": { "success": true, "output": "/tmp", "error": null }
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.host, .devin)
+        XCTAssertEqual(envelope.sessionID, "fallback-uuid")
+        XCTAssertEqual(envelope.eventType, .postToolUse)
+    }
 }
