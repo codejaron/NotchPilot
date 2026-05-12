@@ -1,6 +1,132 @@
 import AppKit
 import SwiftUI
 
+enum CommandDisplayText {
+    static func userVisibleCommand(_ rawCommand: String) -> String {
+        let trimmed = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false,
+              let executable = nextToken(in: trimmed, from: trimmed.startIndex),
+              isShellExecutable(executable.value)
+        else {
+            return trimmed
+        }
+
+        var cursor = executable.endIndex
+        while let option = nextToken(in: trimmed, from: cursor) {
+            guard option.value.hasPrefix("-") else {
+                return trimmed
+            }
+
+            cursor = option.endIndex
+            if option.value.dropFirst().contains("c") {
+                let command = trimmed[cursor...].trimmingCharacters(in: .whitespacesAndNewlines)
+                return command.isEmpty ? trimmed : unquoted(command)
+            }
+        }
+
+        return trimmed
+    }
+
+    private struct Token {
+        let value: String
+        let endIndex: String.Index
+    }
+
+    private static func nextToken(in string: String, from startIndex: String.Index) -> Token? {
+        var index = startIndex
+        while index < string.endIndex, string[index].isWhitespace {
+            index = string.index(after: index)
+        }
+
+        guard index < string.endIndex else {
+            return nil
+        }
+
+        var value = ""
+        var quote: Character?
+        while index < string.endIndex {
+            let character = string[index]
+
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    value.append(character)
+                }
+                index = string.index(after: index)
+                continue
+            }
+
+            if character.isWhitespace {
+                break
+            }
+
+            if character == "'" || character == "\"" {
+                quote = character
+            } else {
+                value.append(character)
+            }
+            index = string.index(after: index)
+        }
+
+        return Token(value: value, endIndex: index)
+    }
+
+    private static func isShellExecutable(_ executable: String) -> Bool {
+        guard let name = executable.split(separator: "/").last else {
+            return false
+        }
+
+        return ["bash", "sh", "zsh"].contains(String(name))
+    }
+
+    private static func unquoted(_ command: String) -> String {
+        guard let first = command.first,
+              (first == "'" || first == "\""),
+              command.last == first,
+              command.count >= 2
+        else {
+            return command
+        }
+
+        let inner = String(command.dropFirst().dropLast())
+        guard first == "\"" else {
+            return inner
+        }
+
+        return unescapedDoubleQuotedCommand(inner)
+    }
+
+    private static func unescapedDoubleQuotedCommand(_ command: String) -> String {
+        var result = ""
+        var isEscaping = false
+
+        for character in command {
+            if isEscaping {
+                if character == "\\" || character == "\"" || character == "$" || character == "`" {
+                    result.append(character)
+                } else {
+                    result.append("\\")
+                    result.append(character)
+                }
+                isEscaping = false
+                continue
+            }
+
+            if character == "\\" {
+                isEscaping = true
+            } else {
+                result.append(character)
+            }
+        }
+
+        if isEscaping {
+            result.append("\\")
+        }
+        return result
+    }
+}
+
 struct AIPluginApprovalSneakNotice: Equatable {
     let count: Int
     let text: String
@@ -28,7 +154,7 @@ struct AIPluginApprovalSneakNotice: Equatable {
 
         if let commandPreview = surface.commandPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
            commandPreview.isEmpty == false {
-            return commandPreview
+            return CommandDisplayText.userVisibleCommand(commandPreview)
         }
 
         return surface.summary
@@ -42,7 +168,7 @@ struct AIPluginApprovalSneakNotice: Equatable {
 
         if let command = approval.payload.command?.trimmingCharacters(in: .whitespacesAndNewlines),
            command.isEmpty == false {
-            return command
+            return CommandDisplayText.userVisibleCommand(command)
         }
 
         if let networkApprovalContext = approval.networkApprovalContext {
@@ -72,7 +198,7 @@ struct CodexApprovalDetailPresentation: Equatable {
 
         if trimmedCommand.isEmpty == false {
             self.summaryText = trimmedSummary.isEmpty ? nil : trimmedSummary
-            self.commandText = trimmedCommand
+            self.commandText = CommandDisplayText.userVisibleCommand(trimmedCommand)
         } else {
             self.summaryText = nil
             self.commandText = trimmedSummary

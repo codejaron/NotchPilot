@@ -194,7 +194,7 @@ struct AIPluginApprovalDetailView: View {
 
     private var approvalCommandText: String {
         if let command = approval.payload.command, command.isEmpty == false {
-            return command
+            return CommandDisplayText.userVisibleCommand(command)
         }
 
         if let networkApprovalContext = approval.networkApprovalContext {

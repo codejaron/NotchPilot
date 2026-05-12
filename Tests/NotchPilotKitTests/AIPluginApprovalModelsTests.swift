@@ -62,7 +62,37 @@ final class AIPluginApprovalModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(presentation.summaryText, "Do you want me to run the broader notch tests?")
-        XCTAssertEqual(presentation.commandText, "/bin/zsh -lc 'swift test --filter \"NotchLayoutMetricsTests\"'")
+        XCTAssertEqual(presentation.commandText, "swift test --filter \"NotchLayoutMetricsTests\"")
+    }
+
+    func testCodexApprovalDetailPresentationKeepsNonShellCommandPreviewUnchanged() {
+        let presentation = CodexApprovalDetailPresentation(
+            surface: CodexActionableSurface(
+                id: "surface-1",
+                summary: "Run command?",
+                commandPreview: "rm -rf '/tmp/demo'",
+                primaryButtonTitle: "Submit",
+                cancelButtonTitle: "Skip"
+            )
+        )
+
+        XCTAssertEqual(presentation.commandText, "rm -rf '/tmp/demo'")
+    }
+
+    func testCommandDisplayTextStripsUnquotedLoginShellWrapper() {
+        XCTAssertEqual(
+            CommandDisplayText.userVisibleCommand("/bin/zsh -lc date"),
+            "date"
+        )
+    }
+
+    func testCommandDisplayTextStripsDoubleQuotedLoginShellWrapper() {
+        XCTAssertEqual(
+            CommandDisplayText.userVisibleCommand(
+                #"/bin/zsh -lc "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests'""#
+            ),
+            #"DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests'"#
+        )
     }
 
     func testStandaloneCodexTextInputPresentationPlacesIndexInsideField() {
