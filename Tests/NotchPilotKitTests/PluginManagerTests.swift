@@ -17,6 +17,25 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertEqual(manager.enabledPlugins.map(\.id), ["system-monitor", "claude", "codex"])
     }
 
+    func testDefaultOpenPluginMapsLegacyAIIDsToVirtualAIID() {
+        let manager = PluginManager()
+        manager.register(PluginManagerTestPlugin(id: "claude", title: "Claude", dockOrder: 100))
+        manager.register(PluginManagerTestPlugin(id: "codex", title: "Codex", dockOrder: 110))
+
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: nil),
+            "ai"
+        )
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: "codex", lastSelectedPluginID: nil),
+            "ai"
+        )
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: "claude"),
+            "ai"
+        )
+    }
+
     func testActivateAllSkipsDisabledPlugins() {
         let manager = PluginManager()
         let enabled = PluginManagerTestPlugin(id: "enabled", title: "Enabled", dockOrder: 1)

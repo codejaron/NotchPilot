@@ -14,3 +14,4 @@ NotchPilot.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 .netrc
 __pycache__/
 *.pyc
+.superpowers/

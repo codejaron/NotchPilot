@@ -142,6 +142,135 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertTrue(marksActivity)
     }
 
+    func testThreadStreamPatchesDoNotMarkCompletedMetadataRefreshAsActivity() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-old-completed"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-old-completed"),
+                                "title": .string("Old Title"),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-old"),
+                                        "status": .string("completed"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-old-completed"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("title")]),
+                                    "value": .string("Old Title Refreshed"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-old-completed")
+        XCTAssertEqual(context.title, "Old Title Refreshed")
+        XCTAssertEqual(context.phase, .completed)
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamPatchesMarkCompletionTransitionAsActivity() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-completing"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-live-completing"),
+                                "title": .string("Live Thread"),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-live"),
+                                        "status": .string("inProgress"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-live-completing"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([.string("turns"), .integer(0), .string("status")]),
+                                    "value": .string("completed"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.threadID, "conv-live-completing")
+        XCTAssertEqual(context.phase, .completed)
+        XCTAssertTrue(marksActivity)
+    }
+
     func testLatestTurnInProgressReflectsLatestTurnStatus() throws {
         var reducer = CodexDesktopEventReducer()
 

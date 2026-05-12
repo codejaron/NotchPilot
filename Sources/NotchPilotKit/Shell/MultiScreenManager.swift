@@ -56,7 +56,7 @@ public final class MultiScreenManager {
                 existing.updateScreen(descriptor)
             } else {
                 let session = ScreenSessionModel(descriptor: descriptor)
-                session.activePluginID = pluginManager.enabledPlugins.first?.id
+                session.activePluginID = AIPluginGroup.resolvedActivePluginID(pluginManager.enabledPlugins.first?.id)
                 sessions[descriptor.id] = session
                 windows[descriptor.id] = NotchWindow(session: session, pluginManager: pluginManager)
             }

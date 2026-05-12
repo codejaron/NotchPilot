@@ -119,6 +119,9 @@ public struct CodexDesktopEventReducer {
             var conversationState = conversationStates[conversationID] ?? .object([
                 "id": .string(conversationID),
             ])
+            let previousState = conversationState.objectValue
+            let previousPhase = previousState.map(conversationPhase(from:))
+            let previousApproval = conversationApprovalRequests[conversationID]
 
             for patchValue in patches {
                 guard let patch = patchValue.objectValue else {
@@ -128,9 +131,62 @@ public struct CodexDesktopEventReducer {
             }
 
             conversationStates[conversationID] = conversationState
-            return outputForConversationState(conversationID: conversationID, marksActivity: true)
+            guard let nextState = conversationState.objectValue else {
+                return []
+            }
+            let currentApproval = approvalRequest(
+                for: conversationID,
+                state: nextState,
+                ownerClientID: conversationOwnerClientIDs[conversationID]
+            )
+            return outputForConversationState(
+                conversationID: conversationID,
+                marksActivity: patchesMarkActivity(
+                    previousPhase: previousPhase,
+                    nextPhase: conversationPhase(from: nextState),
+                    previousApproval: previousApproval,
+                    currentApproval: currentApproval
+                )
+            )
         default:
             return []
+        }
+    }
+
+    private func patchesMarkActivity(
+        previousPhase: CodexThreadPhase?,
+        nextPhase: CodexThreadPhase,
+        previousApproval: CodexDesktopIPCRequestFrame?,
+        currentApproval: CodexDesktopIPCRequestFrame?
+    ) -> Bool {
+        if isLiveActivityPhase(nextPhase) {
+            return true
+        }
+
+        if let previousPhase,
+           isLiveActivityPhase(previousPhase),
+           isTerminalPhase(nextPhase) {
+            return true
+        }
+
+        return currentApproval != nil && currentApproval != previousApproval
+    }
+
+    private func isLiveActivityPhase(_ phase: CodexThreadPhase) -> Bool {
+        switch phase {
+        case .plan, .working:
+            return true
+        case .completed, .connected, .interrupted, .error, .unknown:
+            return false
+        }
+    }
+
+    private func isTerminalPhase(_ phase: CodexThreadPhase) -> Bool {
+        switch phase {
+        case .completed, .interrupted, .error:
+            return true
+        case .plan, .working, .connected, .unknown:
+            return false
         }
     }
 

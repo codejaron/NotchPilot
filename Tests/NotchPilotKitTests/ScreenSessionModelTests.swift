@@ -277,17 +277,52 @@ final class ScreenSessionModelTests: XCTestCase {
             )
         )
 
+        // AI plugin IDs (claude/codex/devin) are now mapped to the unified
+        // "ai" virtual tab ID via AIPluginGroup.resolvedActivePluginID.
         session.open(pluginID: "codex")
         session.close()
 
         XCTAssertEqual(session.notchState, .idleClosed)
-        XCTAssertEqual(session.activePluginID, "codex")
+        XCTAssertEqual(session.activePluginID, "ai")
 
         session.setHover(true, fallbackPluginID: "claude")
         try? await Task.sleep(for: .milliseconds(360))
 
         XCTAssertEqual(session.notchState, .open)
-        XCTAssertEqual(session.activePluginID, "codex")
+        XCTAssertEqual(session.activePluginID, "ai")
+    }
+
+    func testDirectActivePluginAssignmentMapsLegacyAIIDsToVirtualAIID() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        session.activePluginID = "claude"
+        XCTAssertEqual(session.activePluginID, "ai")
+
+        session.activePluginID = "codex"
+        XCTAssertEqual(session.activePluginID, "ai")
+
+        session.activePluginID = "devin"
+        XCTAssertEqual(session.activePluginID, "ai")
+    }
+
+    func testDirectActivePluginAssignmentLeavesNonAIIDsUnchanged() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        session.activePluginID = "system-monitor"
+
+        XCTAssertEqual(session.activePluginID, "system-monitor")
     }
 
     private func makeSettingsStore(activitySneakPreviewsHidden: Bool) -> SettingsStore {

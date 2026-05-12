@@ -22,7 +22,14 @@ public final class ScreenSessionModel: ObservableObject {
     @Published public private(set) var hoverState = false
     @Published public private(set) var hoverFeedbackTrigger = false
     @Published public private(set) var currentSneakPeek: SneakPeekRequest?
-    @Published public var activePluginID: String?
+    @Published public var activePluginID: String? {
+        didSet {
+            let resolvedID = AIPluginGroup.resolvedActivePluginID(activePluginID)
+            if activePluginID != resolvedID {
+                activePluginID = resolvedID
+            }
+        }
+    }
     @Published public private(set) var lastSelectedPluginID: String?
 
     public var id: String { descriptor.id }
@@ -159,7 +166,7 @@ public final class ScreenSessionModel: ObservableObject {
         hoverCloseTask?.cancel()
         if let pluginID {
             activePluginID = pluginID
-            lastSelectedPluginID = pluginID
+            lastSelectedPluginID = activePluginID
         }
         openReason = reason
         notchState = .open

@@ -82,17 +82,30 @@ public final class PluginManager: ObservableObject {
         previewPluginID: String?,
         lastSelectedPluginID: String?
     ) -> String? {
+        let enabledPlugins = enabledPlugins
+
         if let previewPluginID,
-           enabledPlugins.contains(where: { $0.id == previewPluginID }) {
-            return previewPluginID
+           let resolvedID = resolvedDefaultOpenPluginID(previewPluginID, enabledPlugins: enabledPlugins) {
+            return resolvedID
         }
 
         if let lastSelectedPluginID,
-           enabledPlugins.contains(where: { $0.id == lastSelectedPluginID }) {
-            return lastSelectedPluginID
+           let resolvedID = resolvedDefaultOpenPluginID(lastSelectedPluginID, enabledPlugins: enabledPlugins) {
+            return resolvedID
         }
 
-        return enabledPlugins.first?.id
+        return enabledPlugins.first.map { AIPluginGroup.resolvedActivePluginID($0.id) ?? $0.id }
+    }
+
+    private func resolvedDefaultOpenPluginID(
+        _ pluginID: String,
+        enabledPlugins: [any NotchPlugin]
+    ) -> String? {
+        let resolvedID = AIPluginGroup.resolvedActivePluginID(pluginID) ?? pluginID
+        if resolvedID == AIPluginGroup.virtualTabID {
+            return AIPluginGroup.aiPlugins(from: enabledPlugins).isEmpty ? nil : resolvedID
+        }
+        return enabledPlugins.contains(where: { $0.id == resolvedID }) ? resolvedID : nil
     }
 
     private func observe(_ plugin: any NotchPlugin) {
