@@ -18,13 +18,12 @@
 
 ## ✨ Features
 
-- 🪟 **Expandable notch panel** with compact sneak previews
-- 🐙 **Claude Code** — hook-based tool-use approvals surfaced in the notch; approve / deny / remember without leaving your editor
-- 🤖 **Codex Desktop** — live session monitoring, in-notch approval prompts, and session-scoped rules to keep vibe coding flowing
-- 🎵 **Media control** — now-playing previews and playback controls in the notch
-- 🎤 **Desktop lyrics** — floating lyrics window with online search, time-offset adjustment, and per-track ignore list
-- 📊 **System monitoring** — CPU, memory, network, disk, battery, temperature
-- 🖥️ **Multi-screen** support with a menu bar controller
+- 🪟 **Expandable notch panel** — compact previews, left/right view switching, and notch padding customization.
+- 🔔 **Notification center** — system and app notifications displayed directly under the notch.
+- 🐙 **Claude Code & Devin** — handle CLI tool approvals (approve/deny/remember rules) from the notch without switching back to the terminal.
+- 🤖 **Codex Desktop integration** — live session monitoring, current terminal command display, and in-notch approval prompts.
+- 🎵 **Media & Desktop lyrics** — notch playback controls and a floating lyrics window with online search and time offsets.
+- 📊 **System monitoring** — CPU, memory, network traffic, disk, battery, and temperature.
 
 ## 🚀 Getting Started
 
