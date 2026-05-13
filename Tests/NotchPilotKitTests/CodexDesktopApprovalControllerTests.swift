@@ -53,6 +53,84 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
         XCTAssertEqual(surface?.threadID, "thread-1")
     }
 
+    func testCommandApprovalOptionTitleShowsRawShellWrappedCommandForShellWrappedExecpolicyAmendment() {
+        let controller = CodexDesktopApprovalController()
+        let command = "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests|ScreenSessionModelTests'"
+        let rawCommand = #"/bin/zsh -lc "\#(command)""#
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "approval-shell-amendment",
+                method: "item/commandExecution/requestApproval",
+                params: [
+                    "threadId": .string("thread-1"),
+                    "command": .string(rawCommand),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .object([
+                            "acceptWithExecpolicyAmendment": .object([
+                                "execpolicy_amendment": .array([
+                                    .string("/bin/zsh"),
+                                    .string("-lc"),
+                                    .string(command),
+                                ]),
+                            ]),
+                        ]),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(
+            surface?.options.map(\.title),
+            [
+                "Yes",
+                "Yes, and don't ask again for commands that start with `\(rawCommand)`",
+            ]
+        )
+    }
+
+    func testCommandApprovalOptionTitleFallsBackToRawCommandWhenExecpolicyAmendmentIsOnlyShellExecutable() {
+        let controller = CodexDesktopApprovalController()
+        let command = "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests|ScreenSessionModelTests'"
+        let rawCommand = #"/bin/zsh -lc "\#(command)""#
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "approval-shell-only-amendment",
+                method: "item/commandExecution/requestApproval",
+                params: [
+                    "threadId": .string("thread-1"),
+                    "command": .string(rawCommand),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .object([
+                            "acceptWithExecpolicyAmendment": .object([
+                                "execpolicy_amendment": .array([
+                                    .string("/bin/zsh"),
+                                ]),
+                            ]),
+                        ]),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(
+            surface?.options.map(\.title),
+            [
+                "Yes",
+                "Yes, and don't ask again for commands that start with `\(rawCommand)`",
+            ]
+        )
+    }
+
     func testSubmittingSelectedCommandApprovalDecisionReturnsMatchingIPCResponseAndClearsSurface() {
         let controller = CodexDesktopApprovalController()
         _ = controller.handle(

@@ -22,10 +22,10 @@ final class AppLocalizationTests: XCTestCase {
         )
         XCTAssertEqual(
             AppStrings.codexOptionTitle(
-                "Yes, and don't ask again for commands that start with `rm -rf`",
+                "Yes, and don't ask again for commands that start with `/bin/zsh -lc date`",
                 language: .zhHans
             ),
-            "是，且对于以 `rm -rf` 开头的命令不再询问"
+            "是，且对于以后续内容开头的命令不再询问 /bin/zsh -lc date"
         )
     }
 

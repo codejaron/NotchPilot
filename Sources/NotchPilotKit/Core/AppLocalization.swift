@@ -528,7 +528,7 @@ enum AppStrings {
                 let prefix = title
                     .dropFirst("Yes, and don't ask again for commands that start with `".count)
                     .dropLast()
-                return "是，且对于以 `\(prefix)` 开头的命令不再询问"
+                return "是，且对于以后续内容开头的命令不再询问 \(prefix)"
             }
             if title.hasPrefix("Yes, and allow "),
                title.hasSuffix(" in the future") {

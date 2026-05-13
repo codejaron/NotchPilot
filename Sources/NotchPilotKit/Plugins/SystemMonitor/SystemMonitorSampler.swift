@@ -468,7 +468,13 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         demand: SystemMonitorSamplingDemand,
         date: Date
     ) -> [SystemMonitorNetworkProcessActivity] {
-        _ = demand
+        guard demand.includesPerProcessNetwork else {
+            previousNetworkProcessCounters.removeAll()
+            previousNetworkProcessDate = nil
+            cachedNetworkProcessActivities = []
+            return []
+        }
+
         let interval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
         let currentCounters = networkProcessCounters()
         let activities = SystemMonitorSampleMath.networkProcessActivities(

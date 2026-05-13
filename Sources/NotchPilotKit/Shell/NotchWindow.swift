@@ -30,6 +30,8 @@ public final class NotchWindow: NSPanel {
     private var globalMouseMonitor: Any?
     private var lastHoverState: Bool?
     private var pluginObserver: AnyCancellable?
+    private var accumulatedTabScrollDelta = CGSize.zero
+    private var tabScrollGestureLocked = false
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.session = session
@@ -115,12 +117,19 @@ public final class NotchWindow: NSPanel {
             .mouseMoved,
             .leftMouseDragged,
             .rightMouseDragged,
-            .otherMouseDragged
+            .otherMouseDragged,
+            .scrollWheel,
+            .swipe
         ]
 
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) { [weak self] event in
+            var shouldConsumeEvent = false
             MainActor.assumeIsolated {
                 self?.updateMouseInteraction()
+                shouldConsumeEvent = self?.handleTabGesture(event) == true
+            }
+            if shouldConsumeEvent {
+                return nil
             }
             return event
         }
@@ -163,5 +172,113 @@ public final class NotchWindow: NSPanel {
         lastHoverState = hovering
         ignoresMouseEvents = !hovering
         session.setHover(hovering, fallbackPluginID: pluginManager.enabledPlugins.first?.id)
+    }
+
+    private func handleTabGesture(_ event: NSEvent) -> Bool {
+        guard
+            session.notchState == .open,
+            lastHoverState == true,
+            shouldHandleShellTabGesture(for: event)
+        else {
+            resetAccumulatedTabScrollDelta()
+            return false
+        }
+
+        switch event.type {
+        case .scrollWheel:
+            return handleTabScroll(event)
+        case .swipe:
+            return handleTabSwipe(event)
+        default:
+            return false
+        }
+    }
+
+    private func handleTabScroll(_ event: NSEvent) -> Bool {
+        if event.phase == .began || event.phase == .mayBegin {
+            resetAccumulatedTabScrollDelta()
+        }
+
+        if tabScrollGestureLocked {
+            if scrollGestureDidEnd(event) {
+                resetAccumulatedTabScrollDelta()
+            }
+            return true
+        }
+
+        guard event.momentumPhase.isEmpty else {
+            return false
+        }
+
+        accumulatedTabScrollDelta.width += event.scrollingDeltaX
+        accumulatedTabScrollDelta.height += event.scrollingDeltaY
+
+        guard let direction = NotchTabGestureIntent.direction(
+            horizontalDelta: accumulatedTabScrollDelta.width,
+            verticalDelta: accumulatedTabScrollDelta.height
+        ) else {
+            if event.phase == .ended || event.phase == .cancelled {
+                resetAccumulatedTabScrollDelta()
+            }
+            return false
+        }
+
+        guard switchActiveTab(direction) else {
+            resetAccumulatedTabScrollDelta()
+            return false
+        }
+
+        resetAccumulatedTabScrollDelta()
+        if event.phase.isEmpty == false {
+            tabScrollGestureLocked = true
+        }
+        return true
+    }
+
+    private func handleTabSwipe(_ event: NSEvent) -> Bool {
+        guard let direction = NotchTabGestureIntent.direction(
+            horizontalDelta: event.deltaX,
+            verticalDelta: event.deltaY,
+            minimumHorizontalDelta: 0.5,
+            horizontalDominanceRatio: 1.1
+        ) else {
+            return false
+        }
+
+        return switchActiveTab(direction)
+    }
+
+    private func switchActiveTab(_ direction: NotchTabNavigator.Direction) -> Bool {
+        guard let destination = NotchTabNavigator.destination(
+            from: session.activePluginID,
+            orderedTabIDs: NotchTabNavigator.orderedTabIDs(from: pluginManager.enabledPlugins),
+            direction: direction
+        ) else {
+            return false
+        }
+
+        session.activePluginID = destination
+        return true
+    }
+
+    private func resetAccumulatedTabScrollDelta() {
+        accumulatedTabScrollDelta = .zero
+        tabScrollGestureLocked = false
+    }
+
+    private func shouldHandleShellTabGesture(for event: NSEvent) -> Bool {
+        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard event.modifierFlags.intersection(disallowedModifiers).isEmpty else {
+            return false
+        }
+
+        return (firstResponder is NSTextView) == false
+    }
+
+    private func scrollGestureDidEnd(_ event: NSEvent) -> Bool {
+        event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled)
     }
 }

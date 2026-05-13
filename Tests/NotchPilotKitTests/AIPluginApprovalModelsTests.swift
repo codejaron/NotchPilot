@@ -62,7 +62,7 @@ final class AIPluginApprovalModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(presentation.summaryText, "Do you want me to run the broader notch tests?")
-        XCTAssertEqual(presentation.commandText, "swift test --filter \"NotchLayoutMetricsTests\"")
+        XCTAssertEqual(presentation.commandText, "/bin/zsh -lc 'swift test --filter \"NotchLayoutMetricsTests\"'")
     }
 
     func testCodexApprovalDetailPresentationKeepsNonShellCommandPreviewUnchanged() {
@@ -79,19 +79,19 @@ final class AIPluginApprovalModelsTests: XCTestCase {
         XCTAssertEqual(presentation.commandText, "rm -rf '/tmp/demo'")
     }
 
-    func testCommandDisplayTextStripsUnquotedLoginShellWrapper() {
+    func testCommandDisplayTextKeepsUnquotedLoginShellWrapper() {
         XCTAssertEqual(
             CommandDisplayText.userVisibleCommand("/bin/zsh -lc date"),
-            "date"
+            "/bin/zsh -lc date"
         )
     }
 
-    func testCommandDisplayTextStripsDoubleQuotedLoginShellWrapper() {
+    func testCommandDisplayTextKeepsDoubleQuotedLoginShellWrapper() {
         XCTAssertEqual(
             CommandDisplayText.userVisibleCommand(
                 #"/bin/zsh -lc "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests'""#
             ),
-            #"DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests'"#
+            #"/bin/zsh -lc "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter 'NotchLayoutMetricsTests|NotchWindowTests'""#
         )
     }
 

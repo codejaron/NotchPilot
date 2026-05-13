@@ -119,6 +119,7 @@ struct AIPluginCodexSurfaceOptionRow: View {
                     ))
                     .foregroundStyle(NotchPilotTheme.islandTextPrimary)
                     .lineLimit(CodexApprovalCompactLayout.optionLineLimit)
+                    .truncationMode(.middle)
                     .minimumScaleFactor(0.86)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)

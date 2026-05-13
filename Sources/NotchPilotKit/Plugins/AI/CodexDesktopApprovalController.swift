@@ -686,13 +686,19 @@ final class CodexDesktopApprovalController {
         }
 
         if let amendment = object.objectValue(at: ["acceptWithExecpolicyAmendment"]),
-           let commandPrefix = amendment.arrayValue(at: ["execpolicy_amendment"])?.compactMap(\.stringValue).first,
+           let commandPrefix = commandPrefixDisplayText(
+                from: amendment.arrayValue(at: ["execpolicy_amendment"]),
+                params: params
+           ),
            commandPrefix.isEmpty == false {
             return "Yes, and don't ask again for commands that start with `\(commandPrefix)`"
         }
 
         if let amendment = object.objectValue(at: ["approved_execpolicy_amendment"]),
-           let commandPrefix = amendment.arrayValue(at: ["proposed_execpolicy_amendment"])?.compactMap(\.stringValue).joined(separator: " "),
+           let commandPrefix = commandPrefixDisplayText(
+                from: amendment.arrayValue(at: ["proposed_execpolicy_amendment"]),
+                params: params
+           ),
            commandPrefix.isEmpty == false {
             return "Yes, and don't ask again for commands that start with `\(commandPrefix)`"
         }
@@ -707,6 +713,61 @@ final class CodexDesktopApprovalController {
         }
 
         return nil
+    }
+
+    private func commandPrefixDisplayText(
+        from amendmentValues: [JSONValue]?,
+        params: [String: JSONValue]
+    ) -> String? {
+        let proposedComponents = params.arrayValue(at: ["proposedExecpolicyAmendment"])?.compactMap(\.stringValue) ?? []
+        let amendmentComponents = amendmentValues?.compactMap(\.stringValue) ?? []
+
+        for components in [proposedComponents, amendmentComponents] where components.isEmpty == false {
+            guard let displayText = commandPrefixDisplayText(from: components, params: params) else {
+                continue
+            }
+
+            return displayText
+        }
+
+        if let command = params.stringValue(at: ["command"]) {
+            let displayText = CommandDisplayText.userVisibleCommand(command)
+            if displayText.isEmpty == false {
+                return displayText
+            }
+        }
+
+        return commandPrefixDisplayText(from: amendmentComponents)
+    }
+
+    private func commandPrefixDisplayText(from components: [String], params: [String: JSONValue]) -> String? {
+        if componentsStartWithShellExecutable(components),
+           let rawCommand = params.stringValue(at: ["command"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+           rawCommand.isEmpty == false {
+            return rawCommand
+        }
+
+        return commandPrefixDisplayText(from: components)
+    }
+
+    private func commandPrefixDisplayText(from components: [String]) -> String? {
+        let joinedCommand = components
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard joinedCommand.isEmpty == false else {
+            return nil
+        }
+
+        return joinedCommand
+    }
+
+    private func componentsStartWithShellExecutable(_ components: [String]) -> Bool {
+        guard let firstComponent = components.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let executable = firstComponent.split(separator: "/").last else {
+            return false
+        }
+
+        return ["bash", "sh", "zsh"].contains(String(executable))
     }
 
     private func makeUserInputOptions(
