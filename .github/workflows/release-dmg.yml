@@ -142,7 +142,12 @@ jobs:
           set -euo pipefail
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            mapfile -t STALE_DMG_ASSETS < <(
+            STALE_DMG_ASSETS=()
+            while IFS= read -r asset_name; do
+              if [ -n "$asset_name" ]; then
+                STALE_DMG_ASSETS+=("$asset_name")
+              fi
+            done < <(
               gh release view "$GITHUB_REF_NAME" \
                 --json assets \
                 --jq ".assets[].name | select(startswith(\"$APP_NAME-\") and endswith(\".dmg\") and . != \"$DMG_NAME\")"
