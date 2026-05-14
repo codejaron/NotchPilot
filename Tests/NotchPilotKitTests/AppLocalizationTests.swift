@@ -35,4 +35,9 @@ final class AppLocalizationTests: XCTestCase {
         XCTAssertEqual(AppStrings.systemMonitorBlockTitle(.network, language: .zhHans), "网络")
         XCTAssertEqual(AppStrings.systemMonitorBlockTitle(.network, language: .english), "Network")
     }
+
+    func testNotificationsClearAllLabelResolvesInBothLanguages() {
+        XCTAssertEqual(AppStrings.text(.notificationsMarkAllRead, language: .zhHans), "全部已读")
+        XCTAssertEqual(AppStrings.text(.notificationsMarkAllRead, language: .english), "Mark all read")
+    }
 }

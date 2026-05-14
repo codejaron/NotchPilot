@@ -22,7 +22,8 @@ public struct NotchContentView: View {
             screenID: session.id,
             notchState: session.notchState,
             notchGeometry: session.geometry,
-            isPrimaryScreen: session.descriptor.isPrimary
+            isPrimaryScreen: session.descriptor.isPrimary,
+            currentSneakPeek: session.currentSneakPeek
         )
         let layoutMetrics = NotchLayoutMetrics.resolve(session: session, plugins: plugins)
         let displaySize = visualDisplaySize(layoutMetrics.displaySize)

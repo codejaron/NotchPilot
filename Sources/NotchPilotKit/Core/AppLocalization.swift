@@ -178,6 +178,7 @@ enum AppTextKey {
     case notificationsStateDBNotFound
     case notificationsStateDBUnreadable
     case notificationsUnreadLabel
+    case notificationsMarkAllRead
 }
 
 enum AppConnectionStatus {
@@ -863,6 +864,8 @@ enum AppStrings {
             return "数据库读取失败"
         case .notificationsUnreadLabel:
             return "未读"
+        case .notificationsMarkAllRead:
+            return "全部已读"
         }
     }
 
@@ -1188,6 +1191,8 @@ enum AppStrings {
             return "Notification DB unreadable"
         case .notificationsUnreadLabel:
             return "Unread"
+        case .notificationsMarkAllRead:
+            return "Mark all read"
         }
     }
 }

@@ -13,7 +13,8 @@ struct NotchLayoutMetrics {
             screenID: session.id,
             notchState: session.notchState,
             notchGeometry: session.geometry,
-            isPrimaryScreen: session.descriptor.isPrimary
+            isPrimaryScreen: session.descriptor.isPrimary,
+            currentSneakPeek: session.currentSneakPeek
         )
         let displaySize = preferredDisplaySize(session: session, plugins: plugins, context: context)
         let interactionSize = preferredInteractionSize(for: displaySize, notchState: session.notchState)

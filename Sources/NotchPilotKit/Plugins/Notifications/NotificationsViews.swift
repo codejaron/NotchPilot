@@ -3,11 +3,23 @@ import SwiftUI
 
 // MARK: - Compact preview layout
 
+struct NotificationsCompactPreviewLine: Equatable, Hashable {
+    let title: String?
+    let body: String?
+
+    var hasTitle: Bool {
+        title?.isEmpty == false
+    }
+
+    var hasBody: Bool {
+        body?.isEmpty == false
+    }
+}
+
 enum NotificationsCompactPreviewLayout {
     static let outerPadding: CGFloat = 10
     static let iconTileSize: CGFloat = 26
     static let leftFrameBaseWidth: CGFloat = 32       // tile only
-    static let leftFrameWithBadgeWidth: CGFloat = 60  // tile + count badge
     static let rightFrameMinWidth: CGFloat = 40
     static let rightFrameMaxWidth: CGFloat = 180
     static let rightFrameTextMargin: CGFloat = 12
@@ -18,9 +30,10 @@ enum NotificationsCompactPreviewLayout {
     static let bodyFontSize: CGFloat = 10
     static let titleLineHeight: CGFloat = 14
     static let bodyLineHeight: CGFloat = 13
+    static let messageGroupSpacing: CGFloat = 4
 
-    static func leftFrameWidth(burstCount: Int) -> CGFloat {
-        burstCount > 1 ? leftFrameWithBadgeWidth : leftFrameBaseWidth
+    static func leftFrameWidth() -> CGFloat {
+        leftFrameBaseWidth
     }
 
     /// Measure the rendered width of the app name with our chosen font, clamped to [min, max].
@@ -42,12 +55,24 @@ enum NotificationsCompactPreviewLayout {
         return min(max(raw, rightFrameMinWidth), rightFrameMaxWidth)
     }
 
-    static func extensionHeight(hasTitle: Bool, hasBody: Bool) -> CGFloat {
-        guard hasTitle || hasBody else { return 0 }
-        var height: CGFloat = contentRowVerticalPadding * 2
-        if hasTitle { height += titleLineHeight }
-        if hasBody { height += bodyLineHeight + 1 }
-        return height
+    static func extensionHeight(for lines: [NotificationsCompactPreviewLine]) -> CGFloat {
+        guard lines.isEmpty == false else { return 0 }
+
+        let contentHeight = lines.reduce(CGFloat(0)) { height, line in
+            var lineHeight: CGFloat = 0
+            if line.hasTitle {
+                lineHeight += titleLineHeight
+            }
+            if line.hasBody {
+                lineHeight += bodyLineHeight
+                if line.hasTitle {
+                    lineHeight += 1
+                }
+            }
+            return height + lineHeight
+        }
+        let spacing = CGFloat(max(0, lines.count - 1)) * messageGroupSpacing
+        return contentRowVerticalPadding * 2 + contentHeight + spacing
     }
 
     static func totalWidth(compactWidth: CGFloat, leftFrameWidth: CGFloat, rightFrameWidth: CGFloat) -> CGFloat {
@@ -59,9 +84,7 @@ enum NotificationsCompactPreviewLayout {
 
 struct NotificationsCompactPreview: View {
     let appDisplayName: String
-    let titleLine: String?
-    let bodyLine: String?
-    let burstCount: Int
+    let contentLines: [NotificationsCompactPreviewLine]
     let cameraClearanceWidth: CGFloat
     let notchHeight: CGFloat
     let leftFrameWidth: CGFloat
@@ -106,15 +129,6 @@ struct NotificationsCompactPreview: View {
                 size: NotificationsCompactPreviewLayout.iconTileSize,
                 isActive: true
             )
-
-            if burstCount > 1 {
-                NotchPilotStatusBadge(
-                    text: "\(burstCount)",
-                    color: accentColor,
-                    foreground: .white
-                )
-                .fixedSize(horizontal: true, vertical: false)
-            }
         }
     }
 
@@ -128,18 +142,22 @@ struct NotificationsCompactPreview: View {
 
     @ViewBuilder
     private var contentRow: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            if let titleLine, titleLine.isEmpty == false {
-                Text(titleLine)
-                    .font(.system(size: NotificationsCompactPreviewLayout.titleFontSize, weight: .medium, design: .rounded))
-                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                    .lineLimit(1)
-            }
-            if let bodyLine, bodyLine.isEmpty == false {
-                Text(bodyLine)
-                    .font(.system(size: NotificationsCompactPreviewLayout.bodyFontSize, design: .rounded))
-                    .foregroundStyle(NotchPilotTheme.islandTextSecondary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: NotificationsCompactPreviewLayout.messageGroupSpacing) {
+            ForEach(Array(contentLines.enumerated()), id: \.offset) { _, line in
+                VStack(alignment: .leading, spacing: 1) {
+                    if let title = line.title, title.isEmpty == false {
+                        Text(title)
+                            .font(.system(size: NotificationsCompactPreviewLayout.titleFontSize, weight: .medium, design: .rounded))
+                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                            .lineLimit(1)
+                    }
+                    if let body = line.body, body.isEmpty == false {
+                        Text(body)
+                            .font(.system(size: NotificationsCompactPreviewLayout.bodyFontSize, design: .rounded))
+                            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,9 +248,11 @@ struct NotificationsDashboardView: View {
             Button {
                 store.clear()
             } label: {
-                Image(systemName: "trash")
+                Label(AppStrings.text(.notificationsMarkAllRead, language: settings.interfaceLanguage), systemImage: "checkmark.circle")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
             }
             .buttonStyle(.plain)
+            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
             .opacity(store.entries.isEmpty ? 0.3 : 1)
             .disabled(store.entries.isEmpty)
         }

@@ -4,6 +4,11 @@ import SwiftUI
 
 @MainActor
 public final class NotificationsPlugin: NotchPlugin {
+    private struct PreviewBatch: Equatable {
+        let bundleIdentifier: String
+        var notificationIDs: [UUID]
+    }
+
     public let id = "notifications"
     public let title = "Notifications"
     public let iconSystemName = "bell.badge"
@@ -20,11 +25,15 @@ public final class NotificationsPlugin: NotchPlugin {
     private let observer: NotificationDatabaseObserving
     private let appDirectory: NotificationAppDirectory
     private let settingsStore: SettingsStore
-    private let nowProvider: @Sendable () -> Date
-    private var burst: NotificationsSneakBurst
+    private let sneakPeekAutoDismissDuration: TimeInterval
     private var settingsCancellables: Set<AnyCancellable> = []
     private weak var bus: EventBus?
-    private var activeSneakPeekID: UUID?
+    private var previewBatchesByRequestID: [UUID: PreviewBatch] = [:]
+    private var previewBatchRequestOrder: [UUID] = []
+    private var activeSneakPeekIDs: Set<UUID> = []
+    private static let defaultSneakPeekAutoDismissDuration: TimeInterval = 2.0
+    private static let burstWindowDuration: TimeInterval = 3.5
+    private static let maxPreviewBatchSize = 3
 
     public convenience init() {
         self.init(
@@ -37,13 +46,12 @@ public final class NotificationsPlugin: NotchPlugin {
         observer: NotificationDatabaseObserving,
         settingsStore: SettingsStore = .shared,
         appDirectory: NotificationAppDirectory = NotificationAppDirectory(),
-        nowProvider: @escaping @Sendable () -> Date = Date.init
+        sneakPeekAutoDismissDuration: TimeInterval = NotificationsPlugin.defaultSneakPeekAutoDismissDuration
     ) {
         self.observer = observer
         self.settingsStore = settingsStore
         self.appDirectory = appDirectory
-        self.nowProvider = nowProvider
-        self.burst = NotificationsSneakBurst(windowDuration: 1.0)
+        self.sneakPeekAutoDismissDuration = sneakPeekAutoDismissDuration
         self.historyStore = NotificationHistoryStore(limit: settingsStore.notificationsHistoryLimit)
         self.isEnabled = settingsStore.notificationsEnabled
 
@@ -93,46 +101,37 @@ public final class NotificationsPlugin: NotchPlugin {
     }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
+        let visibleEntries = historyStore.entries.filter { !$0.muted }
+        let previewEntries = currentPreviewEntries(
+            from: visibleEntries,
+            currentSneakPeek: context.currentSneakPeek
+        )
+        let hasCurrentRequestBatch = hasPreviewBatch(for: context.currentSneakPeek)
         guard isEnabled,
               settingsStore.notificationsSneakPreviewEnabled,
               settingsStore.activitySneakPreviewsHidden == false,
-              case .running = runtimeState,
-              let latest = historyStore.entries.first(where: { !$0.muted }) else {
+              (isRunning || hasCurrentRequestBatch),
+              let latest = previewEntries.first else {
             return nil
         }
 
         let notification = latest.notification
         let appName = notification.appDisplayName ?? notification.bundleIdentifier
 
-        // Privacy-aware content extraction. Filter rules have already redacted the value:
-        // .full:        title set, body set        → titleLine = title, bodyLine = body, extension
-        // .senderOnly:  title set, body/subtitle nil → titleLine = title, bodyLine = nil,  extension (1 line)
-        // .hidden:      title nil, subtitle nil, body nil → no extension; just app name on right
-        let titleLine = notification.title ?? notification.subtitle
-        let bodyLine = notification.body
-
-        // Count contemporaries from the same app within the burst window for the badge.
-        let burstWindow: TimeInterval = 1.0
-        let cutoff = notification.deliveredAt.addingTimeInterval(-burstWindow)
-        let burstCount = historyStore.entries.filter {
-            $0.muted == false
-                && $0.notification.bundleIdentifier == notification.bundleIdentifier
-                && $0.notification.deliveredAt >= cutoff
-        }.count
+        let contentLines = previewEntries.compactMap {
+            Self.compactPreviewLine(for: $0.notification)
+        }
 
         let cameraClearance = context.notchGeometry.compactSize.width
         let notchHeight = context.notchGeometry.compactSize.height
-        let leftFrameWidth = NotificationsCompactPreviewLayout.leftFrameWidth(burstCount: burstCount)
+        let leftFrameWidth = NotificationsCompactPreviewLayout.leftFrameWidth()
         let rightFrameWidth = NotificationsCompactPreviewLayout.rightFrameWidth(forAppName: appName)
         let totalWidth = NotificationsCompactPreviewLayout.totalWidth(
             compactWidth: cameraClearance,
             leftFrameWidth: leftFrameWidth,
             rightFrameWidth: rightFrameWidth
         )
-        let extensionHeight = NotificationsCompactPreviewLayout.extensionHeight(
-            hasTitle: (titleLine?.isEmpty == false),
-            hasBody: (bodyLine?.isEmpty == false)
-        )
+        let extensionHeight = NotificationsCompactPreviewLayout.extensionHeight(for: contentLines)
 
         return NotchPluginPreview(
             width: totalWidth,
@@ -140,9 +139,7 @@ public final class NotificationsPlugin: NotchPlugin {
             view: AnyView(
                 NotificationsCompactPreview(
                     appDisplayName: appName,
-                    titleLine: titleLine,
-                    bodyLine: bodyLine,
-                    burstCount: burstCount,
+                    contentLines: contentLines,
                     cameraClearanceWidth: cameraClearance,
                     notchHeight: notchHeight,
                     leftFrameWidth: leftFrameWidth,
@@ -153,6 +150,91 @@ public final class NotificationsPlugin: NotchPlugin {
                 )
             )
         )
+    }
+
+    private var isRunning: Bool {
+        if case .running = runtimeState {
+            return true
+        }
+        return false
+    }
+
+    private func hasPreviewBatch(for currentSneakPeek: SneakPeekRequest?) -> Bool {
+        guard currentSneakPeek?.pluginID == id,
+              let requestID = currentSneakPeek?.id else {
+            return false
+        }
+
+        return previewBatchesByRequestID[requestID] != nil
+    }
+
+    private func currentPreviewEntries(
+        from visibleEntries: [NotificationHistoryStore.HistoryEntry],
+        currentSneakPeek: SneakPeekRequest?
+    ) -> [NotificationHistoryStore.HistoryEntry] {
+        if currentSneakPeek?.pluginID == id,
+           let requestID = currentSneakPeek?.id,
+           let batch = previewBatchesByRequestID[requestID] {
+            let batchIDs = Set(batch.notificationIDs)
+            return visibleEntries
+                .filter { batchIDs.contains($0.notification.id) }
+                .sorted {
+                    Self.isNewer($0.notification, than: $1.notification)
+                }
+        }
+
+        guard let latest = visibleEntries.sorted(by: {
+            Self.isNewer($0.notification, than: $1.notification)
+        }).first else {
+            return []
+        }
+
+        return Array(Self.burstEntries(
+            from: visibleEntries,
+            latest: latest.notification,
+            windowDuration: Self.burstWindowDuration
+        ).prefix(Self.maxPreviewBatchSize))
+    }
+
+    private static func burstEntries(
+        from entries: [NotificationHistoryStore.HistoryEntry],
+        latest: SystemNotification,
+        windowDuration: TimeInterval
+    ) -> [NotificationHistoryStore.HistoryEntry] {
+        let cutoff = latest.deliveredAt.addingTimeInterval(-windowDuration)
+        return entries
+            .filter {
+                $0.notification.bundleIdentifier == latest.bundleIdentifier
+                    && $0.notification.deliveredAt >= cutoff
+            }
+            .sorted {
+                isNewer($0.notification, than: $1.notification)
+            }
+    }
+
+    private static func compactPreviewLine(for notification: SystemNotification) -> NotificationsCompactPreviewLine? {
+        let title = cleaned(notification.title ?? notification.subtitle)
+        let body = cleaned(notification.body)
+
+        guard title != nil || body != nil else {
+            return nil
+        }
+
+        return NotificationsCompactPreviewLine(title: title, body: body)
+    }
+
+    private static func isNewer(_ lhs: SystemNotification, than rhs: SystemNotification) -> Bool {
+        if lhs.deliveredAt == rhs.deliveredAt {
+            return lhs.dbRecordID > rhs.dbRecordID
+        }
+
+        return lhs.deliveredAt > rhs.deliveredAt
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func contentView(context: NotchContext) -> AnyView {
@@ -187,11 +269,8 @@ public final class NotificationsPlugin: NotchPlugin {
 
     public func deactivate() {
         observer.stop()
-        burst.reset()
-        if let id = activeSneakPeekID {
-            bus?.emit(.dismissSneakPeek(requestID: id, target: .allScreens))
-            activeSneakPeekID = nil
-        }
+        dismissActiveSneakPeeks()
+        clearPreviewBatches()
         bus = nil
     }
 
@@ -199,6 +278,7 @@ public final class NotificationsPlugin: NotchPlugin {
 
     private func ingest(_ notifications: [SystemNotification]) {
         let rules = currentRules()
+        var previewNotifications: [SystemNotification] = []
 
         for notification in notifications {
             let enriched = enrich(notification)
@@ -212,9 +292,13 @@ public final class NotificationsPlugin: NotchPlugin {
             case .present(let redacted):
                 historyStore.append(redacted, muted: false)
                 if settingsStore.notificationsSneakPreviewEnabled {
-                    emitSneakPeek(for: redacted)
+                    previewNotifications.append(redacted)
                 }
             }
+        }
+
+        if previewNotifications.isEmpty == false {
+            emitSneakPeeks(for: previewNotifications)
         }
 
         if !notifications.isEmpty {
@@ -288,28 +372,82 @@ public final class NotificationsPlugin: NotchPlugin {
         )
     }
 
-    private func emitSneakPeek(for n: SystemNotification) {
-        // Track burst window for the badge count surfaced in preview().
-        _ = burst.observe(n, now: nowProvider())
+    private func emitSneakPeeks(for notifications: [SystemNotification]) {
+        for batch in Self.previewBatches(from: notifications) {
+            emitPreviewBatch(batch)
+        }
+        prunePreviewBatchCache()
+    }
 
-        // Always dismiss the previous active SneakPeek and emit a fresh one so that:
-        //   - Same-app rapid messages each get their own brief banner (with updating badge).
-        //   - Cross-app messages take over the banner instead of queueing behind a stale one.
-        // The 3.5 s autoDismiss starts over each emit, so a continuous stream stays visible.
-        if let previousID = activeSneakPeekID {
-            bus?.emit(.dismissSneakPeek(requestID: previousID, target: .allScreens))
+    private static func previewBatches(from notifications: [SystemNotification]) -> [PreviewBatch] {
+        var batches: [PreviewBatch] = []
+        var current: PreviewBatch?
+
+        for notification in notifications {
+            if var batch = current,
+               batch.bundleIdentifier == notification.bundleIdentifier,
+               batch.notificationIDs.count < maxPreviewBatchSize {
+                batch.notificationIDs.append(notification.id)
+                current = batch
+                continue
+            }
+
+            if let current {
+                batches.append(current)
+            }
+            current = PreviewBatch(
+                bundleIdentifier: notification.bundleIdentifier,
+                notificationIDs: [notification.id]
+            )
         }
 
+        if let current {
+            batches.append(current)
+        }
+
+        return batches
+    }
+
+    private func emitPreviewBatch(_ batch: PreviewBatch) {
         let request = SneakPeekRequest(
             pluginID: id,
             priority: SneakPeekRequestPriority.notifications,
             target: .activeScreen,
             kind: .attention,
             isInteractive: false,
-            autoDismissAfter: 3.5
+            autoDismissAfter: sneakPeekAutoDismissDuration
         )
-        activeSneakPeekID = request.id
+        previewBatchesByRequestID[request.id] = batch
+        previewBatchRequestOrder.append(request.id)
+        activeSneakPeekIDs.insert(request.id)
         bus?.emit(.sneakPeekRequested(request))
+    }
+
+    private func dismissActiveSneakPeeks() {
+        for requestID in activeSneakPeekIDs {
+            bus?.emit(.dismissSneakPeek(requestID: requestID, target: .allScreens))
+        }
+        activeSneakPeekIDs.removeAll()
+    }
+
+    private func clearPreviewBatches() {
+        previewBatchesByRequestID.removeAll()
+        previewBatchRequestOrder.removeAll()
+    }
+
+    private func prunePreviewBatchCache() {
+        let maxCachedRequests = max(20, historyStore.limit)
+        guard previewBatchRequestOrder.count > maxCachedRequests else {
+            return
+        }
+
+        let overflow = previewBatchRequestOrder.count - maxCachedRequests
+        let expiredRequestIDs = previewBatchRequestOrder.prefix(overflow)
+        for requestID in expiredRequestIDs {
+            previewBatchesByRequestID.removeValue(forKey: requestID)
+            activeSneakPeekIDs.remove(requestID)
+        }
+        previewBatchRequestOrder.removeFirst(overflow)
     }
 
     // MARK: - Settings reactivity
@@ -331,7 +469,8 @@ public final class NotificationsPlugin: NotchPlugin {
         } else {
             observer.stop()
             historyStore.clear()
-            burst.reset()
+            dismissActiveSneakPeeks()
+            clearPreviewBatches()
             runtimeState = .disabled
             diagnostics = NotificationsRuntimeDiagnostics()
         }

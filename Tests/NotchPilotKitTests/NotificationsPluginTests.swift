@@ -3,6 +3,19 @@ import XCTest
 @testable import NotchPilotKit
 
 final class NotificationsPluginTests: XCTestCase {
+    private static func previewContext(currentSneakPeek: SneakPeekRequest? = nil) -> NotchContext {
+        NotchContext(
+            screenID: "test-screen",
+            notchState: .previewClosed,
+            notchGeometry: NotchGeometry(
+                compactSize: CGSize(width: 185, height: 32),
+                expandedSize: CGSize(width: 520, height: 320)
+            ),
+            isPrimaryScreen: true,
+            currentSneakPeek: currentSneakPeek
+        )
+    }
+
     private final class FakeObserver: NotificationDatabaseObserving, @unchecked Sendable {
         var onNotifications: ((@Sendable ([SystemNotification]) -> Void))?
         var onStateChange: ((@Sendable (NotificationsPluginRuntimeState) -> Void))?
@@ -106,6 +119,281 @@ final class NotificationsPluginTests: XCTestCase {
         XCTAssertEqual(sneakEvents.count, 1)
         XCTAssertEqual(sneakEvents.first?.pluginID, "notifications")
         XCTAssertEqual(sneakEvents.first?.priority, SneakPeekRequestPriority.notifications)
+        XCTAssertEqual(sneakEvents.first?.autoDismissAfter, 2.0)
+    }
+
+    @MainActor
+    func testFreshNotificationPreviewRendersBeforeObserverReportsRunning() throws {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let bus = EventBus()
+        var sneakEvents: [SneakPeekRequest] = []
+        _ = bus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                sneakEvents.append(req)
+            }
+        }
+        plugin.activate(bus: bus)
+
+        fake.emit([
+            SystemNotification(
+                dbRecordID: 1,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ada", body: "Just arrived",
+                deliveredAt: Date()
+            )
+        ])
+
+        let request = try XCTUnwrap(sneakEvents.first)
+        XCTAssertNotNil(
+            plugin.preview(context: Self.previewContext(currentSneakPeek: request)),
+            "The just-emitted notification request should be renderable even if the observer state update arrives just after the notification callback."
+        )
+    }
+
+    @MainActor
+    func testSameAppBurstPreviewExpandsToIncludePreviousMessages() throws {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let singleFake = FakeObserver()
+        let singlePlugin = NotificationsPlugin(observer: singleFake, settingsStore: store)
+        let singleBus = EventBus()
+        var singleSneaks: [SneakPeekRequest] = []
+        _ = singleBus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                singleSneaks.append(req)
+            }
+        }
+        singlePlugin.activate(bus: singleBus)
+        singleFake.reportState(.running(lastEventAt: nil))
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        singleFake.emit([
+            SystemNotification(
+                dbRecordID: 1,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ada", body: "First",
+                deliveredAt: base
+            )
+        ])
+        let singleRequest = try XCTUnwrap(singleSneaks.first)
+        let singleHeight = try XCTUnwrap(
+            singlePlugin.preview(context: Self.previewContext(currentSneakPeek: singleRequest))?.height
+        )
+
+        let burstFake = FakeObserver()
+        let burstPlugin = NotificationsPlugin(observer: burstFake, settingsStore: store)
+        let burstBus = EventBus()
+        var burstSneaks: [SneakPeekRequest] = []
+        _ = burstBus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                burstSneaks.append(req)
+            }
+        }
+        burstPlugin.activate(bus: burstBus)
+        burstFake.reportState(.running(lastEventAt: nil))
+        burstFake.emit([
+            SystemNotification(
+                dbRecordID: 1,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ada", body: "First",
+                deliveredAt: base
+            ),
+            SystemNotification(
+                dbRecordID: 2,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ben", body: "Second",
+                deliveredAt: base.addingTimeInterval(0.4)
+            )
+        ])
+        XCTAssertEqual(burstSneaks.count, 1)
+        let burstHeight = try XCTUnwrap(
+            burstPlugin.preview(context: Self.previewContext(currentSneakPeek: burstSneaks[0]))?.height
+        )
+
+        XCTAssertGreaterThan(
+            burstHeight,
+            singleHeight,
+            "Burst previews should make room for earlier message content instead of replacing it with only the latest notification."
+        )
+    }
+
+    @MainActor
+    func testSeparateObserverBatchesQueueSeparateSneaks() {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let bus = EventBus()
+        var sneakEvents: [SneakPeekRequest] = []
+        _ = bus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                sneakEvents.append(req)
+            }
+        }
+        plugin.activate(bus: bus)
+        fake.reportState(.running(lastEventAt: nil))
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        fake.emit([
+            SystemNotification(
+                dbRecordID: 1,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ada", body: "Still visible",
+                deliveredAt: base
+            )
+        ])
+        fake.emit([
+            SystemNotification(
+                dbRecordID: 2,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ben", body: "Before auto dismiss",
+                deliveredAt: base.addingTimeInterval(2.0)
+            )
+        ])
+
+        XCTAssertEqual(sneakEvents.count, 2)
+        XCTAssertEqual(sneakEvents.map(\.autoDismissAfter), [2.0, 2.0])
+    }
+
+    @MainActor
+    func testSameAppBurstPreviewCapsVisibleBatchAtThreeMessages() throws {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let bus = EventBus()
+        var sneakEvents: [SneakPeekRequest] = []
+        _ = bus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                sneakEvents.append(req)
+            }
+        }
+        plugin.activate(bus: bus)
+        fake.reportState(.running(lastEventAt: nil))
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        fake.emit((1...4).map { index in
+            SystemNotification(
+                dbRecordID: Int64(index),
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Sender \(index)", body: "Message \(index)",
+                deliveredAt: base.addingTimeInterval(TimeInterval(index) * 0.1)
+            )
+        })
+        XCTAssertEqual(sneakEvents.count, 2)
+        let firstBatchHeight = try XCTUnwrap(
+            plugin.preview(context: Self.previewContext(currentSneakPeek: sneakEvents[0]))?.height
+        )
+        let secondBatchHeight = try XCTUnwrap(
+            plugin.preview(context: Self.previewContext(currentSneakPeek: sneakEvents[1]))?.height
+        )
+
+        XCTAssertGreaterThan(firstBatchHeight, secondBatchHeight)
+    }
+
+    @MainActor
+    func testSameAppBurstDoesNotReserveBadgeWidth() throws {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let bus = EventBus()
+        var sneakEvents: [SneakPeekRequest] = []
+        _ = bus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                sneakEvents.append(req)
+            }
+        }
+        plugin.activate(bus: bus)
+        fake.reportState(.running(lastEventAt: nil))
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        fake.emit([
+            SystemNotification(
+                dbRecordID: 1,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ada", body: "One",
+                deliveredAt: base
+            )
+        ])
+        let singleWidth = try XCTUnwrap(
+            plugin.preview(context: Self.previewContext(currentSneakPeek: sneakEvents[0]))?.width
+        )
+
+        fake.emit([
+            SystemNotification(
+                dbRecordID: 2,
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Ben", body: "Two",
+                deliveredAt: base.addingTimeInterval(0.1)
+            )
+        ])
+        let burstWidth = try XCTUnwrap(
+            plugin.preview(context: Self.previewContext(currentSneakPeek: sneakEvents[1]))?.width
+        )
+
+        XCTAssertEqual(burstWidth, singleWidth)
+    }
+
+    @MainActor
+    func testFourNotificationsEmitTwoQueuedSneaksWithTwoSecondDismissal() {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsSneakPreviewEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.chat"]
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let bus = EventBus()
+        var sneakEvents: [SneakPeekRequest] = []
+        _ = bus.subscribe { event in
+            if case .sneakPeekRequested(let req) = event {
+                sneakEvents.append(req)
+            }
+        }
+        plugin.activate(bus: bus)
+        fake.reportState(.running(lastEventAt: nil))
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        fake.emit((1...4).map { index in
+            SystemNotification(
+                dbRecordID: Int64(index),
+                bundleIdentifier: "com.chat",
+                appDisplayName: "Chat",
+                title: "Sender \(index)", body: "Message \(index)",
+                deliveredAt: base.addingTimeInterval(TimeInterval(index) * 0.1)
+            )
+        })
+
+        XCTAssertEqual(sneakEvents.count, 2)
+        XCTAssertEqual(sneakEvents.map(\.autoDismissAfter), [2.0, 2.0])
     }
 
     @MainActor
