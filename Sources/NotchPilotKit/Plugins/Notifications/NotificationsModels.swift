@@ -10,15 +10,45 @@ public enum NotificationContentPrivacy: String, CaseIterable, Codable, Sendable 
 
 // MARK: - Persisted "known app" cache entry
 
+public enum KnownAppDiscoverySource: String, Codable, Sendable {
+    case databasePreload
+    case notificationArrival
+}
+
 public struct KnownApp: Codable, Equatable, Hashable, Sendable {
     public let bundleIdentifier: String
     public let displayName: String
     public let iconCachePath: String?
+    public let discoverySource: KnownAppDiscoverySource
 
-    public init(bundleIdentifier: String, displayName: String, iconCachePath: String?) {
+    public init(
+        bundleIdentifier: String,
+        displayName: String,
+        iconCachePath: String?,
+        discoverySource: KnownAppDiscoverySource = .databasePreload
+    ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.iconCachePath = iconCachePath
+        self.discoverySource = discoverySource
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case bundleIdentifier
+        case displayName
+        case iconCachePath
+        case discoverySource
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.bundleIdentifier = try container.decode(String.self, forKey: .bundleIdentifier)
+        self.displayName = try container.decode(String.self, forKey: .displayName)
+        self.iconCachePath = try container.decodeIfPresent(String.self, forKey: .iconCachePath)
+        self.discoverySource = try container.decodeIfPresent(
+            KnownAppDiscoverySource.self,
+            forKey: .discoverySource
+        ) ?? .databasePreload
     }
 }
 
@@ -87,12 +117,14 @@ public struct NotificationFilterRules: Sendable {
     public func evaluate(_ notification: SystemNotification) -> Decision {
         guard enabled else { return .drop }
 
-        let redacted = redact(notification)
+        guard whitelistedBundleIDs.contains(notification.bundleIdentifier) else {
+            return .drop
+        }
 
-        let isMuted = whitelistedBundleIDs.contains(notification.bundleIdentifier) == false
+        let redacted = redact(notification)
         let isDND = respectSystemDND && isSystemDNDActive()
 
-        if isMuted || isDND {
+        if isDND {
             return .recordOnly(redacted: redacted)
         }
         return .present(redacted: redacted)

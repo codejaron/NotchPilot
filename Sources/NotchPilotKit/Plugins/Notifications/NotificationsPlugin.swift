@@ -121,11 +121,15 @@ public final class NotificationsPlugin: NotchPlugin {
         let contentLines = previewEntries.compactMap {
             Self.compactPreviewLine(for: $0.notification)
         }
+        let foldedCount = max(0, previewEntries.count - 1)
 
         let cameraClearance = context.notchGeometry.compactSize.width
         let notchHeight = context.notchGeometry.compactSize.height
         let leftFrameWidth = NotificationsCompactPreviewLayout.leftFrameWidth()
-        let rightFrameWidth = NotificationsCompactPreviewLayout.rightFrameWidth(forAppName: appName)
+        let rightFrameWidth = NotificationsCompactPreviewLayout.rightFrameWidth(
+            forAppName: appName,
+            foldedCount: foldedCount
+        )
         let totalWidth = NotificationsCompactPreviewLayout.totalWidth(
             compactWidth: cameraClearance,
             leftFrameWidth: leftFrameWidth,
@@ -138,8 +142,10 @@ public final class NotificationsPlugin: NotchPlugin {
             height: notchHeight + extensionHeight,
             view: AnyView(
                 NotificationsCompactPreview(
+                    bundleIdentifier: notification.bundleIdentifier,
                     appDisplayName: appName,
                     contentLines: contentLines,
+                    foldedCount: foldedCount,
                     cameraClearanceWidth: cameraClearance,
                     notchHeight: notchHeight,
                     leftFrameWidth: leftFrameWidth,
@@ -312,28 +318,81 @@ public final class NotificationsPlugin: NotchPlugin {
     }
 
     private func handleKnownAppsLoaded(_ bundleIDs: [String]) {
-        var current = settingsStore.notificationsKnownAppsCache
-        var added = 0
+        let current = settingsStore.notificationsKnownAppsCache
+        let whitelistedBundleIDs = settingsStore.notificationsWhitelistedBundleIDs
+        var next: [String: KnownApp] = [:]
+
         for bundleID in bundleIDs {
-            if current[bundleID] != nil { continue }
-            let meta = appDirectory.resolve(bundleIdentifier: bundleID)
-            let displayName = meta?.displayName ?? bundleID
-            current[bundleID] = KnownApp(
-                bundleIdentifier: bundleID,
-                displayName: displayName,
-                iconCachePath: nil
-            )
-            added += 1
+            guard Self.shouldIncludePreloadedKnownApp(bundleIdentifier: bundleID) else {
+                continue
+            }
+
+            if let meta = appDirectory.resolve(bundleIdentifier: bundleID) {
+                next[bundleID] = knownAppEntry(
+                    bundleIdentifier: bundleID,
+                    displayName: meta.displayName,
+                    cached: current[bundleID],
+                    discoverySource: current[bundleID]?.discoverySource ?? .databasePreload
+                )
+            } else if let cached = current[bundleID],
+                      shouldKeepUnresolvedKnownApp(cached, whitelistedBundleIDs: whitelistedBundleIDs) {
+                next[bundleID] = cached
+            }
         }
-        if added > 0 {
-            settingsStore.notificationsKnownAppsCache = current
+
+        for (bundleID, cached) in current where next[bundleID] == nil {
+            guard Self.shouldIncludePreloadedKnownApp(bundleIdentifier: bundleID) else {
+                continue
+            }
+
+            if let meta = appDirectory.resolve(bundleIdentifier: bundleID) {
+                next[bundleID] = knownAppEntry(
+                    bundleIdentifier: bundleID,
+                    displayName: meta.displayName,
+                    cached: cached,
+                    discoverySource: cached.discoverySource
+                )
+            } else if shouldKeepUnresolvedKnownApp(cached, whitelistedBundleIDs: whitelistedBundleIDs) {
+                next[bundleID] = cached
+            }
+        }
+
+        if next != current {
+            settingsStore.notificationsKnownAppsCache = next
         }
         diagnostics = NotificationsRuntimeDiagnostics(
             databasePath: diagnostics.databasePath,
-            knownAppCount: bundleIDs.count,
+            knownAppCount: next.count,
             ingestedRecordCount: diagnostics.ingestedRecordCount,
             lastIngestAt: diagnostics.lastIngestAt
         )
+    }
+
+    private func knownAppEntry(
+        bundleIdentifier: String,
+        displayName: String,
+        cached: KnownApp?,
+        discoverySource: KnownAppDiscoverySource
+    ) -> KnownApp {
+        KnownApp(
+            bundleIdentifier: bundleIdentifier,
+            displayName: displayName,
+            iconCachePath: cached?.iconCachePath,
+            discoverySource: discoverySource
+        )
+    }
+
+    private static func shouldIncludePreloadedKnownApp(bundleIdentifier: String) -> Bool {
+        let lowercased = bundleIdentifier.lowercased()
+        return lowercased != "com.apple.background-service"
+    }
+
+    private func shouldKeepUnresolvedKnownApp(
+        _ app: KnownApp,
+        whitelistedBundleIDs: Set<String>
+    ) -> Bool {
+        app.discoverySource == .notificationArrival
+            || whitelistedBundleIDs.contains(app.bundleIdentifier)
     }
 
     private func enrich(_ n: SystemNotification) -> SystemNotification {
@@ -349,14 +408,18 @@ public final class NotificationsPlugin: NotchPlugin {
     }
 
     private func updateKnownAppsCache(for n: SystemNotification) {
-        guard settingsStore.notificationsKnownAppsCache[n.bundleIdentifier] == nil else {
-            return
-        }
+        let existing = settingsStore.notificationsKnownAppsCache[n.bundleIdentifier]
         let entry = KnownApp(
             bundleIdentifier: n.bundleIdentifier,
-            displayName: n.appDisplayName ?? n.bundleIdentifier,
-            iconCachePath: nil
+            displayName: n.appDisplayName ?? existing?.displayName ?? n.bundleIdentifier,
+            iconCachePath: existing?.iconCachePath,
+            discoverySource: .notificationArrival
         )
+
+        guard existing != entry else {
+            return
+        }
+
         var current = settingsStore.notificationsKnownAppsCache
         current[n.bundleIdentifier] = entry
         settingsStore.notificationsKnownAppsCache = current

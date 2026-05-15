@@ -34,6 +34,18 @@ final class NotificationsPluginTests: XCTestCase {
         func reportKnownApps(_ ids: [String]) { onKnownAppsLoaded?(ids) }
     }
 
+    private final class StubWorkspace: NotificationAppDirectoryWorkspace {
+        var lookups: [String: (url: URL, name: String)] = [:]
+
+        func appURL(forBundleIdentifier id: String) -> URL? {
+            lookups[id]?.url
+        }
+
+        func appName(forBundleIdentifier id: String) -> String? {
+            lookups[id]?.name
+        }
+    }
+
     private var suiteName: String!
     private var defaults: UserDefaults!
     private var tempHomeURL: URL!
@@ -397,7 +409,7 @@ final class NotificationsPluginTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordsButDoesNotEmitForMutedApp() {
+    func testIgnoresNonWhitelistedApp() {
         let store = makeStore()
         store.notificationsEnabled = true
         store.notificationsSneakPreviewEnabled = true
@@ -424,8 +436,11 @@ final class NotificationsPluginTests: XCTestCase {
         ])
 
         XCTAssertTrue(sneakEvents.isEmpty)
-        XCTAssertEqual(plugin.historyStore.entries.count, 1)
-        XCTAssertTrue(plugin.historyStore.entries.first?.muted ?? false)
+        XCTAssertTrue(plugin.historyStore.entries.isEmpty)
+        XCTAssertEqual(
+            store.notificationsKnownAppsCache["com.tencent.xinWeChat"]?.discoverySource,
+            .notificationArrival
+        )
     }
 
     @MainActor
@@ -454,8 +469,19 @@ final class NotificationsPluginTests: XCTestCase {
         store.notificationsEnabled = true
         XCTAssertTrue(store.notificationsKnownAppsCache.isEmpty)
 
+        let workspace = StubWorkspace()
+        workspace.lookups = [
+            "com.tencent.xinWeChat": (URL(fileURLWithPath: "/Applications/WeChat.app"), "WeChat"),
+            "com.apple.Mail": (URL(fileURLWithPath: "/System/Applications/Mail.app"), "Mail"),
+            "com.apple.iCal": (URL(fileURLWithPath: "/System/Applications/Calendar.app"), "Calendar"),
+        ]
+
         let fake = FakeObserver()
-        let plugin = NotificationsPlugin(observer: fake, settingsStore: store)
+        let plugin = NotificationsPlugin(
+            observer: fake,
+            settingsStore: store,
+            appDirectory: NotificationAppDirectory(workspace: workspace)
+        )
         plugin.activate(bus: EventBus())
 
         fake.reportKnownApps([
@@ -469,5 +495,79 @@ final class NotificationsPluginTests: XCTestCase {
         XCTAssertNotNil(store.notificationsKnownAppsCache["com.apple.Mail"])
         XCTAssertNotNil(store.notificationsKnownAppsCache["com.apple.iCal"])
         XCTAssertEqual(plugin.diagnostics.knownAppCount, 3)
+    }
+
+    @MainActor
+    func testPreloadedKnownAppsSkipUnresolvedHistoricalBundleIDsButKeepObservedSources() {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsKnownAppsCache = [
+            "com.iphone.Bank": KnownApp(
+                bundleIdentifier: "com.iphone.Bank",
+                displayName: "Bank",
+                iconCachePath: nil,
+                discoverySource: .notificationArrival
+            )
+        ]
+
+        let workspace = StubWorkspace()
+        workspace.lookups["com.chat"] = (
+            URL(fileURLWithPath: "/Applications/Chat.app"),
+            "Chat"
+        )
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(
+            observer: fake,
+            settingsStore: store,
+            appDirectory: NotificationAppDirectory(workspace: workspace)
+        )
+        plugin.activate(bus: EventBus())
+
+        fake.reportKnownApps([
+            "com.chat",
+            "com.iphone.Bank",
+            "com.deleted.OldApp",
+            "com.apple.background-service"
+        ])
+
+        XCTAssertEqual(
+            Set(store.notificationsKnownAppsCache.keys),
+            ["com.chat", "com.iphone.Bank"]
+        )
+        XCTAssertEqual(plugin.diagnostics.knownAppCount, 2)
+    }
+
+    @MainActor
+    func testKnownAppsPreloadPrunesStaleCachedAppsUnlessWhitelisted() {
+        let store = makeStore()
+        store.notificationsEnabled = true
+        store.notificationsWhitelistedBundleIDs = ["com.stale.Keep"]
+        store.notificationsKnownAppsCache = [
+            "com.chat": KnownApp(bundleIdentifier: "com.chat", displayName: "Old Chat", iconCachePath: nil),
+            "com.stale.Drop": KnownApp(bundleIdentifier: "com.stale.Drop", displayName: "Drop", iconCachePath: nil),
+            "com.stale.Keep": KnownApp(bundleIdentifier: "com.stale.Keep", displayName: "Keep", iconCachePath: nil),
+        ]
+
+        let workspace = StubWorkspace()
+        workspace.lookups["com.chat"] = (
+            URL(fileURLWithPath: "/Applications/Chat.app"),
+            "Chat"
+        )
+
+        let fake = FakeObserver()
+        let plugin = NotificationsPlugin(
+            observer: fake,
+            settingsStore: store,
+            appDirectory: NotificationAppDirectory(workspace: workspace)
+        )
+        plugin.activate(bus: EventBus())
+
+        fake.reportKnownApps(["com.chat", "com.stale.Drop", "com.stale.Keep"])
+
+        XCTAssertNotNil(store.notificationsKnownAppsCache["com.chat"])
+        XCTAssertNil(store.notificationsKnownAppsCache["com.stale.Drop"])
+        XCTAssertNotNil(store.notificationsKnownAppsCache["com.stale.Keep"])
+        XCTAssertEqual(plugin.diagnostics.knownAppCount, 2)
     }
 }

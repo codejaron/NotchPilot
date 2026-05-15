@@ -37,10 +37,10 @@ final class NotificationFilterRulesTests: XCTestCase {
         }
     }
 
-    func testRecordOnlyWhenNotWhitelisted() {
+    func testDropsWhenNotWhitelisted() {
         let rules = makeRules(whitelist: [])
-        guard case .recordOnly = rules.evaluate(makeNotification()) else {
-            return XCTFail("expected .recordOnly")
+        guard case .drop = rules.evaluate(makeNotification()) else {
+            return XCTFail("expected .drop")
         }
     }
 

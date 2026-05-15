@@ -18,19 +18,20 @@ struct NotificationsCompactPreviewLine: Equatable, Hashable {
 
 enum NotificationsCompactPreviewLayout {
     static let outerPadding: CGFloat = 10
-    static let iconTileSize: CGFloat = 26
-    static let leftFrameBaseWidth: CGFloat = 32       // tile only
-    static let rightFrameMinWidth: CGFloat = 40
-    static let rightFrameMaxWidth: CGFloat = 180
-    static let rightFrameTextMargin: CGFloat = 12
+    static let iconTileSize: CGFloat = 28
+    static let leftFrameBaseWidth: CGFloat = 36
+    static let rightFrameMinWidth: CGFloat = 68
+    static let rightFrameMaxWidth: CGFloat = 220
+    static let rightFrameTextMargin: CGFloat = 16
+    static let foldedCountBadgeWidth: CGFloat = 34
     static let contentRowHorizontalPadding: CGFloat = 8
-    static let contentRowVerticalPadding: CGFloat = 6
+    static let contentRowVerticalPadding: CGFloat = 8
     static let appNameFontSize: CGFloat = 12
-    static let titleFontSize: CGFloat = 11
-    static let bodyFontSize: CGFloat = 10
-    static let titleLineHeight: CGFloat = 14
-    static let bodyLineHeight: CGFloat = 13
-    static let messageGroupSpacing: CGFloat = 4
+    static let titleFontSize: CGFloat = 12
+    static let bodyFontSize: CGFloat = 10.5
+    static let titleLineHeight: CGFloat = 15
+    static let bodyLineHeight: CGFloat = 14
+    static let messageGroupSpacing: CGFloat = 3
 
     static func leftFrameWidth() -> CGFloat {
         leftFrameBaseWidth
@@ -41,7 +42,7 @@ enum NotificationsCompactPreviewLayout {
     /// SwiftUI's `.font(.system(size:weight:design: .rounded))` renders with SF Pro Rounded,
     /// which is slightly wider than the default SF Pro Text. We mirror that here so the measured
     /// width matches the on-screen rendering (otherwise the right edge truncates names).
-    static func rightFrameWidth(forAppName name: String) -> CGFloat {
+    static func rightFrameWidth(forAppName name: String, foldedCount: Int = 0) -> CGFloat {
         let baseFont = NSFont.systemFont(ofSize: appNameFontSize, weight: .semibold)
         let renderFont: NSFont
         if let descriptor = baseFont.fontDescriptor.withDesign(.rounded),
@@ -51,7 +52,8 @@ enum NotificationsCompactPreviewLayout {
             renderFont = baseFont
         }
         let measured = (name as NSString).size(withAttributes: [.font: renderFont]).width
-        let raw = ceil(measured) + rightFrameTextMargin
+        let badgeWidth = foldedCount > 0 ? foldedCountBadgeWidth + 6 : 0
+        let raw = ceil(measured) + rightFrameTextMargin + badgeWidth
         return min(max(raw, rightFrameMinWidth), rightFrameMaxWidth)
     }
 
@@ -59,7 +61,7 @@ enum NotificationsCompactPreviewLayout {
         guard lines.isEmpty == false else { return 0 }
 
         let contentHeight = lines.reduce(CGFloat(0)) { height, line in
-            var lineHeight: CGFloat = 0
+            var lineHeight: CGFloat = contentRowVerticalPadding * 2
             if line.hasTitle {
                 lineHeight += titleLineHeight
             }
@@ -72,7 +74,7 @@ enum NotificationsCompactPreviewLayout {
             return height + lineHeight
         }
         let spacing = CGFloat(max(0, lines.count - 1)) * messageGroupSpacing
-        return contentRowVerticalPadding * 2 + contentHeight + spacing
+        return contentHeight + spacing
     }
 
     static func totalWidth(compactWidth: CGFloat, leftFrameWidth: CGFloat, rightFrameWidth: CGFloat) -> CGFloat {
@@ -83,8 +85,10 @@ enum NotificationsCompactPreviewLayout {
 // MARK: - Compact preview view
 
 struct NotificationsCompactPreview: View {
+    let bundleIdentifier: String
     let appDisplayName: String
     let contentLines: [NotificationsCompactPreviewLine]
+    let foldedCount: Int
     let cameraClearanceWidth: CGFloat
     let notchHeight: CGFloat
     let leftFrameWidth: CGFloat
@@ -122,47 +126,100 @@ struct NotificationsCompactPreview: View {
     }
 
     private var brandCluster: some View {
-        HStack(spacing: 5) {
-            NotchPilotIconTile(
-                systemName: "bell.badge.fill",
-                accent: accentColor,
-                size: NotificationsCompactPreviewLayout.iconTileSize,
-                isActive: true
+        HStack(spacing: 0) {
+            NotificationAppIconView(
+                bundleIdentifier: bundleIdentifier,
+                accentColor: accentColor,
+                size: NotificationsCompactPreviewLayout.iconTileSize
             )
         }
     }
 
     private var appNameCluster: some View {
-        Text(appDisplayName)
-            .font(.system(size: NotificationsCompactPreviewLayout.appNameFontSize, weight: .semibold, design: .rounded))
-            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-            .lineLimit(1)
-            .truncationMode(.tail)
+        HStack(spacing: 6) {
+            Text(appDisplayName)
+                .font(.system(size: NotificationsCompactPreviewLayout.appNameFontSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if foldedCount > 0 {
+                Text("+\(foldedCount)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(accentColor.opacity(0.16))
+                    }
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .strokeBorder(accentColor.opacity(0.24), lineWidth: 1)
+                    }
+            }
+        }
     }
 
     @ViewBuilder
     private var contentRow: some View {
-        VStack(alignment: .leading, spacing: NotificationsCompactPreviewLayout.messageGroupSpacing) {
-            ForEach(Array(contentLines.enumerated()), id: \.offset) { _, line in
-                VStack(alignment: .leading, spacing: 1) {
-                    if let title = line.title, title.isEmpty == false {
-                        Text(title)
-                            .font(.system(size: NotificationsCompactPreviewLayout.titleFontSize, weight: .medium, design: .rounded))
-                            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                            .lineLimit(1)
+        ZStack(alignment: .topLeading) {
+            if foldedCount > 0 {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(Color.white.opacity(0.035))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
                     }
-                    if let body = line.body, body.isEmpty == false {
-                        Text(body)
-                            .font(.system(size: NotificationsCompactPreviewLayout.bodyFontSize, design: .rounded))
-                            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
-                            .lineLimit(1)
-                    }
+                    .offset(x: 12, y: 5)
+
+                if foldedCount > 1 {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Color.white.opacity(0.025))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.04), lineWidth: 1)
+                        }
+                        .offset(x: 24, y: 9)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: NotificationsCompactPreviewLayout.messageGroupSpacing) {
+                ForEach(Array(contentLines.enumerated()), id: \.offset) { index, line in
+                    lineCard(line, isLatest: index == 0)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, NotificationsCompactPreviewLayout.contentRowHorizontalPadding)
+    }
+
+    private func lineCard(_ line: NotificationsCompactPreviewLine, isLatest: Bool) -> some View {
+        VStack(alignment: .leading, spacing: NotificationsCompactPreviewLayout.messageGroupSpacing) {
+            if let title = line.title, title.isEmpty == false {
+                Text(title)
+                    .font(.system(size: NotificationsCompactPreviewLayout.titleFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                    .lineLimit(1)
+            }
+            if let body = line.body, body.isEmpty == false {
+                Text(body)
+                    .font(.system(size: NotificationsCompactPreviewLayout.bodyFontSize, weight: .regular, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
         .padding(.vertical, NotificationsCompactPreviewLayout.contentRowVerticalPadding)
+        .background {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.white.opacity(isLatest ? 0.06 : 0.045))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(Color.white.opacity(isLatest ? 0.08 : 0.06), lineWidth: 1)
+        }
     }
 }
 
@@ -180,7 +237,6 @@ struct NotificationsDashboardView: View {
         VStack(spacing: 0) {
             header
             diagnosticStrip
-            Divider().opacity(0.2)
             switch runtimeState {
             case .awaitingFullDiskAccess:
                 permissionsCard(title: AppStrings.text(.notificationsPermissionsMissing, language: settings.interfaceLanguage))
@@ -192,7 +248,8 @@ struct NotificationsDashboardView: View {
                 listContent
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 6)
+        .padding(.bottom, 8)
     }
 
     private var diagnosticStrip: some View {
@@ -205,8 +262,18 @@ struct NotificationsDashboardView: View {
                 .foregroundStyle(NotchPilotTheme.islandTextSecondary)
             Spacer()
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        }
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        }
         .padding(.horizontal, 12)
-        .padding(.bottom, 4)
+        .padding(.bottom, 8)
     }
 
     private var stateColor: Color {
@@ -241,15 +308,29 @@ struct NotificationsDashboardView: View {
 
     private var header: some View {
         HStack {
-            Text(AppStrings.text(.notifications, language: settings.interfaceLanguage))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            HStack(spacing: 8) {
+                NotchPilotIconTile(
+                    systemName: "bell.badge.fill",
+                    accent: accentColor,
+                    size: 24,
+                    isActive: true
+                )
+                Text(AppStrings.text(.notifications, language: settings.interfaceLanguage))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            }
             Spacer()
             Button {
                 store.clear()
             } label: {
                 Label(AppStrings.text(.notificationsMarkAllRead, language: settings.interfaceLanguage), systemImage: "checkmark.circle")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(store.entries.isEmpty ? 0 : 0.065))
+                    }
             }
             .buttonStyle(.plain)
             .foregroundStyle(NotchPilotTheme.islandTextSecondary)
@@ -261,15 +342,33 @@ struct NotificationsDashboardView: View {
     }
 
     private var listContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(store.groupedByApp, id: \.bundleID) { group in
-                    section(for: group)
+        Group {
+            if store.groupedByApp.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(store.groupedByApp, id: \.bundleID) { group in
+                            section(for: group)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "bell.slash")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(NotchPilotTheme.islandTextMuted)
+            Text(stateText)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 140)
     }
 
     @ViewBuilder
@@ -277,19 +376,37 @@ struct NotificationsDashboardView: View {
         let isMuted = group.entries.allSatisfy(\.muted)
         let appName = group.entries.first?.notification.appDisplayName ?? group.bundleID
 
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                NotificationAppIconView(
+                    bundleIdentifier: group.bundleID,
+                    accentColor: accentColor,
+                    size: 22
+                )
+
                 Text(appName)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                    .lineLimit(1)
+
+                Text("\(group.entries.count)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                    }
+
                 if isMuted {
-                    Text("· \(AppStrings.text(.notificationsRecordedWhileMuted, language: settings.interfaceLanguage)) · \(group.entries.count)")
+                    Text("· \(AppStrings.text(.notificationsRecordedWhileMuted, language: settings.interfaceLanguage))")
                         .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 4)
+            .padding(.leading, 2)
 
             VStack(spacing: 6) {
                 ForEach(group.entries) { entry in
@@ -312,6 +429,11 @@ struct NotificationsDashboardView: View {
             store.remove(id: entry.id)
         } label: {
             HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(accentColor.opacity(entry.muted ? 0.22 : 0.7))
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
+
                 VStack(alignment: .leading, spacing: 2) {
                     if hasAnyContent {
                         if let title = titleText, title.isEmpty == false {
@@ -339,18 +461,18 @@ struct NotificationsDashboardView: View {
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.7))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(entry.muted ? 0.03 : 0.055))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(entry.muted ? 0.04 : 0.07), lineWidth: 1)
             )
             .opacity(entry.muted ? 0.55 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -366,6 +488,9 @@ struct NotificationsDashboardView: View {
 
     private func permissionsCard(title: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: "externaldrive.badge.exclamationmark")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.orange)
             Text(AppStrings.text(.notificationsPermissionsTitle, language: settings.interfaceLanguage))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(NotchPilotTheme.islandTextPrimary)
@@ -379,6 +504,16 @@ struct NotificationsDashboardView: View {
             }
             .controlSize(.small)
         }
-        .padding(12)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+        }
+        .padding(.horizontal, 12)
     }
 }

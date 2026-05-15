@@ -802,9 +802,8 @@ struct NotificationsPluginSettingsView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(sortedApps.enumerated()), id: \.element.bundleIdentifier) { index, app in
                                 if index > 0 { SettingsRowDivider() }
-                                SettingsToggleRow(
-                                    title: app.displayName,
-                                    detail: app.bundleIdentifier,
+                                NotificationsAllowedAppRow(
+                                    app: app,
                                     isEnabled: store.notificationsEnabled,
                                     isOn: bindingForWhitelist(bundleID: app.bundleIdentifier)
                                 )
@@ -882,5 +881,44 @@ struct NotificationsPluginSettingsView: View {
                 store.notificationsWhitelistedBundleIDs = current
             }
         )
+    }
+}
+
+private struct NotificationsAllowedAppRow: View {
+    let app: KnownApp
+    let isEnabled: Bool
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            NotificationAppIconView(
+                bundleIdentifier: app.bundleIdentifier,
+                accentColor: NotchPilotTheme.notifications,
+                size: 28
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(app.displayName)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(isEnabled ? .primary : .secondary)
+                    .lineLimit(1)
+
+                Text(app.bundleIdentifier)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 16)
+
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(!isEnabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .opacity(isEnabled ? 1 : 0.42)
     }
 }
