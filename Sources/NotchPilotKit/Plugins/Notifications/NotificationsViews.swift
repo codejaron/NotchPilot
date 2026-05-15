@@ -21,9 +21,8 @@ enum NotificationsCompactPreviewLayout {
     static let iconTileSize: CGFloat = 28
     static let leftFrameBaseWidth: CGFloat = 36
     static let rightFrameMinWidth: CGFloat = 68
-    static let rightFrameMaxWidth: CGFloat = 220
+    static let rightFrameMaxWidth: CGFloat = 280
     static let rightFrameTextMargin: CGFloat = 16
-    static let foldedCountBadgeWidth: CGFloat = 34
     static let contentRowHorizontalPadding: CGFloat = 8
     static let contentRowVerticalPadding: CGFloat = 8
     static let appNameFontSize: CGFloat = 12
@@ -42,7 +41,7 @@ enum NotificationsCompactPreviewLayout {
     /// SwiftUI's `.font(.system(size:weight:design: .rounded))` renders with SF Pro Rounded,
     /// which is slightly wider than the default SF Pro Text. We mirror that here so the measured
     /// width matches the on-screen rendering (otherwise the right edge truncates names).
-    static func rightFrameWidth(forAppName name: String, foldedCount: Int = 0) -> CGFloat {
+    static func rightFrameWidth(forAppName name: String) -> CGFloat {
         let baseFont = NSFont.systemFont(ofSize: appNameFontSize, weight: .semibold)
         let renderFont: NSFont
         if let descriptor = baseFont.fontDescriptor.withDesign(.rounded),
@@ -52,8 +51,7 @@ enum NotificationsCompactPreviewLayout {
             renderFont = baseFont
         }
         let measured = (name as NSString).size(withAttributes: [.font: renderFont]).width
-        let badgeWidth = foldedCount > 0 ? foldedCountBadgeWidth + 6 : 0
-        let raw = ceil(measured) + rightFrameTextMargin + badgeWidth
+        let raw = ceil(measured) + rightFrameTextMargin
         return min(max(raw, rightFrameMinWidth), rightFrameMaxWidth)
     }
 
@@ -136,29 +134,11 @@ struct NotificationsCompactPreview: View {
     }
 
     private var appNameCluster: some View {
-        HStack(spacing: 6) {
-            Text(appDisplayName)
-                .font(.system(size: NotificationsCompactPreviewLayout.appNameFontSize, weight: .semibold, design: .rounded))
-                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            if foldedCount > 0 {
-                Text("+\(foldedCount)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(accentColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(accentColor.opacity(0.16))
-                    }
-                    .overlay {
-                        Capsule(style: .continuous)
-                            .strokeBorder(accentColor.opacity(0.24), lineWidth: 1)
-                    }
-            }
-        }
+        Text(appDisplayName)
+            .font(.system(size: NotificationsCompactPreviewLayout.appNameFontSize, weight: .semibold, design: .rounded))
+            .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder
@@ -212,14 +192,6 @@ struct NotificationsCompactPreview: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, NotificationsCompactPreviewLayout.contentRowVerticalPadding)
-        .background {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(isLatest ? 0.06 : 0.045))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(Color.white.opacity(isLatest ? 0.08 : 0.06), lineWidth: 1)
-        }
     }
 }
 

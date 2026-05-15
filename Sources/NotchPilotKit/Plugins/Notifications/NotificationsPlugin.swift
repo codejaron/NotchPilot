@@ -127,8 +127,7 @@ public final class NotificationsPlugin: NotchPlugin {
         let notchHeight = context.notchGeometry.compactSize.height
         let leftFrameWidth = NotificationsCompactPreviewLayout.leftFrameWidth()
         let rightFrameWidth = NotificationsCompactPreviewLayout.rightFrameWidth(
-            forAppName: appName,
-            foldedCount: foldedCount
+            forAppName: appName
         )
         let totalWidth = NotificationsCompactPreviewLayout.totalWidth(
             compactWidth: cameraClearance,
