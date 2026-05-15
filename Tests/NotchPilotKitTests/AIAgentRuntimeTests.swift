@@ -150,20 +150,17 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.pendingApprovals.first?.eventType, .preToolUse)
     }
 
-    func testUserPromptSubmitSetsSessionTitleAndPreservesTokensOnLaterPromptEvents() throws {
+    func testUserPromptSubmitSetsSessionTitleAndPreservesTokensFromTranscriptReader() throws {
         let runtime = AIAgentRuntime()
 
-        let usageEnvelope = AIBridgeEnvelope(
+        let bootstrapEnvelope = AIBridgeEnvelope(
             host: .claude,
             requestID: "req-5",
             sessionID: "session-5",
             eventType: .postToolUse,
             capabilities: .none,
             needsResponse: false,
-            payload: .generic([
-                "usage.input_tokens": "1200",
-                "usage.output_tokens": "300",
-            ])
+            payload: .generic([:])
         )
 
         let firstPromptEnvelope = AIBridgeEnvelope(
@@ -190,7 +187,13 @@ final class AIAgentRuntimeTests: XCTestCase {
             ])
         )
 
-        _ = runtime.handle(envelope: usageEnvelope)
+        _ = runtime.handle(envelope: bootstrapEnvelope)
+        // Tokens come from the transcript reader (post-tool-use hooks never carry usage).
+        XCTAssertTrue(runtime.updateTokenCounts(
+            sessionID: "session-5",
+            inputTokenCount: 1200,
+            outputTokenCount: 300
+        ))
         _ = runtime.handle(envelope: firstPromptEnvelope)
         _ = runtime.handle(envelope: secondPromptEnvelope)
 
@@ -200,27 +203,40 @@ final class AIAgentRuntimeTests: XCTestCase {
         XCTAssertEqual(session.outputTokenCount, 300)
     }
 
-    func testClaudeRuntimeParsesNestedCamelCaseUsageTokenCounts() throws {
+    func testUpdateTokenCountsReturnsFalseForUnknownSession() {
         let runtime = AIAgentRuntime()
 
-        let usageEnvelope = AIBridgeEnvelope(
+        let updated = runtime.updateTokenCounts(
+            sessionID: "missing",
+            inputTokenCount: 1,
+            outputTokenCount: 2
+        )
+
+        XCTAssertFalse(updated)
+    }
+
+    func testUpdateTokenCountsReturnsFalseWhenValuesUnchanged() {
+        let runtime = AIAgentRuntime()
+        _ = runtime.handle(envelope: AIBridgeEnvelope(
             host: .claude,
-            requestID: "req-camel-1",
-            sessionID: "session-camel-1",
+            requestID: "req-tok",
+            sessionID: "session-tok",
             eventType: .postToolUse,
             capabilities: .none,
             needsResponse: false,
-            payload: .generic([
-                "message.usage.inputTokens": "2100",
-                "message.usage.outputTokens": "450",
-            ])
-        )
+            payload: .generic([:])
+        ))
 
-        _ = runtime.handle(envelope: usageEnvelope)
-
-        let session = try XCTUnwrap(runtime.sessions.first)
-        XCTAssertEqual(session.inputTokenCount, 2100)
-        XCTAssertEqual(session.outputTokenCount, 450)
+        XCTAssertTrue(runtime.updateTokenCounts(
+            sessionID: "session-tok",
+            inputTokenCount: 100,
+            outputTokenCount: 50
+        ))
+        XCTAssertFalse(runtime.updateTokenCounts(
+            sessionID: "session-tok",
+            inputTokenCount: 100,
+            outputTokenCount: 50
+        ))
     }
 
     func testCodexSessionUpsertClearsTokenCountsWhenDesktopStreamOmitsThem() throws {

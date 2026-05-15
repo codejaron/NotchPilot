@@ -1,3 +1,4 @@
+import Darwin
 import Dispatch
 import Foundation
 import SQLite3
@@ -26,10 +27,20 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
 
     private var dbHandle: OpaquePointer?
     private var bundleIDByAppID: [Int64: String] = [:]
-    private var lastSeenRowID: Int64 = 0
+    // Cursor is the Mac-absolute `delivered_date` of the most recent emitted notification.
+    // Using a time-based cursor (rather than `rec_id`) keeps us correct across
+    // usernoted's periodic VACUUM / file replacement, where rec_id space is renumbered.
+    private var lastSeenDeliveredAt: Double = 0
     private var pollTimer: DispatchSourceTimer?
     private let pollInterval: DispatchTimeInterval = .seconds(2)
     private var databaseURL: URL?
+
+    // Watches the DB file inode. When usernoted replaces the file (rename/delete),
+    // our open SQLite handle keeps reading the orphaned inode and silently goes blind.
+    // The monitor flips `needsReopen` so the next poll cycle reopens the connection.
+    private var fileMonitor: DispatchSourceFileSystemObject?
+    private var monitoredFD: CInt = -1
+    private var needsReopen: Bool = false
 
     public init(
         locator: NotificationDatabaseLocator = NotificationDatabaseLocator(),
@@ -42,6 +53,9 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
     deinit {
         if let handle = dbHandle {
             sqlite3_close(handle)
+        }
+        if monitoredFD != -1 {
+            close(monitoredFD)
         }
     }
 
@@ -58,10 +72,37 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
     // MARK: Lifecycle (must be called on `queue`)
 
     private func startInternal() {
+        guard openDatabase() else { return }
+        loadAppIDTable()
+        let bundleIDs = Array(bundleIDByAppID.values).sorted()
+        onKnownAppsLoaded?(bundleIDs)
+        seedBaselineCursor()
+        startFileMonitor()
+        startPolling()
+        emitState(.running(lastEventAt: nil))
+    }
+
+    private func stopInternal() {
+        pollTimer?.cancel()
+        pollTimer = nil
+
+        stopFileMonitor()
+        closeDatabase()
+        bundleIDByAppID.removeAll()
+        lastSeenDeliveredAt = 0
+        databaseURL = nil
+        needsReopen = false
+    }
+
+    // MARK: Database open/close
+
+    /// Opens the database and emits the appropriate state if it fails.
+    /// Returns true on success.
+    private func openDatabase() -> Bool {
         guard let url = locator.locateDatabase() else {
             onDatabasePathResolved?(nil)
             emitState(.databaseNotFound)
-            return
+            return false
         }
         databaseURL = url
         onDatabasePathResolved?(url.path)
@@ -78,29 +119,37 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
             } else {
                 emitState(.databaseUnreadable(message: msg))
             }
-            return
+            return false
         }
         dbHandle = handle
-
-        loadAppIDTable()
-        let bundleIDs = Array(bundleIDByAppID.values).sorted()
-        onKnownAppsLoaded?(bundleIDs)
-        seedBaselineRowID()
-        startPolling()
-        emitState(.running(lastEventAt: nil))
+        return true
     }
 
-    private func stopInternal() {
-        pollTimer?.cancel()
-        pollTimer = nil
-
+    private func closeDatabase() {
         if let handle = dbHandle {
             sqlite3_close(handle)
             dbHandle = nil
         }
+    }
+
+    /// Reopens the database after the file was replaced (or queries started failing).
+    /// Preserves `lastSeenDeliveredAt` so the next fetch catches any notifications
+    /// that arrived around the swap.
+    private func reopenDatabase() {
+        needsReopen = false
+        stopFileMonitor()
+        closeDatabase()
         bundleIDByAppID.removeAll()
-        lastSeenRowID = 0
-        databaseURL = nil
+
+        guard openDatabase() else {
+            // Stay flagged so the next poll retries.
+            needsReopen = true
+            return
+        }
+        loadAppIDTable()
+        let bundleIDs = Array(bundleIDByAppID.values).sorted()
+        onKnownAppsLoaded?(bundleIDs)
+        startFileMonitor()
     }
 
     // MARK: SQL helpers
@@ -121,39 +170,46 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
         }
     }
 
-    private func seedBaselineRowID() {
+    private func seedBaselineCursor() {
         guard let handle = dbHandle else { return }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "SELECT COALESCE(MAX(rec_id), 0) FROM record;", -1, &stmt, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v2(handle, "SELECT COALESCE(MAX(delivered_date), 0) FROM record;", -1, &stmt, nil) == SQLITE_OK else {
             return
         }
         defer { sqlite3_finalize(stmt) }
 
         if sqlite3_step(stmt) == SQLITE_ROW {
-            lastSeenRowID = sqlite3_column_int64(stmt, 0)
+            lastSeenDeliveredAt = sqlite3_column_double(stmt, 0)
         }
     }
 
-    private func fetchNewNotifications() -> [SystemNotification] {
-        guard let handle = dbHandle else { return [] }
+    /// Returns `nil` on SQL failure (signals caller to reopen). Empty array means no new rows.
+    private func fetchNewNotifications() -> [SystemNotification]? {
+        guard let handle = dbHandle else { return nil }
 
         var stmt: OpaquePointer?
-        let sql = "SELECT rec_id, app_id, data, delivered_date FROM record WHERE rec_id > ? ORDER BY rec_id ASC;"
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        let sql = "SELECT rec_id, app_id, data, delivered_date FROM record WHERE delivered_date > ? ORDER BY delivered_date ASC, rec_id ASC;"
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_int64(stmt, 1, lastSeenRowID)
+        sqlite3_bind_double(stmt, 1, lastSeenDeliveredAt)
 
         var results: [SystemNotification] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        while true {
+            let step = sqlite3_step(stmt)
+            if step == SQLITE_DONE { break }
+            if step != SQLITE_ROW { return nil }
+
             let recID = sqlite3_column_int64(stmt, 0)
             let appID = sqlite3_column_int64(stmt, 1)
             let dataLength = Int(sqlite3_column_bytes(stmt, 2))
             let blobPtr = sqlite3_column_blob(stmt, 2)
             let deliveredAbs = sqlite3_column_double(stmt, 3)
 
-            lastSeenRowID = max(lastSeenRowID, recID)
+            if deliveredAbs > lastSeenDeliveredAt {
+                lastSeenDeliveredAt = deliveredAbs
+            }
 
             guard let blobPtr, dataLength > 0 else { continue }
             let data = Data(bytes: blobPtr, count: dataLength)
@@ -180,6 +236,40 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
         return results
     }
 
+    // MARK: File monitoring
+
+    private func startFileMonitor() {
+        stopFileMonitor()
+        guard let url = databaseURL else { return }
+
+        let fd = open(url.path, O_EVTONLY)
+        guard fd != -1 else { return }
+        monitoredFD = fd
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.delete, .rename, .revoke],
+            queue: queue
+        )
+        source.setEventHandler { [weak self] in
+            self?.needsReopen = true
+        }
+        source.setCancelHandler { [weak self] in
+            guard let self else { return }
+            if self.monitoredFD != -1 {
+                close(self.monitoredFD)
+                self.monitoredFD = -1
+            }
+        }
+        source.resume()
+        fileMonitor = source
+    }
+
+    private func stopFileMonitor() {
+        fileMonitor?.cancel()
+        fileMonitor = nil
+    }
+
     // MARK: Polling
 
     private func startPolling() {
@@ -194,7 +284,18 @@ public final class LiveNotificationDatabaseObserver: NotificationDatabaseObservi
     }
 
     private func performFetch() {
-        let newOnes = fetchNewNotifications()
+        if needsReopen {
+            reopenDatabase()
+            // If reopen failed (e.g. file not yet present mid-rename), bail and retry next tick.
+            if needsReopen { return }
+        }
+
+        guard let newOnes = fetchNewNotifications() else {
+            // Query failed — handle is likely stale. Flag for reopen on the next tick.
+            needsReopen = true
+            return
+        }
+
         if newOnes.isEmpty == false {
             onNotifications?(newOnes)
             // Refresh `app` mapping in case a new app was added since the last load.

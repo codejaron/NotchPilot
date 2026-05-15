@@ -254,6 +254,7 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
     public let needsResponse: Bool
     public let launchContext: AISessionLaunchContext?
     public let payload: AIBridgePayload
+    public let transcriptPath: String?
 
     public init(
         host: AIHost,
@@ -263,7 +264,8 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         capabilities: AIBridgeCapabilities,
         needsResponse: Bool,
         launchContext: AISessionLaunchContext? = nil,
-        payload: AIBridgePayload
+        payload: AIBridgePayload,
+        transcriptPath: String? = nil
     ) {
         self.host = host
         self.requestID = requestID
@@ -273,6 +275,11 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         self.needsResponse = needsResponse
         self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
         self.payload = payload
+        if let trimmed = transcriptPath?.trimmingCharacters(in: .whitespacesAndNewlines), trimmed.isEmpty == false {
+            self.transcriptPath = trimmed
+        } else {
+            self.transcriptPath = nil
+        }
     }
 }
 

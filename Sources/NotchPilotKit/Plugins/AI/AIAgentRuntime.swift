@@ -196,6 +196,37 @@ public final class AIAgentRuntime {
     }
 
     @discardableResult
+    public func updateTokenCounts(
+        sessionID: String,
+        inputTokenCount: Int?,
+        outputTokenCount: Int?
+    ) -> Bool {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else {
+            return false
+        }
+
+        var session = sessions[index]
+        var changed = false
+
+        if let inputTokenCount, session.inputTokenCount != inputTokenCount {
+            session.inputTokenCount = inputTokenCount
+            changed = true
+        }
+
+        if let outputTokenCount, session.outputTokenCount != outputTokenCount {
+            session.outputTokenCount = outputTokenCount
+            changed = true
+        }
+
+        guard changed else {
+            return false
+        }
+
+        sessions[index] = session
+        return true
+    }
+
+    @discardableResult
     public func expirePendingApproval(requestID: String) -> PendingApproval? {
         mutatePendingApproval(requestID: requestID, newStatus: .expired)
     }
@@ -251,8 +282,6 @@ public final class AIAgentRuntime {
                 host: host,
                 lastEventType: eventType,
                 activityLabel: activity.label,
-                inputTokenCount: activity.inputTokenCount,
-                outputTokenCount: activity.outputTokenCount,
                 sessionTitle: sessionTitle,
                 launchContext: launchContext
             )
@@ -292,53 +321,13 @@ public final class AIAgentRuntime {
 
 private struct SessionActivity {
     let label: String
-    let inputTokenCount: Int?
-    let outputTokenCount: Int?
 
     init(eventType: AIBridgeEventType, payload: AIBridgePayload) {
         switch payload {
         case .permissionRequest:
             label = "Waiting Approval"
-            inputTokenCount = nil
-            outputTokenCount = nil
         case let .generic(values):
             label = SessionActivity.resolveLabel(eventType: eventType, values: values)
-            inputTokenCount = SessionActivity.resolveCount(
-                in: values,
-                keys: [
-                    "input_tokens",
-                    "inputTokens",
-                    "usage.input_tokens",
-                    "usage.inputTokens",
-                    "token_usage.input_tokens",
-                    "token_usage.inputTokens",
-                    "tokenUsage.inputTokens",
-                    "tokens.input",
-                    "prompt_tokens",
-                    "promptTokens",
-                    "usage.prompt_tokens",
-                    "usage.promptTokens",
-                    "inputTokenCount",
-                ]
-            )
-            outputTokenCount = SessionActivity.resolveCount(
-                in: values,
-                keys: [
-                    "output_tokens",
-                    "outputTokens",
-                    "usage.output_tokens",
-                    "usage.outputTokens",
-                    "token_usage.output_tokens",
-                    "token_usage.outputTokens",
-                    "tokenUsage.outputTokens",
-                    "tokens.output",
-                    "completion_tokens",
-                    "completionTokens",
-                    "usage.completion_tokens",
-                    "usage.completionTokens",
-                    "outputTokenCount",
-                ]
-            )
         }
     }
 
@@ -399,30 +388,6 @@ private struct SessionActivity {
         case .unknown:
             return "Active"
         }
-    }
-
-    private static func resolveCount(in values: [String: String], keys: [String]) -> Int? {
-        for key in keys {
-            if let count = integerValue(in: values, matching: key) {
-                return count
-            }
-        }
-        return nil
-    }
-
-    private static func integerValue(in values: [String: String], matching key: String) -> Int? {
-        if let raw = values[key], let count = Int(raw) {
-            return count
-        }
-
-        let suffix = ".\(key)"
-        for (candidate, raw) in values where candidate.hasSuffix(suffix) {
-            if let count = Int(raw) {
-                return count
-            }
-        }
-
-        return nil
     }
 
     private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {

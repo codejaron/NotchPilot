@@ -48,6 +48,10 @@ public struct HookEventParser {
             permissionMode: permissionMode
         )
         let payload = resolvePayload(from: dictionary, eventType: eventType, permissionMode: permissionMode)
+        let transcriptPath = findString(in: dictionary, paths: [
+            ["transcript_path"],
+            ["transcriptPath"],
+        ])
 
         return AIBridgeEnvelope(
             host: frame.host,
@@ -57,7 +61,8 @@ public struct HookEventParser {
             capabilities: capabilities,
             needsResponse: needsResponse,
             launchContext: frame.origin,
-            payload: payload
+            payload: payload,
+            transcriptPath: transcriptPath
         )
     }
 

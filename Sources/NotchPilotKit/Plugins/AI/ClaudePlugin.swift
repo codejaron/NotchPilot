@@ -30,6 +30,7 @@ public final class ClaudePlugin: AIPluginRendering {
     private let settingsStore: SettingsStore
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
+    private let transcriptReader: any ClaudeTranscriptReading
 
     private weak var bus: EventBus?
     private var responders: [String: @Sendable (Data) -> Void] = [:]
@@ -42,12 +43,14 @@ public final class ClaudePlugin: AIPluginRendering {
         permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
         sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
+        transcriptReader: any ClaudeTranscriptReading = ClaudeTranscriptReader(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
         self.encoder = HookResponseEncoder(permissionRuleStore: permissionRuleStore)
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
         self.sessionFocuser = sessionFocuser
+        self.transcriptReader = transcriptReader
         self.nowProvider = nowProvider
         self.isEnabled = Self.aggregateEnabled(
             claude: settingsStore.claudePluginEnabled,
@@ -124,6 +127,8 @@ public final class ClaudePlugin: AIPluginRendering {
         codexActionableSurface = nil
         lastErrorMessage = nil
         activityTracker.reset()
+        let reader = transcriptReader
+        Task { await reader.reset() }
         bus = nil
     }
 
@@ -162,6 +167,7 @@ public final class ClaudePlugin: AIPluginRendering {
                 _ = runtime.handle(envelope: bypass(envelope: envelope))
                 syncState()
                 syncSneakPeek()
+                scheduleTranscriptUsageRefresh(for: envelope)
                 do {
                     let data = try encoder.encode(
                         decision: .allowOnce,
@@ -179,6 +185,7 @@ public final class ClaudePlugin: AIPluginRendering {
             let result = runtime.handle(envelope: envelope)
             syncState()
             syncSneakPeek()
+            scheduleTranscriptUsageRefresh(for: envelope)
 
             switch result {
             case let .respondNow(data):
@@ -193,6 +200,34 @@ public final class ClaudePlugin: AIPluginRendering {
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
             respond(Data("{}".utf8))
+        }
+    }
+
+    private func scheduleTranscriptUsageRefresh(for envelope: AIBridgeEnvelope) {
+        guard let transcriptPath = envelope.transcriptPath else {
+            return
+        }
+
+        let sessionID = envelope.sessionID
+        let reader = transcriptReader
+
+        Task { [weak self] in
+            guard let usage = await reader.usage(forSessionID: sessionID, transcriptPath: transcriptPath) else {
+                return
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+                let didChange = self.runtime.updateTokenCounts(
+                    sessionID: sessionID,
+                    inputTokenCount: usage.contextInputTokens,
+                    outputTokenCount: usage.totalOutputTokens
+                )
+                if didChange {
+                    self.syncState()
+                    self.syncSneakPeek()
+                }
+            }
         }
     }
 

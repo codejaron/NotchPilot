@@ -304,6 +304,25 @@ final class HookEventParserTests: XCTestCase {
         }
         XCTAssertEqual(values["prompt"], "请帮我修复审批同步问题")
         XCTAssertNil(values["session_title"])
+        XCTAssertEqual(envelope.transcriptPath, transcriptURL.path)
+    }
+
+    func testEnvelopeTranscriptPathIsNilWhenAbsent() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-no-transcript",
+            rawJSON: """
+            {
+              "hook_event_name": "PostToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Bash"
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertNil(envelope.transcriptPath)
     }
 
     func testPreToolUseEditToolDoesNotRequireResponseInDefaultMode() throws {
