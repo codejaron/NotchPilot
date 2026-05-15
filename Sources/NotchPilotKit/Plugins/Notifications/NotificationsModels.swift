@@ -99,6 +99,7 @@ public struct NotificationFilterRules: Sendable {
     public let respectSystemDND: Bool
     public let contentPrivacy: NotificationContentPrivacy
     public let isSystemDNDActive: @Sendable () -> Bool
+    private let normalizedWhitelistedBundleIDs: Set<String>
 
     public init(
         enabled: Bool,
@@ -109,6 +110,7 @@ public struct NotificationFilterRules: Sendable {
     ) {
         self.enabled = enabled
         self.whitelistedBundleIDs = whitelistedBundleIDs
+        self.normalizedWhitelistedBundleIDs = Set(whitelistedBundleIDs.map(Self.normalizedBundleIdentifier))
         self.respectSystemDND = respectSystemDND
         self.contentPrivacy = contentPrivacy
         self.isSystemDNDActive = isSystemDNDActive
@@ -117,7 +119,7 @@ public struct NotificationFilterRules: Sendable {
     public func evaluate(_ notification: SystemNotification) -> Decision {
         guard enabled else { return .drop }
 
-        guard whitelistedBundleIDs.contains(notification.bundleIdentifier) else {
+        guard normalizedWhitelistedBundleIDs.contains(Self.normalizedBundleIdentifier(notification.bundleIdentifier)) else {
             return .drop
         }
 
@@ -128,6 +130,10 @@ public struct NotificationFilterRules: Sendable {
             return .recordOnly(redacted: redacted)
         }
         return .present(redacted: redacted)
+    }
+
+    private static func normalizedBundleIdentifier(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func redact(_ n: SystemNotification) -> SystemNotification {

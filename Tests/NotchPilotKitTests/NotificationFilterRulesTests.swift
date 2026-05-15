@@ -60,6 +60,13 @@ final class NotificationFilterRulesTests: XCTestCase {
         XCTAssertEqual(redacted.title, "张三")
     }
 
+    func testWhitelistMatchingIsCaseInsensitive() {
+        let rules = makeRules(whitelist: ["com.tencent.xinwechat"])
+        guard case .present = rules.evaluate(makeNotification(bundleID: "com.tencent.xinWeChat")) else {
+            return XCTFail("expected .present")
+        }
+    }
+
     func testSenderOnlyPrivacyRedactsBody() {
         let rules = makeRules(privacy: .senderOnly)
         guard case .present(let redacted) = rules.evaluate(makeNotification()) else {

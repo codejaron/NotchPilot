@@ -478,8 +478,11 @@ struct NotificationsDashboardView: View {
         .contextMenu {
             if entry.muted {
                 Button("\(AppStrings.text(.notificationsAllowedApps, language: settings.interfaceLanguage)) · \(entry.notification.appDisplayName ?? entry.notification.bundleIdentifier)") {
-                    var current = settings.notificationsWhitelistedBundleIDs
-                    current.insert(entry.notification.bundleIdentifier)
+                    let normalizedBundleID = entry.notification.bundleIdentifier.lowercased()
+                    var current = Set(settings.notificationsWhitelistedBundleIDs.filter {
+                        $0.lowercased() != normalizedBundleID
+                    })
+                    current.insert(normalizedBundleID)
                     settings.notificationsWhitelistedBundleIDs = current
                 }
             }

@@ -873,11 +873,18 @@ struct NotificationsPluginSettingsView: View {
     }
 
     private func bindingForWhitelist(bundleID: String) -> Binding<Bool> {
-        Binding(
-            get: { store.notificationsWhitelistedBundleIDs.contains(bundleID) },
+        let normalizedBundleID = bundleID.lowercased()
+        return Binding(
+            get: {
+                store.notificationsWhitelistedBundleIDs.contains {
+                    $0.lowercased() == normalizedBundleID
+                }
+            },
             set: { newValue in
-                var current = store.notificationsWhitelistedBundleIDs
-                if newValue { current.insert(bundleID) } else { current.remove(bundleID) }
+                var current = Set(store.notificationsWhitelistedBundleIDs.filter {
+                    $0.lowercased() != normalizedBundleID
+                })
+                if newValue { current.insert(normalizedBundleID) }
                 store.notificationsWhitelistedBundleIDs = current
             }
         )
