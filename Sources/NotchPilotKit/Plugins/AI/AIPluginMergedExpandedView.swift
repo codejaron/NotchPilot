@@ -162,6 +162,14 @@ struct AIPluginMergedExpandedView: View {
         plugin(for: summary.host, in: plugins)?.activateSession(id: summary.id) ?? false
     }
 
+    @discardableResult
+    static func stop(
+        summary: AIPluginExpandedSessionSummary,
+        in plugins: [any AIPluginRendering]
+    ) -> Bool {
+        plugin(for: summary.host, in: plugins)?.stopSession(id: summary.id) ?? false
+    }
+
     static func respond(
         to approval: PendingApproval,
         with action: ApprovalAction,
@@ -221,6 +229,9 @@ struct AIPluginMergedExpandedView: View {
             },
             onJump: { summary in
                 _ = Self.activate(summary: summary, in: plugins)
+            },
+            onStop: { summary in
+                _ = Self.stop(summary: summary, in: plugins)
             }
         )
     }

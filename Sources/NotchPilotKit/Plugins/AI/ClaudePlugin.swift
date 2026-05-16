@@ -443,6 +443,36 @@ public final class ClaudePlugin: AIPluginRendering {
         )
     }
 
+    @discardableResult
+    public func stopSession(id: String) -> Bool {
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            return false
+        }
+
+        guard activityTracker.stop(sessionID: id, at: nowProvider()) else {
+            return false
+        }
+
+        _ = runtime.apply(
+            event: .sessionUpsert(
+                AISession(
+                    id: id,
+                    host: session.host,
+                    lastEventType: .stop,
+                    activityLabel: "Stopped",
+                    inputTokenCount: session.inputTokenCount,
+                    outputTokenCount: session.outputTokenCount,
+                    sessionTitle: session.sessionTitle,
+                    launchContext: session.launchContext
+                )
+            )
+        )
+        expirePendingApprovals(forSessionID: id)
+        syncState()
+        syncSneakPeek()
+        return true
+    }
+
     private func runtimeDurationText(forSessionID sessionID: String) -> String? {
         guard let duration = activityTracker.duration(forSessionID: sessionID, now: nowProvider()) else {
             return nil
@@ -644,6 +674,19 @@ struct ClaudeSessionActivityTracker {
         }
 
         lastEventType[sessionID] = eventType
+    }
+
+    mutating func stop(sessionID: String, at date: Date) -> Bool {
+        guard firstActiveAt[sessionID] != nil || lastActiveAt[sessionID] != nil else {
+            return false
+        }
+
+        if firstActiveAt[sessionID] == nil {
+            firstActiveAt[sessionID] = lastActiveAt[sessionID] ?? date
+        }
+        updateLastActiveAt(sessionID: sessionID, date: date)
+        lastEventType[sessionID] = .stop
+        return true
     }
 
     func visibleSessions(

@@ -29,6 +29,41 @@ final class AppLocalizationTests: XCTestCase {
         )
     }
 
+    func testClaudePermissionActionTitlesResolveInChinese() {
+        XCTAssertEqual(
+            AppStrings.approvalActionTitle(
+                "Don't ask again this session",
+                id: "claude-allow-persist",
+                language: .zhHans
+            ),
+            "本会话不再询问"
+        )
+        XCTAssertEqual(
+            AppStrings.approvalActionTitle(
+                "Always allow in this project",
+                id: "claude-allow-persist",
+                language: .zhHans
+            ),
+            "此项目始终允许"
+        )
+        XCTAssertEqual(
+            AppStrings.approvalActionTitle(
+                "Accept edits this session",
+                id: "claude-allow-persist",
+                language: .zhHans
+            ),
+            "本会话自动接受编辑"
+        )
+        XCTAssertEqual(
+            AppStrings.approvalActionTitle(
+                "Always allow directory in this project",
+                id: "claude-allow-persist",
+                language: .zhHans
+            ),
+            "此项目始终允许目录"
+        )
+    }
+
     func testSystemMonitorLabelsResolveInBothLanguages() {
         XCTAssertEqual(AppStrings.systemMonitorMetricTitle(.memory, language: .zhHans), "内存")
         XCTAssertEqual(AppStrings.systemMonitorMetricTitle(.memory, language: .english), "Memory")

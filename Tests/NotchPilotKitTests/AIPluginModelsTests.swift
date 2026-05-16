@@ -2,7 +2,7 @@ import XCTest
 @testable import NotchPilotKit
 
 final class AIPluginModelsTests: XCTestCase {
-    func testExpandedSessionSummaryOnlyDimsCompletedSessions() {
+    func testExpandedSessionSummaryDimsTerminalSessions() {
         let working = AIPluginExpandedSessionSummary(
             id: "thread-working",
             host: .claude,
@@ -29,9 +29,26 @@ final class AIPluginModelsTests: XCTestCase {
             inputTokenCount: nil,
             outputTokenCount: nil
         )
+        let interrupted = AIPluginExpandedSessionSummary(
+            id: "thread-interrupted",
+            host: .codex,
+            title: "Stopped",
+            subtitle: "Stopped",
+            phase: .interrupted,
+            approvalCount: 0,
+            approvalRequestID: nil,
+            codexSurfaceID: nil,
+            updatedAt: Date(timeIntervalSince1970: 2),
+            inputTokenCount: nil,
+            outputTokenCount: nil
+        )
 
         XCTAssertFalse(working.isDimmed)
+        XCTAssertTrue(working.canStopManually)
         XCTAssertTrue(completed.isDimmed)
+        XCTAssertFalse(completed.canStopManually)
+        XCTAssertTrue(interrupted.isDimmed)
+        XCTAssertFalse(interrupted.canStopManually)
     }
 
     func testSessionRowsOnlyUsePrimaryAreaForAttentionAndAlwaysExposeJumpTarget() {

@@ -62,6 +62,34 @@ struct CodexThreadRegistry {
         }
     }
 
+    mutating func stop(threadID: String, at date: Date) -> Bool {
+        guard let context = contextsByID[threadID],
+              firstActiveAtByID[threadID] != nil || lastActiveAtByID[threadID] != nil
+        else {
+            return false
+        }
+
+        contextsByID[threadID] = CodexThreadContext(
+            threadID: context.threadID,
+            title: context.title,
+            activityLabel: "Stopped",
+            phase: .interrupted,
+            inputTokenCount: context.inputTokenCount,
+            outputTokenCount: context.outputTokenCount,
+            updatedAt: date,
+            launchContext: context.launchContext
+        )
+        if firstActiveAtByID[threadID] == nil {
+            firstActiveAtByID[threadID] = lastActiveAtByID[threadID] ?? date
+        }
+        lastActiveAtByID[threadID] = date
+        latestContextThreadID = threadID
+        if currentActiveThreadID == threadID {
+            currentActiveThreadID = nil
+        }
+        return true
+    }
+
     func sessions() -> [AISession] {
         contextsByID.keys.compactMap(session(threadID:)).sorted { $0.updatedAt > $1.updatedAt }
     }

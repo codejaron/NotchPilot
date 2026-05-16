@@ -10,6 +10,7 @@ struct AIPluginSessionListView: View {
     let summaries: [AIPluginExpandedSessionSummary]
     let onActivate: (AIPluginExpandedSessionSummary) -> Void
     let onJump: ((AIPluginExpandedSessionSummary) -> Void)?
+    let onStop: ((AIPluginExpandedSessionSummary) -> Void)?
 
     var body: some View {
         let presentation = AIPluginExpandedSessionListPresentation(summaries: summaries)
@@ -21,6 +22,9 @@ struct AIPluginSessionListView: View {
                         onActivate: { onActivate(summary) },
                         onJump: onJump.map { jump in
                             { jump(summary) }
+                        },
+                        onStop: onStop.map { stop in
+                            { stop(summary) }
                         }
                     )
                 }
@@ -33,6 +37,7 @@ private struct AIPluginSessionRow: View {
     let summary: AIPluginExpandedSessionSummary
     let onActivate: () -> Void
     let onJump: (() -> Void)?
+    let onStop: (() -> Void)?
 
     @ObservedObject private var settingsStore = SettingsStore.shared
 
@@ -125,6 +130,29 @@ private struct AIPluginSessionRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open session")
+            }
+
+            if let onStop, summary.canStopManually {
+                Button(action: onStop) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(0.045))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.86))
+                    }
+                    .frame(width: 24, height: 24)
+                    .frame(width: summary.jumpAccessoryHitWidth, height: jumpAccessory.hitHeight)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AppStrings.text(.stopSessionDetection, language: settingsStore.interfaceLanguage))
+                .help(AppStrings.text(.stopSessionDetection, language: settingsStore.interfaceLanguage))
             }
         }
     }

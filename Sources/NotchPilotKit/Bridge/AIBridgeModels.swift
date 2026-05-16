@@ -409,7 +409,7 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
             }
 
             let type = object["type"]?.stringValue ?? ""
-            if type == "setMode" {
+            if type == "setMode" || type == "addDirectories" {
                 return true
             }
 
@@ -422,10 +422,81 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
             return "Always allow"
         }
 
-        if object["destination"]?.stringValue == "session" {
-            return "Allow for session"
-        }
+        let type = object["type"]?.stringValue ?? ""
+        let destination = object["destination"]?.stringValue
 
-        return "Always allow"
+        switch type {
+        case "addRules":
+            return titleForRuleSuggestion(destination: destination)
+        case "addDirectories":
+            return titleForDirectorySuggestion(destination: destination)
+        case "setMode":
+            return titleForModeSuggestion(
+                mode: object["mode"]?.stringValue,
+                destination: destination
+            )
+        default:
+            return "Always allow"
+        }
+    }
+
+    private static func titleForRuleSuggestion(destination: String?) -> String {
+        switch destination {
+        case "session":
+            return "Don't ask again this session"
+        case "localSettings":
+            return "Always allow in this project"
+        case "projectSettings":
+            return "Always allow for shared project"
+        case "userSettings":
+            return "Always allow globally"
+        default:
+            return "Always allow"
+        }
+    }
+
+    private static func titleForDirectorySuggestion(destination: String?) -> String {
+        switch destination {
+        case "session":
+            return "Allow directory this session"
+        case "localSettings":
+            return "Always allow directory in this project"
+        case "projectSettings":
+            return "Always allow directory for shared project"
+        case "userSettings":
+            return "Always allow directory globally"
+        default:
+            return "Allow directory access"
+        }
+    }
+
+    private static func titleForModeSuggestion(mode: String?, destination: String?) -> String {
+        switch mode {
+        case "acceptEdits":
+            return titleForAcceptEditsMode(destination: destination)
+        case "dontAsk":
+            return "Don't ask mode"
+        case "plan":
+            return "Plan mode"
+        case "bypassPermissions":
+            return "Bypass permissions"
+        default:
+            return "Switch permission mode"
+        }
+    }
+
+    private static func titleForAcceptEditsMode(destination: String?) -> String {
+        switch destination {
+        case "session":
+            return "Accept edits this session"
+        case "localSettings":
+            return "Accept edits in this project"
+        case "projectSettings":
+            return "Accept edits for shared project"
+        case "userSettings":
+            return "Accept edits globally"
+        default:
+            return "Accept edits"
+        }
     }
 }

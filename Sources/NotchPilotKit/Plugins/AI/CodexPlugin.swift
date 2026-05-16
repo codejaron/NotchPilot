@@ -244,6 +244,26 @@ public final class CodexPlugin: AIPluginRendering {
         return sessionFocuser.focusCodexThread(id: id, fallbackContext: launchContext)
     }
 
+    @discardableResult
+    public func stopSession(id: String) -> Bool {
+        guard isEnabled, codexThreads.stop(threadID: id, at: nowProvider()) else {
+            return false
+        }
+
+        if rawCodexActionableSurface?.threadID == id {
+            let previousSurfaceID = rawCodexActionableSurface?.id
+            rawCodexActionableSurface = nil
+            if let previousSurfaceID {
+                dismissSneakPeek(for: previousSurfaceID)
+            }
+        }
+
+        lastSeenPhasesByThreadID[id] = .interrupted
+        syncState()
+        syncSneakPeek()
+        return true
+    }
+
     private func runtimeDurationText(forThreadID threadID: String, now: Date) -> String? {
         guard let duration = codexThreads.preferredActivityDuration(for: threadID, now: now) else {
             return nil

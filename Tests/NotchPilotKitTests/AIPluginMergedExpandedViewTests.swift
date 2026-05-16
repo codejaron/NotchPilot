@@ -91,6 +91,18 @@ final class AIPluginMergedExpandedViewTests: XCTestCase {
         XCTAssertEqual(claude.activatedSessionIDs, [])
     }
 
+    func testStopSessionRoutesToOwningPlugin() {
+        let claude = MergedViewProbeAIPlugin(id: "claude")
+        let codex = MergedViewProbeAIPlugin(id: "codex")
+        let summary = makeSummary(id: "devin-thread", host: .devin)
+
+        let didStop = AIPluginMergedExpandedView.stop(summary: summary, in: [codex, claude])
+
+        XCTAssertTrue(didStop)
+        XCTAssertEqual(claude.stoppedSessionIDs, ["devin-thread"])
+        XCTAssertEqual(codex.stoppedSessionIDs, [])
+    }
+
     func testRespondRoutesApprovalToCorrectPlugin() {
         let claude = MergedViewProbeAIPlugin(id: "claude")
         let codex = MergedViewProbeAIPlugin(id: "codex")
@@ -124,6 +136,7 @@ private final class MergedViewProbeAIPlugin: AIPluginRendering {
     var currentCompactActivity: AIPluginCompactActivity?
     var expandedSessionSummaries: [AIPluginExpandedSessionSummary]
     private(set) var activatedSessionIDs: [String] = []
+    private(set) var stoppedSessionIDs: [String] = []
     private(set) var respondedApprovals: [(requestID: String, action: ApprovalAction)] = []
 
     init(
@@ -147,6 +160,12 @@ private final class MergedViewProbeAIPlugin: AIPluginRendering {
     @discardableResult
     func activateSession(id: String) -> Bool {
         activatedSessionIDs.append(id)
+        return true
+    }
+
+    @discardableResult
+    func stopSession(id: String) -> Bool {
+        stoppedSessionIDs.append(id)
         return true
     }
 

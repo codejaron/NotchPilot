@@ -477,6 +477,45 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(activity?.runtimeDurationText, "1m06s")
     }
 
+    func testManualStopSessionFreezesRuntimeAndStopsCompactPreview() async {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                nowProvider: { now.value }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-manual-stop",
+                    title: "Stale Codex thread",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        }
+
+        now.value = Date(timeIntervalSince1970: 12)
+        let didStop = await MainActor.run {
+            plugin.stopSession(id: "codex-manual-stop")
+        }
+        now.value = Date(timeIntervalSince1970: 30)
+
+        let summary = await MainActor.run { plugin.expandedSessionSummaries.first }
+        let hasPreview = await MainActor.run { plugin.preview(context: Self.previewContext) != nil }
+        XCTAssertTrue(didStop)
+        XCTAssertEqual(summary?.id, "codex-manual-stop")
+        XCTAssertEqual(summary?.phase, .interrupted)
+        XCTAssertEqual(summary?.runtimeDurationText, "12s")
+        XCTAssertFalse(hasPreview)
+    }
+
     func testActionableSurfaceEmitsInteractiveSneakPeek() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

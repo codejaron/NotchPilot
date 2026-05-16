@@ -319,6 +319,50 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testManualStopSessionFreezesRuntimeAndDismissesActivitySneakPeek() {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
+        let bus = EventBus()
+        let plugin = ClaudePlugin(nowProvider: { now.value })
+        let recorder = SplitEventRecorder()
+
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-manual-stop-active",
+                rawJSON: """
+                {
+                  "hook_event_name": "UserPromptSubmit",
+                  "session_id": "claude-manual-stop-session",
+                  "prompt": "Investigate stale session"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        now.value = Date(timeIntervalSince1970: 12)
+        XCTAssertTrue(plugin.stopSession(id: "claude-manual-stop-session"))
+        now.value = Date(timeIntervalSince1970: 30)
+
+        let summary = plugin.expandedSessionSummaries.first
+        XCTAssertNil(plugin.currentCompactActivity)
+        XCTAssertEqual(summary?.id, "claude-manual-stop-session")
+        XCTAssertEqual(summary?.phase, .completed)
+        XCTAssertEqual(summary?.runtimeDurationText, "12s")
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
+
+        bus.unsubscribe(token)
+    }
+
+    @MainActor
     func testPermissionRequestDoesNotEmitSneakPeekWhenApprovalSneakSettingIsDisabled() {
         let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
         SettingsStore.shared.approvalSneakNotificationsEnabled = false

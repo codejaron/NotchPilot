@@ -16,6 +16,8 @@ protocol AIPluginRendering: NotchPlugin {
     func preferredCodexTitle(for surface: CodexActionableSurface?) -> String?
     @discardableResult
     func activateSession(id: String) -> Bool
+    @discardableResult
+    func stopSession(id: String) -> Bool
     func respond(to requestID: String, with action: ApprovalAction)
 
     @discardableResult
@@ -125,6 +127,9 @@ extension AIPluginRendering {
 
     @discardableResult
     func activateSession(id: String) -> Bool { false }
+
+    @discardableResult
+    func stopSession(id: String) -> Bool { false }
 
     var approvalSneakNotificationsEnabled: Bool {
         SettingsStore.shared.approvalSneakNotificationsEnabled

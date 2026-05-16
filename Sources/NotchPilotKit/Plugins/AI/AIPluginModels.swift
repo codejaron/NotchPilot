@@ -83,7 +83,11 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     }
 
     var isDimmed: Bool {
-        phase == .completed
+        phase.isTerminal
+    }
+
+    var canStopManually: Bool {
+        phase.isTerminal == false
     }
 
     var hasTokenUsage: Bool {
@@ -170,6 +174,15 @@ enum AIPluginSessionPhase: Equatable {
             self = .error
         case .unknown:
             self = .unknown
+        }
+    }
+
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .interrupted, .error:
+            return true
+        case .plan, .working, .connected, .unknown:
+            return false
         }
     }
 }
