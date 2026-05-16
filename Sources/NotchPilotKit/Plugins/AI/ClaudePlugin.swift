@@ -572,7 +572,7 @@ public final class ClaudePlugin: AIPluginRendering {
 
         let request = SneakPeekRequest(
             pluginID: id,
-            priority: SneakPeekRequestPriority.ai,
+            priority: SneakPeekRequestPriority.ai(for: kind),
             target: .activeScreen,
             kind: kind,
             isInteractive: true,

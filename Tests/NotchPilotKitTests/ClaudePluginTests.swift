@@ -204,7 +204,7 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "claude")
-        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.aiApproval)
         XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertEqual(request.kind, .attention)
         XCTAssertTrue(request.isInteractive)
@@ -257,6 +257,7 @@ final class ClaudePluginTests: XCTestCase {
         let activity = plugin.currentCompactActivity
         XCTAssertEqual(request.pluginID, "claude")
         XCTAssertEqual(request.kind, .activity)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.aiActivity)
         XCTAssertTrue(request.isInteractive)
         XCTAssertEqual(activity?.host, .claude)
         XCTAssertEqual(activity?.approvalCount, 0)

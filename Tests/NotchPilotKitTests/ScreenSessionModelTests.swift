@@ -125,7 +125,7 @@ final class ScreenSessionModelTests: XCTestCase {
         session.enqueue(
             SneakPeekRequest(
                 pluginID: "claude",
-                priority: SneakPeekRequestPriority.ai,
+                priority: SneakPeekRequestPriority.aiApproval,
                 target: .activeScreen,
                 kind: .attention,
                 isInteractive: true,
@@ -134,8 +134,99 @@ final class ScreenSessionModelTests: XCTestCase {
         )
 
         XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
-        XCTAssertEqual(session.currentSneakPeek?.priority, SneakPeekRequestPriority.ai)
+        XCTAssertEqual(session.currentSneakPeek?.priority, SneakPeekRequestPriority.aiApproval)
         XCTAssertEqual(session.currentSneakPeek?.kind, .attention)
+    }
+
+    func testAIApprovalRequestsOutrankEarlierAIActivitySneaks() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        let claudeActivity = SneakPeekRequest(
+            pluginID: "claude",
+            priority: SneakPeekRequestPriority.aiActivity,
+            target: .activeScreen,
+            kind: .activity,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+        let codexApproval = SneakPeekRequest(
+            pluginID: "codex",
+            priority: SneakPeekRequestPriority.aiApproval,
+            target: .activeScreen,
+            kind: .attention,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+
+        session.enqueue(claudeActivity)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
+
+        session.enqueue(codexApproval)
+
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "codex")
+        XCTAssertEqual(session.currentSneakPeek?.kind, .attention)
+
+        session.dismissSneakPeek(requestID: codexApproval.id)
+
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
+        XCTAssertEqual(session.currentSneakPeek?.kind, .activity)
+    }
+
+    func testNotificationsOutrankAIActivitySneaksButYieldToAIApprovals() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        let aiActivity = SneakPeekRequest(
+            pluginID: "claude",
+            priority: SneakPeekRequestPriority.aiActivity,
+            target: .activeScreen,
+            kind: .activity,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+        let notification = SneakPeekRequest(
+            pluginID: "notifications",
+            priority: SneakPeekRequestPriority.notifications,
+            target: .activeScreen,
+            kind: .attention,
+            isInteractive: false,
+            autoDismissAfter: 2.0
+        )
+        let aiApproval = SneakPeekRequest(
+            pluginID: "codex",
+            priority: SneakPeekRequestPriority.aiApproval,
+            target: .activeScreen,
+            kind: .attention,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+
+        session.enqueue(aiActivity)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
+
+        session.enqueue(notification)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "notifications")
+
+        session.enqueue(aiApproval)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "codex")
+
+        session.dismissSneakPeek(requestID: aiApproval.id)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "notifications")
+
+        session.dismissSneakPeek(requestID: notification.id)
+        XCTAssertEqual(session.currentSneakPeek?.pluginID, "claude")
+        XCTAssertEqual(session.currentSneakPeek?.kind, .activity)
     }
 
     func testWindowFrameUsesFixedExpandedContentSizeAndStaysPinnedToTopCenter() {

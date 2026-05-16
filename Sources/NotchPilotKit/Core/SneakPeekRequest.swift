@@ -6,10 +6,21 @@ public enum SneakPeekRequestKind: Equatable, Sendable {
 }
 
 public enum SneakPeekRequestPriority {
-    public static let ai = 100
+    public static let aiApproval = 100
+    public static let ai = aiApproval
     public static let notifications = 500
+    public static let aiActivity = 600
     public static let mediaPlayback = 700
     public static let systemMonitor = 2_000
+
+    public static func ai(for kind: SneakPeekRequestKind) -> Int {
+        switch kind {
+        case .attention:
+            return aiApproval
+        case .activity:
+            return aiActivity
+        }
+    }
 }
 
 public struct SneakPeekRequest: Equatable, Sendable, Identifiable {

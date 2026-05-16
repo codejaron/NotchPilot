@@ -549,7 +549,7 @@ final class CodexPluginTests: XCTestCase {
 
         XCTAssertEqual(request.pluginID, "codex")
         XCTAssertEqual(request.kind, .attention)
-        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.aiApproval)
         XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertTrue(request.isInteractive)
 
@@ -631,7 +631,7 @@ final class CodexPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(request.pluginID, "codex")
-        XCTAssertEqual(request.priority, SneakPeekRequestPriority.ai)
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.aiApproval)
         XCTAssertLessThan(request.priority, SneakPeekRequestPriority.mediaPlayback)
         XCTAssertEqual(request.kind, .attention)
         XCTAssertTrue(request.isInteractive)
