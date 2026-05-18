@@ -134,7 +134,7 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(preToolEntries.flatMap(commandStrings(in:)).contains { $0.contains("--host claude") })
     }
 
-    func testInstallClaudeHooksUsesShortPermissionRequestTimeoutToBoundStuckApprovals() throws {
+    func testInstallClaudeHooksDoesNotTimeoutPermissionRequests() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
 
@@ -148,7 +148,51 @@ final class HookInstallerTests: XCTestCase {
             .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
         let timeouts = permissionHooks.compactMap { $0["timeout"] as? Int }
 
-        XCTAssertEqual(timeouts, [30])
+        XCTAssertTrue(timeouts.isEmpty)
+    }
+
+    func testClaudeHooksNeedUpdateReturnsTrueWhenManagedPermissionHookStillHasTimeout() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        let bridgeURL = tempHomeURL.appendingPathComponent("notch-bridge.py")
+        let bridgePath = bridgeURL.path
+        let escapedBridgePath = bridgePath.replacingOccurrences(of: "\"", with: "\\\"")
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 4\n".write(
+            to: bridgeURL, atomically: true, encoding: .utf8
+        )
+        try Data(
+            """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "PermissionRequest": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude", "timeout": 30 } ] }
+                ],
+                "PostToolUse": [
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "SessionStart": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "Stop": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ],
+                "UserPromptSubmit": [
+                  { "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
+                ]
+              }
+            }
+            """.utf8
+        ).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+
+        XCTAssertTrue(installer.claudeHooksInstalled(bridgeScript: bridgePath))
+        XCTAssertTrue(installer.claudeHooksNeedUpdate(bridgeScript: bridgePath))
     }
 
     func testInstallClaudeHooksReplacesManagedPreToolUseEntries() throws {
@@ -413,7 +457,7 @@ final class HookInstallerTests: XCTestCase {
                   { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
                 ],
                 "PermissionRequest": [
-                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude", "timeout": 30 } ] }
+                  { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
                 ],
                 "PostToolUse": [
                   { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }

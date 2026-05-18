@@ -400,57 +400,7 @@ enum AppStrings {
         if id == "claude-deny-feedback-submit" {
             return text(.noTellClaudeWhy, language: language)
         }
-
-        switch (language, title) {
-        case (.zhHans, "Deny"):
-            return "拒绝"
-        case (.zhHans, "Allow once"):
-            return "允许一次"
-        case (.zhHans, "Always allow"):
-            return "始终允许"
-        case (.zhHans, "Allow for session"):
-            return "本会话不再询问"
-        case (.zhHans, "Don't ask again this session"):
-            return "本会话不再询问"
-        case (.zhHans, "Always allow in this project"):
-            return "此项目始终允许"
-        case (.zhHans, "Always allow for shared project"):
-            return "项目共享允许"
-        case (.zhHans, "Always allow globally"):
-            return "全局始终允许"
-        case (.zhHans, "Allow directory this session"):
-            return "本会话允许目录"
-        case (.zhHans, "Always allow directory in this project"):
-            return "此项目始终允许目录"
-        case (.zhHans, "Always allow directory for shared project"):
-            return "项目共享允许目录"
-        case (.zhHans, "Always allow directory globally"):
-            return "全局始终允许目录"
-        case (.zhHans, "Allow directory access"):
-            return "允许目录访问"
-        case (.zhHans, "Accept edits this session"):
-            return "本会话自动接受编辑"
-        case (.zhHans, "Accept edits in this project"):
-            return "此项目自动接受编辑"
-        case (.zhHans, "Accept edits for shared project"):
-            return "项目共享自动接受编辑"
-        case (.zhHans, "Accept edits globally"):
-            return "全局自动接受编辑"
-        case (.zhHans, "Accept edits"):
-            return "自动接受编辑"
-        case (.zhHans, "Don't ask mode"):
-            return "不询问模式"
-        case (.zhHans, "Plan mode"):
-            return "计划模式"
-        case (.zhHans, "Bypass permissions"):
-            return "跳过权限检查"
-        case (.zhHans, "Switch permission mode"):
-            return "切换权限模式"
-        case (.zhHans, "No, tell Claude why"):
-            return text(.noTellClaudeWhy, language: language)
-        default:
-            return title
-        }
+        return title
     }
 
     static func claudeApprovalTitle(_ title: String, language: AppLanguage) -> String {

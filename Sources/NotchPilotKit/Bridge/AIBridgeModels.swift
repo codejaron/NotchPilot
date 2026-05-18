@@ -192,6 +192,7 @@ public struct ApprovalPayload: Equatable, Sendable {
     public let permissionSuggestions: [JSONValue]
     public let toolInput: JSONValue?
     public let claudeQuestions: [ClaudeUserQuestion]
+    public let cwd: String?
 
     public init(
         title: String,
@@ -211,7 +212,8 @@ public struct ApprovalPayload: Equatable, Sendable {
         permissionMode: String? = nil,
         permissionSuggestions: [JSONValue] = [],
         toolInput: JSONValue? = nil,
-        claudeQuestions: [ClaudeUserQuestion] = []
+        claudeQuestions: [ClaudeUserQuestion] = [],
+        cwd: String? = nil
     ) {
         self.title = title
         self.toolName = toolName
@@ -231,6 +233,7 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.permissionSuggestions = permissionSuggestions
         self.toolInput = toolInput
         self.claudeQuestions = claudeQuestions
+        self.cwd = cwd
     }
 
     public func updatedInput(answering answers: [String: String]) -> JSONValue {
@@ -361,7 +364,8 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         webFetchDomain: String?,
         mcpServer: String?,
         mcpTool: String?,
-        permissionSuggestions: [JSONValue] = []
+        permissionSuggestions: [JSONValue] = [],
+        cwd: String? = nil
     ) -> [ApprovalAction] {
         if toolName == "AskUserQuestion" {
             return []
@@ -371,13 +375,13 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         var actions = [
             ApprovalAction(
                 id: "claude-deny",
-                title: "Deny",
+                title: "No",
                 style: .outline,
                 payload: .claude(.denyOnce)
             ),
             ApprovalAction(
                 id: "claude-allow",
-                title: "Allow once",
+                title: "Yes",
                 style: permissionSuggestion == nil ? .primary : .outline,
                 payload: .claude(.allowOnce)
             )
@@ -387,7 +391,7 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
             actions.append(
                 ApprovalAction(
                     id: "claude-allow-persist",
-                    title: title(forPermissionSuggestion: permissionSuggestion),
+                    title: title(forPermissionSuggestion: permissionSuggestion, cwd: cwd),
                     style: .primary,
                     payload: .claude(
                         ApprovalDecision(
@@ -417,56 +421,93 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         }
     }
 
-    private static func title(forPermissionSuggestion suggestion: JSONValue) -> String {
+    private static func title(forPermissionSuggestion suggestion: JSONValue, cwd: String?) -> String {
         guard let object = suggestion.objectValue else {
-            return "Always allow"
+            return "Yes, and always allow"
         }
 
         let type = object["type"]?.stringValue ?? ""
         let destination = object["destination"]?.stringValue
+        let firstRule = (object["rules"]?.arrayValue?.first)?.objectValue
+        let ruleToolName = firstRule?["toolName"]?.stringValue
+        let ruleContent = firstRule?["ruleContent"]?.stringValue
 
         switch type {
         case "addRules":
-            return titleForRuleSuggestion(destination: destination)
+            return titleForRuleSuggestion(
+                destination: destination,
+                toolName: ruleToolName,
+                ruleContent: ruleContent,
+                cwd: cwd
+            )
         case "addDirectories":
-            return titleForDirectorySuggestion(destination: destination)
+            return titleForDirectorySuggestion(destination: destination, cwd: cwd)
         case "setMode":
             return titleForModeSuggestion(
                 mode: object["mode"]?.stringValue,
                 destination: destination
             )
         default:
-            return "Always allow"
+            return "Yes, and always allow"
         }
     }
 
-    private static func titleForRuleSuggestion(destination: String?) -> String {
+    private static func toolDisplayLabel(_ toolName: String?, ruleContent: String?) -> String {
+        let base: String
+        switch toolName {
+        case "WebSearch":
+            base = "Web Search"
+        case .some(let name):
+            base = name
+        case .none:
+            base = "this tool"
+        }
+        if let ruleContent, ruleContent.isEmpty == false {
+            return "\(base)(\(ruleContent))"
+        }
+        return base
+    }
+
+    private static func titleForRuleSuggestion(
+        destination: String?,
+        toolName: String?,
+        ruleContent: String?,
+        cwd: String?
+    ) -> String {
+        let toolLabel = toolDisplayLabel(toolName, ruleContent: ruleContent)
+
         switch destination {
         case "session":
-            return "Don't ask again this session"
+            return "Yes, and don't ask again for \(toolLabel) commands this session"
         case "localSettings":
-            return "Always allow in this project"
+            if let cwd, cwd.isEmpty == false {
+                return "Yes, and don't ask again for \(toolLabel) commands in \(cwd)"
+            }
+            return "Yes, and don't ask again for \(toolLabel) commands in this project"
         case "projectSettings":
-            return "Always allow for shared project"
+            return "Yes, and don't ask again for \(toolLabel) commands for shared project"
         case "userSettings":
-            return "Always allow globally"
+            return "Yes, and always allow \(toolLabel) commands"
         default:
-            return "Always allow"
+            return "Yes, and always allow \(toolLabel)"
         }
     }
 
-    private static func titleForDirectorySuggestion(destination: String?) -> String {
+    private static func titleForDirectorySuggestion(destination: String?, cwd: String?) -> String {
         switch destination {
         case "session":
-            return "Allow directory this session"
+            return "Yes, and allow directory access this session"
         case "localSettings":
-            return "Always allow directory in this project"
+            if let cwd, cwd.isEmpty == false {
+                return "Yes, and always allow directory access in \(cwd)"
+            }
+            return "Yes, and always allow directory access in this project"
         case "projectSettings":
-            return "Always allow directory for shared project"
+            return "Yes, and always allow directory access for shared project"
         case "userSettings":
-            return "Always allow directory globally"
+            return "Yes, and always allow directory access"
         default:
-            return "Allow directory access"
+            return "Yes, and allow directory access"
         }
     }
 
@@ -475,28 +516,28 @@ public struct ApprovalAction: Equatable, Sendable, Identifiable {
         case "acceptEdits":
             return titleForAcceptEditsMode(destination: destination)
         case "dontAsk":
-            return "Don't ask mode"
+            return "Yes, and don't ask again"
         case "plan":
-            return "Plan mode"
+            return "Yes, and enter plan mode"
         case "bypassPermissions":
-            return "Bypass permissions"
+            return "Yes, and bypass permissions"
         default:
-            return "Switch permission mode"
+            return "Yes, and switch permission mode"
         }
     }
 
     private static func titleForAcceptEditsMode(destination: String?) -> String {
         switch destination {
         case "session":
-            return "Accept edits this session"
+            return "Yes, and accept edits this session"
         case "localSettings":
-            return "Accept edits in this project"
+            return "Yes, and accept edits in this project"
         case "projectSettings":
-            return "Accept edits for shared project"
+            return "Yes, and accept edits for shared project"
         case "userSettings":
-            return "Accept edits globally"
+            return "Yes, and accept edits globally"
         default:
-            return "Accept edits"
+            return "Yes, and accept edits"
         }
     }
 }

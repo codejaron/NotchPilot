@@ -29,38 +29,30 @@ final class AppLocalizationTests: XCTestCase {
         )
     }
 
-    func testClaudePermissionActionTitlesResolveInChinese() {
+    func testClaudePermissionActionTitlesPassThroughVerbatim() {
         XCTAssertEqual(
             AppStrings.approvalActionTitle(
-                "Don't ask again this session",
+                "Yes, and don't ask again for Web Search commands in /Users/jaron/project",
                 id: "claude-allow-persist",
                 language: .zhHans
             ),
-            "本会话不再询问"
+            "Yes, and don't ask again for Web Search commands in /Users/jaron/project"
         )
         XCTAssertEqual(
             AppStrings.approvalActionTitle(
-                "Always allow in this project",
-                id: "claude-allow-persist",
+                "Yes",
+                id: "claude-allow",
                 language: .zhHans
             ),
-            "此项目始终允许"
+            "Yes"
         )
         XCTAssertEqual(
             AppStrings.approvalActionTitle(
-                "Accept edits this session",
-                id: "claude-allow-persist",
+                "No",
+                id: "claude-deny",
                 language: .zhHans
             ),
-            "本会话自动接受编辑"
-        )
-        XCTAssertEqual(
-            AppStrings.approvalActionTitle(
-                "Always allow directory in this project",
-                id: "claude-allow-persist",
-                language: .zhHans
-            ),
-            "此项目始终允许目录"
+            "No"
         )
     }
 

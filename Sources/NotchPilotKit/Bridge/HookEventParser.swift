@@ -304,7 +304,8 @@ public struct HookEventParser {
                     permissionMode: permissionMode,
                     permissionSuggestions: permissionSuggestions(from: dictionary),
                     toolInput: toolInput,
-                    claudeQuestions: claudeQuestions
+                    claudeQuestions: claudeQuestions,
+                    cwd: findString(in: dictionary, paths: [["cwd"]])
                 )
             )
         case .userPromptSubmit:

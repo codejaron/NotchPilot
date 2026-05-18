@@ -156,7 +156,8 @@ public final class AIAgentRuntime {
                 webFetchDomain: payload.webFetchDomain,
                 mcpServer: payload.mcpServer,
                 mcpTool: payload.mcpTool,
-                permissionSuggestions: payload.permissionSuggestions
+                permissionSuggestions: payload.permissionSuggestions,
+                cwd: payload.cwd
             ),
             status: .pending
         )

@@ -32,8 +32,41 @@ final class ApprovalActionTests: XCTestCase {
         XCTAssertEqual(decision.permissionUpdates, [suggestion])
         XCTAssertNil(decision.sessionRule)
         XCTAssertNil(decision.persistRule)
-        XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once", "Always allow in this project"])
+        XCTAssertEqual(actions.map(\.title), [
+            "No",
+            "Yes",
+            "Yes, and don't ask again for Bash(npm test) commands in this project",
+        ])
         XCTAssertEqual(actions.map(\.style), [.outline, .outline, .primary])
+    }
+
+    func testPermissionSuggestionUsesCwdInLabel() throws {
+        let suggestion: JSONValue = .object([
+            "type": .string("addRules"),
+            "rules": .array([
+                .object([
+                    "toolName": .string("WebSearch"),
+                ]),
+            ]),
+            "behavior": .string("allow"),
+            "destination": .string("localSettings"),
+        ])
+        let actions = ApprovalAction.claudeActions(
+            toolKind: .webSearch,
+            toolName: "WebSearch",
+            bashCommandPrefix: nil,
+            webFetchDomain: nil,
+            mcpServer: nil,
+            mcpTool: nil,
+            permissionSuggestions: [suggestion],
+            cwd: "/Users/jaron/data/project/NotchPilot"
+        )
+
+        XCTAssertEqual(actions.map(\.title), [
+            "No",
+            "Yes",
+            "Yes, and don't ask again for Web Search commands in /Users/jaron/data/project/NotchPilot",
+        ])
     }
 
     func testSessionPermissionSuggestionUsesDontAskAgainLanguage() throws {
@@ -58,7 +91,11 @@ final class ApprovalActionTests: XCTestCase {
             permissionSuggestions: [suggestion]
         )
 
-        XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once", "Don't ask again this session"])
+        XCTAssertEqual(actions.map(\.title), [
+            "No",
+            "Yes",
+            "Yes, and don't ask again for Bash(npm list *) commands this session",
+        ])
     }
 
     func testSetModeAcceptEditsSuggestionNamesModeInsteadOfGenericAllow() throws {
@@ -77,7 +114,11 @@ final class ApprovalActionTests: XCTestCase {
             permissionSuggestions: [suggestion]
         )
 
-        XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once", "Accept edits this session"])
+        XCTAssertEqual(actions.map(\.title), [
+            "No",
+            "Yes",
+            "Yes, and accept edits this session",
+        ])
     }
 
     func testDirectoryPermissionSuggestionUsesDirectoryLanguage() throws {
@@ -96,7 +137,11 @@ final class ApprovalActionTests: XCTestCase {
             permissionSuggestions: [suggestion]
         )
 
-        XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once", "Always allow directory in this project"])
+        XCTAssertEqual(actions.map(\.title), [
+            "No",
+            "Yes",
+            "Yes, and always allow directory access in this project",
+        ])
     }
 
     func testNoPermissionSuggestionDoesNotInventPersistentAction() {
@@ -111,7 +156,7 @@ final class ApprovalActionTests: XCTestCase {
         )
 
         XCTAssertNil(actions.first(where: { $0.id == "claude-allow-persist" }))
-        XCTAssertEqual(actions.map(\.title), ["Deny", "Allow once"])
+        XCTAssertEqual(actions.map(\.title), ["No", "Yes"])
         XCTAssertEqual(actions.map(\.style), [.outline, .primary])
     }
 

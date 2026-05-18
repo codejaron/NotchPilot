@@ -19,6 +19,8 @@ struct AIPluginApprovalDetailView: View {
 
     @ObservedObject private var settingsStore = SettingsStore.shared
 
+    @State private var claudeApprovalInteractionState: ClaudeApprovalInteractionState?
+
     private let claudeFeedbackFont = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     var body: some View {
@@ -57,51 +59,192 @@ struct AIPluginApprovalDetailView: View {
     }
 
     private var approvalCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let options = currentApprovalOptions
+
+        return VStack(alignment: .leading, spacing: 10) {
             codexApprovalSummary(claudeApprovalSummary)
             AIPluginApprovalCommandView(text: approvalCommandText)
-            approvalButtons
+            approvalOptions
             if feedbackRequestID == approval.requestID {
                 approvalFeedbackInput
             }
         }
+        .background(
+            CodexApprovalKeyMonitor(
+                isEnabled: feedbackRequestID != approval.requestID && options.isEmpty == false,
+                focusedTarget: claudeApprovalFocusedTarget(options: options),
+                onMoveUp: {
+                    moveClaudeApprovalFocusUp()
+                },
+                onMoveDown: {
+                    moveClaudeApprovalFocusDown()
+                },
+                onSubmit: {
+                    submitFocusedClaudeApproval()
+                }
+            )
+            .allowsHitTesting(false)
+        )
+        .onAppear {
+            syncClaudeApprovalInteraction(options: options)
+        }
+        .onChange(of: approval.requestID) { _, _ in
+            syncClaudeApprovalInteraction(options: currentApprovalOptions)
+        }
+        .onChange(of: currentApprovalOptionIDs) { _, _ in
+            syncClaudeApprovalInteraction(options: currentApprovalOptions)
+        }
     }
 
-    private var approvalButtons: some View {
+    private var approvalOptions: some View {
         let accent = NotchPilotTheme.brand(for: approval.host)
+        let options = currentApprovalOptions
+        let focusedActionID = claudeApprovalInteractionState?.focusedActionID ?? options.first?.id
 
-        return HStack(spacing: 8) {
-            ForEach(approval.availableActions) { action in
+        return VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.optionStackSpacing) {
+            ForEach(options) { option in
                 Button {
-                    handleApprovalAction(action)
+                    focusClaudeApproval(actionID: option.id, options: options)
+                    handleApprovalAction(option.action)
                 } label: {
-                    Text(AppStrings.approvalActionTitle(
-                        action.title,
-                        id: action.id,
-                        language: settingsStore.interfaceLanguage
-                    ))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AIPluginApprovalStyle.foregroundColor(for: action.style))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(AIPluginApprovalStyle.backgroundFill(for: action.style, accent: accent))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(
-                                    AIPluginApprovalStyle.borderColor(for: action.style, accent: accent),
-                                    lineWidth: AIPluginApprovalStyle.borderLineWidth(for: action.style)
-                                )
-                        )
+                    approvalOptionLabel(option, accent: accent, isFocused: option.id == focusedActionID)
                 }
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var currentApprovalOptions: [ClaudeApprovalOptionPresentation] {
+        ClaudeApprovalOptionPresentation.options(
+            for: approval.availableActions,
+            language: settingsStore.interfaceLanguage
+        )
+    }
+
+    private var currentApprovalOptionIDs: [String] {
+        currentApprovalOptions.map(\.id)
+    }
+
+    private func approvalOptionLabel(
+        _ option: ClaudeApprovalOptionPresentation,
+        accent: Color,
+        isFocused: Bool
+    ) -> some View {
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(accent.opacity(0.92))
+                .frame(width: 8)
+                .opacity(isFocused ? 1 : 0)
+
+            Text(option.indexText)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(
+                    isFocused
+                        ? accent
+                        : NotchPilotTheme.islandTextSecondary
+                )
+                .frame(width: 22, alignment: .trailing)
+
+            Text(option.title)
+                .font(.system(
+                    size: 12,
+                    weight: isFocused ? .semibold : .medium,
+                    design: .rounded
+                ))
+                .foregroundStyle(
+                    NotchPilotTheme.islandTextPrimary.opacity(
+                        isFocused ? 0.98 : 0.86
+                    )
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, CodexApprovalCompactLayout.optionHorizontalPadding)
+        .padding(.vertical, CodexApprovalCompactLayout.optionVerticalPadding)
+        .background(
+            RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.optionCornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: isFocused
+                            ? [
+                                accent.opacity(0.16),
+                                accent.opacity(0.06),
+                            ]
+                            : [
+                                Color.white.opacity(0.03),
+                                Color.white.opacity(0.015),
+                            ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.optionCornerRadius, style: .continuous)
+                .strokeBorder(
+                    isFocused
+                        ? accent.opacity(0.46)
+                        : Color.white.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(option.indexText) \(option.title)")
+        .help(option.title)
+    }
+
+    private func claudeApprovalFocusedTarget(
+        options: [ClaudeApprovalOptionPresentation]
+    ) -> CodexApprovalFocusTarget? {
+        let focusedActionID = claudeApprovalInteractionState?.focusedActionID ?? options.first?.id
+        return focusedActionID.map { .option(id: $0) }
+    }
+
+    private func syncClaudeApprovalInteraction(options: [ClaudeApprovalOptionPresentation]) {
+        if var state = claudeApprovalInteractionState {
+            state.sync(options: options)
+            claudeApprovalInteractionState = state
+            return
+        }
+
+        claudeApprovalInteractionState = ClaudeApprovalInteractionState(options: options)
+    }
+
+    private func focusClaudeApproval(
+        actionID: String?,
+        options: [ClaudeApprovalOptionPresentation]
+    ) {
+        var state = claudeApprovalInteractionState ?? ClaudeApprovalInteractionState(options: options)
+        _ = state.focus(actionID: actionID, options: options)
+        claudeApprovalInteractionState = state
+    }
+
+    private func moveClaudeApprovalFocusUp() {
+        let options = currentApprovalOptions
+        var state = claudeApprovalInteractionState ?? ClaudeApprovalInteractionState(options: options)
+        _ = state.moveUp(options: options)
+        claudeApprovalInteractionState = state
+    }
+
+    private func moveClaudeApprovalFocusDown() {
+        let options = currentApprovalOptions
+        var state = claudeApprovalInteractionState ?? ClaudeApprovalInteractionState(options: options)
+        _ = state.moveDown(options: options)
+        claudeApprovalInteractionState = state
+    }
+
+    private func submitFocusedClaudeApproval() {
+        let options = currentApprovalOptions
+        var state = claudeApprovalInteractionState ?? ClaudeApprovalInteractionState(options: options)
+        state.sync(options: options)
+        claudeApprovalInteractionState = state
+
+        guard let action = state.focusedAction(in: options) else {
+            return
+        }
+
+        handleApprovalAction(action)
     }
 
     private var approvalFeedbackInput: some View {

@@ -158,6 +158,10 @@ public struct HookInstaller {
             if hasManaged, managedEventNames.contains(eventName) == false {
                 return true
             }
+            if eventName == "PermissionRequest",
+               entries.contains(where: { managedEntryContainsTimeout($0, bridgeScript: bridgeScript) }) {
+                return true
+            }
         }
 
         for eventName in managedEventNames {
@@ -219,7 +223,6 @@ public struct HookInstaller {
                         [
                             "type": "command",
                             "command": command,
-                            "timeout": 30,
                         ],
                     ],
                 ],
@@ -314,6 +317,22 @@ public struct HookInstaller {
                 return false
             }
             return command.contains(commandNeedle)
+        }
+    }
+
+    private func managedEntryContainsTimeout(_ entry: [String: Any], bridgeScript: String?) -> Bool {
+        guard let hooks = entry["hooks"] as? [[String: Any]] else {
+            return false
+        }
+
+        let commandNeedle = bridgeScript?.isEmpty == false ? bridgeScript! : "notch-bridge.py"
+        return hooks.contains { hook in
+            guard let command = hook["command"] as? String,
+                  command.contains(commandNeedle)
+            else {
+                return false
+            }
+            return hook["timeout"] != nil
         }
     }
 }
