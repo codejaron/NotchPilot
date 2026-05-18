@@ -114,8 +114,6 @@ public struct SettingsView: View {
                     CodexPluginSettingsView()
                 case .systemMonitor:
                     SystemMonitorPluginSettingsView()
-                case .notifications:
-                    NotificationsPluginSettingsView()
                 }
             }
         }

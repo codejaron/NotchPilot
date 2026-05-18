@@ -33,13 +33,11 @@ final class SneakPeekQueueTests: XCTestCase {
         XCTAssertEqual(queue.current?.id, next.id)
     }
 
-    func testPriorityRanksApprovalsNotificationsAIActivityAndMediaPlayback() {
+    func testPriorityRanksApprovalsAIActivityAndMediaPlayback() {
         // Lower priority value = served earlier in the queue.
         XCTAssertEqual(SneakPeekRequestPriority.ai, SneakPeekRequestPriority.aiApproval)
-        XCTAssertLessThan(SneakPeekRequestPriority.aiApproval, SneakPeekRequestPriority.notifications)
-        XCTAssertLessThan(SneakPeekRequestPriority.notifications, SneakPeekRequestPriority.aiActivity)
+        XCTAssertLessThan(SneakPeekRequestPriority.aiApproval, SneakPeekRequestPriority.aiActivity)
         XCTAssertLessThan(SneakPeekRequestPriority.aiActivity, SneakPeekRequestPriority.mediaPlayback)
-        XCTAssertEqual(SneakPeekRequestPriority.notifications, 500)
     }
 
     func testAIPriorityResolvesApprovalAndActivityKindsSeparately() {

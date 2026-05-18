@@ -20,13 +20,11 @@ final class AIPluginGroupTests: XCTestCase {
         let plugins: [any NotchPlugin] = [
             SystemMonitorPlugin(),
             ClaudePlugin(),
-            NotificationsPlugin(),
             CodexPlugin(),
         ]
         let nonAIPlugins = AIPluginGroup.nonAIPlugins(from: plugins)
-        XCTAssertEqual(nonAIPlugins.count, 2)
+        XCTAssertEqual(nonAIPlugins.count, 1)
         XCTAssertTrue(nonAIPlugins.contains(where: { $0.id == "system-monitor" }))
-        XCTAssertTrue(nonAIPlugins.contains(where: { $0.id == "notifications" }))
     }
 
     func testResolvedActivePluginIDMapsLegacyIDsToVirtualTabID() {
@@ -38,7 +36,6 @@ final class AIPluginGroupTests: XCTestCase {
     func testResolvedActivePluginIDPassesThroughOtherIDs() {
         XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("system-monitor"), "system-monitor")
         XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("media-playback"), "media-playback")
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("notifications"), "notifications")
     }
 
     func testResolvedActivePluginIDPassesThroughNil() {

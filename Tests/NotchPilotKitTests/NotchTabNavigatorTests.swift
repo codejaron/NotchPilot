@@ -102,11 +102,10 @@ final class NotchTabNavigatorTests: XCTestCase {
             pluginTabs: [
                 NotchTabNavigator.Tab(id: "system-monitor", title: "System", dockOrder: 120),
                 NotchTabNavigator.Tab(id: "media-playback", title: "Media", dockOrder: 80),
-                NotchTabNavigator.Tab(id: "notifications", title: "Notifications", dockOrder: 90),
             ],
             aiTabDockOrder: 100
         )
 
-        XCTAssertEqual(tabIDs, ["media-playback", "notifications", "ai", "system-monitor"])
+        XCTAssertEqual(tabIDs, ["media-playback", "ai", "system-monitor"])
     }
 }

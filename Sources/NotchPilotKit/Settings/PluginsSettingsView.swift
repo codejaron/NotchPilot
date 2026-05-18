@@ -2,7 +2,6 @@ import SwiftUI
 
 public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifiable {
     case systemMonitor = "system-monitor"
-    case notifications = "notifications"
     case claude
     case devin
     case codex
@@ -26,8 +25,6 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return "Codex"
         case .systemMonitor:
             return AppStrings.text(.system, language: language)
-        case .notifications:
-            return AppStrings.text(.notifications, language: language)
         }
     }
 
@@ -43,8 +40,6 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return "terminal"
         case .systemMonitor:
             return "cpu"
-        case .notifications:
-            return "bell.badge"
         }
     }
 
@@ -56,7 +51,7 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return .devin
         case .codex:
             return .codex
-        case .media, .systemMonitor, .notifications:
+        case .media, .systemMonitor:
             return nil
         }
     }
@@ -77,8 +72,6 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return AppStrings.text(.connectionStatus, language: language)
         case .systemMonitor:
             return language == .zhHans ? "系统监控" : "System Monitor"
-        case .notifications:
-            return language == .zhHans ? "通知" : "Notifications"
         }
     }
 }
@@ -762,170 +755,5 @@ private enum SystemMonitorSneakSide {
 private extension SystemMonitorMetric {
     func settingsTitle(language: AppLanguage) -> String {
         AppStrings.systemMonitorMetricTitle(self, language: language)
-    }
-}
-
-struct NotificationsPluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
-
-    var body: some View {
-        SettingsPage(title: AppStrings.text(.notifications, language: store.interfaceLanguage)) {
-            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
-                duplicateBannerNotice
-                SettingsRowDivider()
-                SettingsToggleRow(
-                    title: AppStrings.text(.enableNotificationsPlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableNotificationsPluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.notificationsEnabled
-                )
-                SettingsRowDivider()
-                SettingsToggleRow(
-                    title: AppStrings.text(.notificationsShowSneakPreview, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.notificationsShowSneakPreviewDetail, language: store.interfaceLanguage),
-                    isEnabled: store.notificationsEnabled,
-                    isOn: $store.notificationsSneakPreviewEnabled
-                )
-            }
-
-            SettingsGroupSection(title: AppStrings.text(.notificationsAllowedApps, language: store.interfaceLanguage)) {
-                if store.notificationsKnownAppsCache.isEmpty {
-                    SettingsRow(
-                        title: AppStrings.text(.notificationsAllowedAppsEmpty, language: store.interfaceLanguage),
-                        detail: nil,
-                        isEnabled: store.notificationsEnabled
-                    ) { EmptyView() }
-                } else {
-                    let sortedApps = store.notificationsKnownAppsCache.values.sorted {
-                        $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-                    }
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(sortedApps.enumerated()), id: \.element.bundleIdentifier) { index, app in
-                                if index > 0 { SettingsRowDivider() }
-                                NotificationsAllowedAppRow(
-                                    app: app,
-                                    isEnabled: store.notificationsEnabled,
-                                    isOn: bindingForWhitelist(bundleID: app.bundleIdentifier)
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 320)
-                }
-            }
-
-            SettingsGroupSection(title: AppStrings.text(.preview, language: store.interfaceLanguage)) {
-                SettingsToggleRow(
-                    title: AppStrings.text(.notificationsRespectDND, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.notificationsRespectDNDDetail, language: store.interfaceLanguage),
-                    isEnabled: store.notificationsEnabled,
-                    isOn: $store.notificationsRespectSystemDND
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title: AppStrings.text(.notificationsContentPrivacy, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.notificationsContentPrivacyDetail, language: store.interfaceLanguage),
-                    isEnabled: store.notificationsEnabled
-                ) {
-                    Picker("", selection: $store.notificationsContentPrivacy) {
-                        Text(AppStrings.text(.notificationsContentPrivacyFull, language: store.interfaceLanguage)).tag(NotificationContentPrivacy.full)
-                        Text(AppStrings.text(.notificationsContentPrivacySenderOnly, language: store.interfaceLanguage)).tag(NotificationContentPrivacy.senderOnly)
-                        Text(AppStrings.text(.notificationsContentPrivacyHidden, language: store.interfaceLanguage)).tag(NotificationContentPrivacy.hidden)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 180)
-                    .disabled(!store.notificationsEnabled)
-                }
-                SettingsRowDivider()
-                SettingsRow(
-                    title: AppStrings.text(.notificationsHistoryLimit, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.notificationsHistoryLimitDetail, language: store.interfaceLanguage),
-                    isEnabled: store.notificationsEnabled
-                ) {
-                    Stepper("\(store.notificationsHistoryLimit)", value: $store.notificationsHistoryLimit, in: 20...500, step: 20)
-                        .frame(width: 130)
-                        .disabled(!store.notificationsEnabled)
-                }
-                SettingsRowDivider()
-                SettingsToggleRow(
-                    title: AppStrings.text(.notificationsLaunchAppOnClick, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.notificationsLaunchAppOnClickDetail, language: store.interfaceLanguage),
-                    isEnabled: store.notificationsEnabled,
-                    isOn: $store.notificationsOpenOnClick
-                )
-            }
-        }
-    }
-
-    private var duplicateBannerNotice: some View {
-        Text(AppStrings.text(.notificationsDuplicateBannerInfo, language: store.interfaceLanguage))
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.06))
-            )
-            .padding(.bottom, 4)
-    }
-
-    private func bindingForWhitelist(bundleID: String) -> Binding<Bool> {
-        let normalizedBundleID = bundleID.lowercased()
-        return Binding(
-            get: {
-                store.notificationsWhitelistedBundleIDs.contains {
-                    $0.lowercased() == normalizedBundleID
-                }
-            },
-            set: { newValue in
-                var current = Set(store.notificationsWhitelistedBundleIDs.filter {
-                    $0.lowercased() != normalizedBundleID
-                })
-                if newValue { current.insert(normalizedBundleID) }
-                store.notificationsWhitelistedBundleIDs = current
-            }
-        )
-    }
-}
-
-private struct NotificationsAllowedAppRow: View {
-    let app: KnownApp
-    let isEnabled: Bool
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            NotificationAppIconView(
-                bundleIdentifier: app.bundleIdentifier,
-                accentColor: NotchPilotTheme.notifications,
-                size: 28
-            )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(app.displayName)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isEnabled ? .primary : .secondary)
-                    .lineLimit(1)
-
-                Text(app.bundleIdentifier)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer(minLength: 16)
-
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .disabled(!isEnabled)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .opacity(isEnabled ? 1 : 0.42)
     }
 }

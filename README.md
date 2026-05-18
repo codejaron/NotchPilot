@@ -19,7 +19,6 @@
 ## ✨ Features
 
 - 🪟 **Expandable notch panel** — compact previews, left/right view switching, and notch padding customization.
-- 🔔 **Notification center** — system and app notifications displayed directly under the notch.
 - 🐙 **Claude Code & Devin** — handle CLI tool approvals (approve/deny/remember rules) from the notch without switching back to the terminal.
 - 🤖 **Codex Desktop integration** — live session monitoring, current terminal command display, and in-notch approval prompts.
 - 🎵 **Media & Desktop lyrics** — notch playback controls and a floating lyrics window with online search and time offsets.
