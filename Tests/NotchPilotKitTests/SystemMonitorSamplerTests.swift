@@ -225,6 +225,11 @@ final class SystemMonitorSamplerTests: XCTestCase {
         )
     }
 
+    func testUInt64AdditionSaturatesOnOverflow() {
+        XCTAssertEqual(SystemMonitorSampleMath.addClamped(UInt64.max - 1, 10), UInt64.max)
+        XCTAssertEqual(SystemMonitorSampleMath.addClamped(1_000 as UInt64, 2_500), 3_500)
+    }
+
     func testProcessActivitiesUseProcCounterDeltas() {
         let previous = [
             pid_t(42): SystemMonitorProcessCounter(

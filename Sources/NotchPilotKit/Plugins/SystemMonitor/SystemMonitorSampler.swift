@@ -360,6 +360,11 @@ enum SystemMonitorSampleMath {
         return lhs > Int64.max - rhs ? Int64.max : lhs + rhs
     }
 
+    static func addClamped(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
+        let result = lhs.addingReportingOverflow(rhs)
+        return result.overflow ? UInt64.max : result.partialValue
+    }
+
     private static func clamp(_ value: Double) -> Double {
         min(1, max(0, value))
     }
@@ -760,9 +765,15 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         }
 
         return ProcessRusage(
-            cpuTimeNanoseconds: usage.ri_user_time + usage.ri_system_time,
+            cpuTimeNanoseconds: SystemMonitorSampleMath.addClamped(
+                usage.ri_user_time,
+                usage.ri_system_time
+            ),
             physicalFootprintBytes: usage.ri_phys_footprint,
-            diskBytes: usage.ri_diskio_bytesread + usage.ri_diskio_byteswritten
+            diskBytes: SystemMonitorSampleMath.addClamped(
+                usage.ri_diskio_bytesread,
+                usage.ri_diskio_byteswritten
+            )
         )
     }
 
