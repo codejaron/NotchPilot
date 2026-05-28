@@ -47,21 +47,21 @@ struct SystemMonitorStaticSampler: SystemMonitorSampling {
 }
 
 struct SystemMonitorDefaultSampler: SystemMonitorSampling {
-    private let collector: @Sendable () -> SystemMonitorSnapshot?
+    private let collector: @Sendable (SystemMonitorSamplingDemand) -> SystemMonitorSnapshot?
     private let fallback: any SystemMonitorSampling
 
     init(fallback: any SystemMonitorSampling = SystemMonitorUnavailableSampler()) {
         let bestEffortSampler = SystemMonitorBestEffortSampler()
         self.init(
-            collector: {
-                bestEffortSampler.snapshot()
+            collector: { demand in
+                bestEffortSampler.snapshot(demand: demand)
             },
             fallback: fallback
         )
     }
 
     init(
-        collector: @escaping @Sendable () -> SystemMonitorSnapshot?,
+        collector: @escaping @Sendable (SystemMonitorSamplingDemand) -> SystemMonitorSnapshot?,
         fallback: any SystemMonitorSampling = SystemMonitorUnavailableSampler()
     ) {
         self.collector = collector
@@ -69,7 +69,11 @@ struct SystemMonitorDefaultSampler: SystemMonitorSampling {
     }
 
     func snapshot() -> SystemMonitorSnapshot {
-        collector() ?? fallback.snapshot()
+        snapshot(demand: .basic)
+    }
+
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
+        collector(demand) ?? fallback.snapshot(demand: demand)
     }
 }
 
