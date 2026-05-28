@@ -139,6 +139,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
                     snapshot: snapshot,
                     configuration: effectiveConfiguration,
                     activeAlerts: activeAlerts,
+                    thresholds: settingsStore.systemMonitorAlertThresholds,
                     context: context,
                     sideFrameWidth: sideFrameWidth,
                     totalWidth: width
@@ -328,7 +329,11 @@ enum SystemMonitorSneakComposer {
             return base
 
         case .pinnedReactive:
-            let reactiveOrder = orderedReactiveMetrics(base: base, activeAlerts: activeAlerts)
+            let reactiveOrder = orderedReactiveMetrics(
+                base: base,
+                activeAlerts: activeAlerts,
+                excluding: Set(base.pinnedMetrics)
+            )
             guard reactiveOrder.isEmpty == false else {
                 return base
             }
@@ -345,7 +350,11 @@ enum SystemMonitorSneakComposer {
             )
 
         case .ambient:
-            let reactiveOrder = orderedReactiveMetrics(base: base, activeAlerts: activeAlerts)
+            let reactiveOrder = orderedReactiveMetrics(
+                base: base,
+                activeAlerts: activeAlerts,
+                excluding: []
+            )
             guard reactiveOrder.isEmpty == false else {
                 return SystemMonitorSneakConfiguration(
                     mode: base.mode,
@@ -369,10 +378,12 @@ enum SystemMonitorSneakComposer {
 
     private static func orderedReactiveMetrics(
         base: SystemMonitorSneakConfiguration,
-        activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert]
+        activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert],
+        excluding excludedMetrics: Set<SystemMonitorMetric>
     ) -> [SystemMonitorMetric] {
         let allowed = base.reactiveMetrics
         return allowed.compactMap { metric -> (SystemMonitorMetric, SystemMonitorAlertSeverity, Date)? in
+            guard excludedMetrics.contains(metric) == false else { return nil }
             guard let alert = activeAlerts[metric] else { return nil }
             return (metric, alert.severity, alert.firedAt)
         }

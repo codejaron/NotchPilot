@@ -42,11 +42,11 @@ final class SystemMonitorModelsTests: XCTestCase {
         XCTAssertEqual(configuration.rightMetrics, [.network])
         XCTAssertEqual(
             configuration.reactiveMetrics,
-            [.memory, .temperature, .battery, .disk]
+            SystemMonitorMetric.allCases
         )
     }
 
-    func testReactiveMetricsExcludePinnedMetricsAutomatically() {
+    func testReactiveMetricsCanIncludePinnedMetricsForAlertColoring() {
         let configuration = SystemMonitorSneakConfiguration(
             mode: .pinnedReactive,
             left: [.cpu, .memory],
@@ -54,7 +54,171 @@ final class SystemMonitorModelsTests: XCTestCase {
             reactive: [.cpu, .memory, .temperature, .battery]
         )
 
-        XCTAssertEqual(configuration.reactiveMetrics, [.temperature, .battery])
+        XCTAssertEqual(configuration.reactiveMetrics, [.cpu, .memory, .temperature, .battery])
+    }
+
+    @MainActor
+    func testAlertThresholdSettingsStayActiveForAlwaysOnSneakMode() {
+        XCTAssertTrue(
+            SystemMonitorSettingsAvailability.alertThresholdsActive(
+                systemMonitorEnabled: true,
+                sneakPreviewEnabled: true
+            )
+        )
+        XCTAssertTrue(
+            SystemMonitorSettingsAvailability.reactiveMetricsActive(
+                systemMonitorEnabled: true,
+                sneakPreviewEnabled: true,
+                mode: .alwaysOn
+            )
+        )
+    }
+
+    @MainActor
+    func testPinnedReactiveMetricToggleStaysEditableAndReflectsStoredValue() {
+        XCTAssertTrue(
+            SystemMonitorSettingsAvailability.reactiveMetricToggleActive(
+                systemMonitorEnabled: true,
+                sneakPreviewEnabled: true,
+                mode: .pinnedReactive,
+                isMetricPinned: true
+            )
+        )
+        XCTAssertFalse(
+            SystemMonitorSettingsAvailability.reactiveMetricToggleValue(
+                storedValue: false,
+                mode: .pinnedReactive,
+                isMetricPinned: true
+            )
+        )
+        XCTAssertTrue(
+            SystemMonitorSettingsAvailability.reactiveMetricToggleValue(
+                storedValue: true,
+                mode: .pinnedReactive,
+                isMetricPinned: true
+            )
+        )
+    }
+
+    @MainActor
+    func testAlwaysOnReactiveMetricToggleOnlyEnablesPinnedMetrics() {
+        XCTAssertTrue(
+            SystemMonitorSettingsAvailability.reactiveMetricToggleActive(
+                systemMonitorEnabled: true,
+                sneakPreviewEnabled: true,
+                mode: .alwaysOn,
+                isMetricPinned: true
+            )
+        )
+        XCTAssertFalse(
+            SystemMonitorSettingsAvailability.reactiveMetricToggleActive(
+                systemMonitorEnabled: true,
+                sneakPreviewEnabled: true,
+                mode: .alwaysOn,
+                isMetricPinned: false
+            )
+        )
+    }
+
+    func testPinnedReactivePinnedMetricUsesAlertColorOnlyWhenReactive() {
+        let alert = SystemMonitorActiveAlert(
+            metric: .cpu,
+            severity: .warn,
+            value: 92,
+            firedAt: Date(timeIntervalSince1970: 0),
+            triggeringRuleID: "cpu.warn"
+        )
+        let nonReactiveConfiguration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.memory]
+        )
+        let reactiveConfiguration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.cpu, .memory]
+        )
+
+        XCTAssertNil(
+            SystemMonitorSneakAlertResolver.alert(
+                for: .cpu,
+                configuration: nonReactiveConfiguration,
+                activeAlerts: [.cpu: alert]
+            )
+        )
+        XCTAssertEqual(
+            SystemMonitorSneakAlertResolver.alert(
+                for: .cpu,
+                configuration: reactiveConfiguration,
+                activeAlerts: [.cpu: alert]
+            ),
+            alert
+        )
+    }
+
+    func testPinnedReactivePinnedMetricUsesThresholdColorImmediatelyWhenReactive() {
+        let configuration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.cpu]
+        )
+        let snapshot = SystemMonitorSnapshot(
+            cpuUsage: 0.6,
+            memoryPressure: 0.2,
+            memoryUsage: 0.2,
+            downloadBytesPerSecond: 0,
+            uploadBytesPerSecond: 0,
+            temperatureCelsius: 45,
+            diskFreeBytes: 100_000_000_000,
+            batteryPercent: 0.9,
+            blocks: SystemMonitorSnapshot.unavailable.blocks
+        )
+        let thresholds = SystemMonitorAlertThresholds.default.setting(50, for: .cpu)
+
+        let alert = SystemMonitorSneakAlertResolver.alert(
+            for: .cpu,
+            configuration: configuration,
+            activeAlerts: [:],
+            snapshot: snapshot,
+            thresholds: thresholds
+        )
+
+        XCTAssertEqual(alert?.severity, .warn)
+        XCTAssertEqual(alert?.triggeringRuleID, "cpu.warn")
+    }
+
+    func testPinnedReactivePinnedMetricIgnoresThresholdColorWhenReactiveOff() {
+        let configuration = SystemMonitorSneakConfiguration(
+            mode: .pinnedReactive,
+            left: [.cpu],
+            right: [.network],
+            reactive: [.memory]
+        )
+        let snapshot = SystemMonitorSnapshot(
+            cpuUsage: 0.6,
+            memoryPressure: 0.2,
+            memoryUsage: 0.2,
+            downloadBytesPerSecond: 0,
+            uploadBytesPerSecond: 0,
+            temperatureCelsius: 45,
+            diskFreeBytes: 100_000_000_000,
+            batteryPercent: 0.9,
+            blocks: SystemMonitorSnapshot.unavailable.blocks
+        )
+        let thresholds = SystemMonitorAlertThresholds.default.setting(50, for: .cpu)
+
+        XCTAssertNil(
+            SystemMonitorSneakAlertResolver.alert(
+                for: .cpu,
+                configuration: configuration,
+                activeAlerts: [:],
+                snapshot: snapshot,
+                thresholds: thresholds
+            )
+        )
     }
 
     // MARK: - Slot editor regression coverage

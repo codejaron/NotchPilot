@@ -528,7 +528,12 @@ struct SystemMonitorPluginSettingsView: View {
                     }
                     SettingsToggleRow(
                         title: metric.settingsTitle(language: store.interfaceLanguage),
-                        isEnabled: areReactiveMetricsActive && isMetricPinned(metric) == false,
+                        isEnabled: SystemMonitorSettingsAvailability.reactiveMetricToggleActive(
+                            systemMonitorEnabled: store.systemMonitorEnabled,
+                            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled,
+                            mode: store.systemMonitorSneakConfiguration.mode,
+                            isMetricPinned: isMetricPinned(metric)
+                        ),
                         isOn: reactiveBinding(for: metric)
                     )
                 }
@@ -560,7 +565,7 @@ struct SystemMonitorPluginSettingsView: View {
         SettingsRow(
             title: thresholdRowTitle(for: metric),
             detail: detail,
-            isEnabled: areReactiveMetricsActive
+            isEnabled: areAlertThresholdsActive
         ) {
             HStack(spacing: 10) {
                 Text(AppStrings.systemMonitorThresholdValueText(metric: metric, value: value))
@@ -575,7 +580,7 @@ struct SystemMonitorPluginSettingsView: View {
                     step: SystemMonitorAlertThresholds.step(for: metric)
                 )
                 .labelsHidden()
-                .disabled(areReactiveMetricsActive == false)
+                .disabled(areAlertThresholdsActive == false)
             }
         }
     }
@@ -608,15 +613,18 @@ struct SystemMonitorPluginSettingsView: View {
     }
 
     private var arePinnedSlotsActive: Bool {
-        store.systemMonitorEnabled
-            && store.systemMonitorSneakPreviewEnabled
-            && store.systemMonitorSneakConfiguration.mode != .ambient
+        SystemMonitorSettingsAvailability.pinnedSlotsActive(
+            systemMonitorEnabled: store.systemMonitorEnabled,
+            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled,
+            mode: store.systemMonitorSneakConfiguration.mode
+        )
     }
 
-    private var areReactiveMetricsActive: Bool {
-        store.systemMonitorEnabled
-            && store.systemMonitorSneakPreviewEnabled
-            && store.systemMonitorSneakConfiguration.mode != .alwaysOn
+    private var areAlertThresholdsActive: Bool {
+        SystemMonitorSettingsAvailability.alertThresholdsActive(
+            systemMonitorEnabled: store.systemMonitorEnabled,
+            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled
+        )
     }
 
     private var modeBinding: Binding<SystemMonitorSneakMode> {
@@ -724,7 +732,12 @@ struct SystemMonitorPluginSettingsView: View {
     private func reactiveBinding(for metric: SystemMonitorMetric) -> Binding<Bool> {
         Binding(
             get: {
-                store.systemMonitorSneakConfiguration.reactiveMetrics.contains(metric)
+                let configuration = store.systemMonitorSneakConfiguration
+                return SystemMonitorSettingsAvailability.reactiveMetricToggleValue(
+                    storedValue: configuration.reactiveMetrics.contains(metric),
+                    mode: configuration.mode,
+                    isMetricPinned: isMetricPinned(metric)
+                )
             },
             set: { isOn in
                 let configuration = store.systemMonitorSneakConfiguration
@@ -750,6 +763,58 @@ struct SystemMonitorPluginSettingsView: View {
 private enum SystemMonitorSneakSide {
     case left
     case right
+}
+
+enum SystemMonitorSettingsAvailability {
+    static func pinnedSlotsActive(
+        systemMonitorEnabled: Bool,
+        sneakPreviewEnabled: Bool,
+        mode: SystemMonitorSneakMode
+    ) -> Bool {
+        systemMonitorEnabled
+            && sneakPreviewEnabled
+            && mode != .ambient
+    }
+
+    static func reactiveMetricsActive(
+        systemMonitorEnabled: Bool,
+        sneakPreviewEnabled: Bool,
+        mode: SystemMonitorSneakMode
+    ) -> Bool {
+        systemMonitorEnabled && sneakPreviewEnabled
+    }
+
+    static func reactiveMetricToggleActive(
+        systemMonitorEnabled: Bool,
+        sneakPreviewEnabled: Bool,
+        mode: SystemMonitorSneakMode,
+        isMetricPinned: Bool
+    ) -> Bool {
+        guard systemMonitorEnabled && sneakPreviewEnabled else {
+            return false
+        }
+
+        if mode == .alwaysOn {
+            return isMetricPinned
+        }
+
+        return true
+    }
+
+    static func reactiveMetricToggleValue(
+        storedValue: Bool,
+        mode: SystemMonitorSneakMode,
+        isMetricPinned: Bool
+    ) -> Bool {
+        return storedValue
+    }
+
+    static func alertThresholdsActive(
+        systemMonitorEnabled: Bool,
+        sneakPreviewEnabled: Bool
+    ) -> Bool {
+        systemMonitorEnabled && sneakPreviewEnabled
+    }
 }
 
 private extension SystemMonitorMetric {

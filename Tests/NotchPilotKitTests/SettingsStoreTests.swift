@@ -136,7 +136,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.systemMonitorSneakConfiguration.rightMetrics, [.network])
         XCTAssertEqual(
             store.systemMonitorSneakConfiguration.reactiveMetrics,
-            [.memory, .temperature, .battery, .disk]
+            SystemMonitorMetric.allCases
         )
 
         store.systemMonitorSneakPreviewEnabled = false

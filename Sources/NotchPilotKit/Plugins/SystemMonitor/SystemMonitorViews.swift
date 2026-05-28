@@ -104,6 +104,7 @@ struct SystemMonitorSneakPreviewView: View {
     let snapshot: SystemMonitorSnapshot
     let configuration: SystemMonitorSneakConfiguration
     let activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert]
+    let thresholds: SystemMonitorAlertThresholds
     let context: NotchContext
     let sideFrameWidth: CGFloat
     let totalWidth: CGFloat
@@ -112,6 +113,7 @@ struct SystemMonitorSneakPreviewView: View {
         snapshot: SystemMonitorSnapshot,
         configuration: SystemMonitorSneakConfiguration,
         activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert] = [:],
+        thresholds: SystemMonitorAlertThresholds = .default,
         context: NotchContext,
         sideFrameWidth: CGFloat,
         totalWidth: CGFloat
@@ -119,6 +121,7 @@ struct SystemMonitorSneakPreviewView: View {
         self.snapshot = snapshot
         self.configuration = configuration
         self.activeAlerts = activeAlerts
+        self.thresholds = thresholds
         self.context = context
         self.sideFrameWidth = sideFrameWidth
         self.totalWidth = totalWidth
@@ -156,9 +159,75 @@ struct SystemMonitorSneakPreviewView: View {
         SystemMonitorCompactMetricView(
             metric: metric,
             snapshot: snapshot,
-            alert: activeAlerts[metric],
+            alert: SystemMonitorSneakAlertResolver.alert(
+                for: metric,
+                configuration: configuration,
+                activeAlerts: activeAlerts,
+                snapshot: snapshot,
+                thresholds: thresholds
+            ),
             language: store.interfaceLanguage
         )
+    }
+}
+
+enum SystemMonitorSneakAlertResolver {
+    static func alert(
+        for metric: SystemMonitorMetric,
+        configuration: SystemMonitorSneakConfiguration,
+        activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert]
+    ) -> SystemMonitorActiveAlert? {
+        guard let alert = activeAlerts[metric] else {
+            return nil
+        }
+
+        return configuration.reactiveMetrics.contains(metric) ? alert : nil
+    }
+
+    static func alert(
+        for metric: SystemMonitorMetric,
+        configuration: SystemMonitorSneakConfiguration,
+        activeAlerts: [SystemMonitorMetric: SystemMonitorActiveAlert],
+        snapshot: SystemMonitorSnapshot,
+        thresholds: SystemMonitorAlertThresholds
+    ) -> SystemMonitorActiveAlert? {
+        guard configuration.reactiveMetrics.contains(metric) else {
+            return nil
+        }
+
+        if let alert = activeAlerts[metric] {
+            return alert
+        }
+
+        guard configuration.pinnedMetrics.contains(metric) else {
+            return nil
+        }
+
+        return thresholdAlert(for: metric, snapshot: snapshot, thresholds: thresholds)
+    }
+
+    private static func thresholdAlert(
+        for metric: SystemMonitorMetric,
+        snapshot: SystemMonitorSnapshot,
+        thresholds: SystemMonitorAlertThresholds
+    ) -> SystemMonitorActiveAlert? {
+        let rules = SystemMonitorAlertRuleCatalog.rules(for: thresholds)
+        let alerts = rules.compactMap { rule -> SystemMonitorActiveAlert? in
+            guard rule.metric == metric else { return nil }
+            let value = SystemMonitorAlertEngine.metricValue(for: metric, snapshot: snapshot)
+            guard SystemMonitorAlertEngine.evaluate(rule: rule, value: value) else { return nil }
+            return SystemMonitorActiveAlert(
+                metric: metric,
+                severity: rule.severity,
+                value: value ?? rule.threshold,
+                firedAt: Date(timeIntervalSince1970: 0),
+                triggeringRuleID: rule.id
+            )
+        }
+
+        return alerts.max { lhs, rhs in
+            lhs.severity < rhs.severity
+        }
     }
 }
 
@@ -214,7 +283,7 @@ private struct SystemMonitorCompactMetricView: View {
         HStack(spacing: 4) {
             Text(metric.compactLabel(language: language))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                .foregroundStyle(labelColor)
 
             Text(metric.compactValue(in: snapshot))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -240,7 +309,7 @@ private struct SystemMonitorCompactMetricView: View {
                     HStack(spacing: SystemMonitorSneakPreviewLayout.networkArrowValueSpacing) {
                         Image(systemName: row.symbolSystemName)
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+                            .foregroundStyle(labelColor)
                             .frame(width: arrowWidth, alignment: .trailing)
 
                         Text(row.value)
@@ -279,10 +348,11 @@ private struct SystemMonitorCompactMetricView: View {
     // MARK: - Severity-driven styling
 
     private var valueColor: Color {
-        guard let alert else {
-            return NotchPilotTheme.islandTextPrimary
-        }
-        return SystemMonitorAlertVisuals.color(for: alert.severity)
+        SystemMonitorSneakMetricStyle.valueColor(for: alert)
+    }
+
+    private var labelColor: Color {
+        SystemMonitorSneakMetricStyle.labelColor(for: alert)
     }
 
     private var criticalGlowColor: Color {
@@ -372,6 +442,24 @@ enum SystemMonitorAlertVisuals {
         case .critical:
             return Color(red: 1.00, green: 0.40, blue: 0.36)    // red
         }
+    }
+}
+
+enum SystemMonitorSneakMetricStyle {
+    static let alertLabelOpacity = 0.82
+
+    static func valueColor(for alert: SystemMonitorActiveAlert?) -> Color {
+        guard let alert else {
+            return NotchPilotTheme.islandTextPrimary
+        }
+        return SystemMonitorAlertVisuals.color(for: alert.severity)
+    }
+
+    static func labelColor(for alert: SystemMonitorActiveAlert?) -> Color {
+        guard let alert else {
+            return NotchPilotTheme.islandTextSecondary
+        }
+        return SystemMonitorAlertVisuals.color(for: alert.severity).opacity(alertLabelOpacity)
     }
 }
 

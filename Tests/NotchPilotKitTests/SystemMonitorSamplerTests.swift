@@ -23,7 +23,7 @@ final class SystemMonitorSamplerTests: XCTestCase {
             blocks: []
         )
         let sampler = SystemMonitorDefaultSampler(
-            collector: { nil },
+            collector: { _ in nil },
             fallback: SystemMonitorStaticSampler(snapshot: fallbackSnapshot)
         )
 
@@ -44,7 +44,7 @@ final class SystemMonitorSamplerTests: XCTestCase {
             ]
         )
         let sampler = SystemMonitorDefaultSampler(
-            collector: { collectedSnapshot },
+            collector: { _ in collectedSnapshot },
             fallback: SystemMonitorUnavailableSampler()
         )
 

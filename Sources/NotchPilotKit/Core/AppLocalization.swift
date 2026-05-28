@@ -235,13 +235,13 @@ enum AppStrings {
 
         switch (language, isLowTrigger) {
         case (.zhHans, true):
-            return "\(metricName)低于 \(valueText) 时进入 sneak"
+            return "\(metricName)低于 \(valueText) 时触发变色或冒出"
         case (.zhHans, false):
-            return "\(metricName)超过 \(valueText) 时进入 sneak"
+            return "\(metricName)超过 \(valueText) 时触发变色或冒出"
         case (.english, true):
-            return "Surfaces when \(metricName.lowercased()) drops below \(valueText)"
+            return "Tints or pops out when \(metricName.lowercased()) drops below \(valueText)"
         case (.english, false):
-            return "Surfaces when \(metricName.lowercased()) exceeds \(valueText)"
+            return "Tints or pops out when \(metricName.lowercased()) exceeds \(valueText)"
         }
     }
 
@@ -608,11 +608,11 @@ enum AppStrings {
         case .sneakPreviewMode:
             return "预览模式"
         case .sneakPreviewModeDetail:
-            return "决定刘海闭合时何时显示系统监控数据。"
+            return "仅常驻不会加入额外指标；常驻 + 异常冒出会把非常驻异常指标临时放进 sneak。"
         case .sneakPreviewModeAlwaysOn:
-            return "始终显示"
+            return "仅常驻"
         case .sneakPreviewModePinnedReactive:
-            return "常驻 + 异常扩展"
+            return "常驻 + 异常冒出"
         case .sneakPreviewModeAmbient:
             return "仅异常时显示"
         case .pinnedSlots:
@@ -622,13 +622,13 @@ enum AppStrings {
         case .reactiveMetrics:
             return "反应式指标"
         case .reactiveMetricsDetail:
-            return "勾选的指标在阈值越界时自动出现在 sneak 中。"
+            return "勾选常驻指标会在阈值越界时原地变色；勾选非常驻指标会在异常时冒出。"
         case .reactiveMetricsFooter:
-            return "已选为常驻槽位的指标会自动从此列表中排除。"
+            return "常驻指标不会重复冒出，只受这里的开关控制是否变色。"
         case .reactiveThresholds:
             return "反应阈值"
         case .reactiveThresholdsFooter:
-            return "突破阈值后，对应指标会临时插入到 sneak 中；按需调高/调低敏感度。"
+            return "阈值只决定什么时候触发异常；是否变色或冒出由反应式指标开关决定。"
         case .cpuThresholdTitle:
             return "CPU 触发线"
         case .memoryThresholdTitle:
@@ -869,11 +869,11 @@ enum AppStrings {
         case .sneakPreviewMode:
             return "Preview Mode"
         case .sneakPreviewModeDetail:
-            return "Decide when the system monitor sneak appears while the notch is closed."
+            return "Pinned Only never adds extra metrics; Pinned + Alert Popout temporarily shows unpinned alerting metrics."
         case .sneakPreviewModeAlwaysOn:
-            return "Always On"
+            return "Pinned Only"
         case .sneakPreviewModePinnedReactive:
-            return "Pinned + Reactive"
+            return "Pinned + Alert Popout"
         case .sneakPreviewModeAmbient:
             return "Only on Alert"
         case .pinnedSlots:
@@ -883,13 +883,13 @@ enum AppStrings {
         case .reactiveMetrics:
             return "Reactive Metrics"
         case .reactiveMetricsDetail:
-            return "Enabled metrics surface in the sneak only when their alert threshold fires."
+            return "Enabled pinned metrics change color in place; enabled unpinned metrics pop out on alert."
         case .reactiveMetricsFooter:
-            return "Metrics already pinned to a slot are removed from this list automatically."
+            return "Pinned metrics do not pop out again; this switch only controls whether they tint on alert."
         case .reactiveThresholds:
             return "Reactive Thresholds"
         case .reactiveThresholdsFooter:
-            return "When a metric crosses its threshold, it temporarily appears in the sneak. Tune the sensitivity per metric."
+            return "Thresholds only decide when an alert fires; tinting or popout is controlled by Reactive Metrics."
         case .cpuThresholdTitle:
             return "CPU Trigger"
         case .memoryThresholdTitle:

@@ -564,6 +564,46 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertEqual(composed.rightMetrics, [.network, .temperature])
     }
 
+    func testAlwaysOnPinnedMetricShowsAlertColorWithoutReissuingSneakRequest() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .alwaysOn,
+            left: [.memory],
+            right: [.network],
+            reactive: [.memory]
+        )
+        let plugin = SystemMonitorPlugin(
+            sampler: MutableSnapshotSampler(snapshot: Self.memoryHighSnapshot),
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        await plugin.refresh()
+
+        let sneakRequests: [SneakPeekRequest] = receivedEvents.compactMap {
+            if case let .sneakPeekRequested(request) = $0 { return request }
+            return nil
+        }
+        XCTAssertEqual(sneakRequests.count, 1, "Pinned alert state should recolor the existing sneak instead of popping a new one.")
+        XCTAssertEqual(plugin.activeAlerts[.memory]?.severity, .warn)
+        XCTAssertEqual(
+            SystemMonitorSneakMetricStyle.valueColor(for: plugin.activeAlerts[.memory]),
+            SystemMonitorAlertVisuals.color(for: .warn)
+        )
+        XCTAssertEqual(
+            SystemMonitorSneakMetricStyle.labelColor(for: plugin.activeAlerts[.memory]),
+            SystemMonitorAlertVisuals.color(for: .warn).opacity(SystemMonitorSneakMetricStyle.alertLabelOpacity)
+        )
+    }
+
     // MARK: - Fixtures
 
     private static let memoryWarnRule = SystemMonitorAlertRule(

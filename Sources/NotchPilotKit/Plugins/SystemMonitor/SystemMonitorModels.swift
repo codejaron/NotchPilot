@@ -43,15 +43,15 @@ struct SystemMonitorSneakConfiguration: Equatable, Sendable {
         mode: .pinnedReactive,
         left: [.cpu],
         right: [.network],
-        reactive: [.memory, .temperature, .battery, .disk]
+        reactive: SystemMonitorMetric.allCases
     )
 
     let mode: SystemMonitorSneakMode
     let leftMetrics: [SystemMonitorMetric]
     let rightMetrics: [SystemMonitorMetric]
-    /// Metrics allowed to surface in the sneak preview when their alert rule
-    /// fires. Pinned metrics are filtered out automatically because they are
-    /// already on screen.
+    /// Metrics allowed to react when their alert rule fires. Pinned metrics
+    /// change color in place; unpinned metrics may temporarily surface in the
+    /// sneak preview depending on the selected mode.
     let reactiveMetrics: [SystemMonitorMetric]
 
     init(
@@ -67,10 +67,8 @@ struct SystemMonitorSneakConfiguration: Equatable, Sendable {
         leftMetrics = trimmedLeft
         rightMetrics = trimmedRight
 
-        let pinned = Set(trimmedLeft + trimmedRight)
         var seen: Set<SystemMonitorMetric> = []
         reactiveMetrics = reactive.filter { metric in
-            guard pinned.contains(metric) == false else { return false }
             return seen.insert(metric).inserted
         }
     }
