@@ -191,7 +191,7 @@ final class ScreenSessionModelTests: XCTestCase {
         let frame = session.windowFrame
 
         XCTAssertEqual(frame.width, 720, accuracy: 0.1)
-        XCTAssertEqual(frame.height, 240, accuracy: 0.1)
+        XCTAssertEqual(frame.height, 240 + ScreenSessionModel.expandedShadowBottomInset, accuracy: 0.1)
         XCTAssertEqual(frame.midX, 1512 / 2, accuracy: 0.1)
         XCTAssertEqual(frame.maxY, 982, accuracy: 0.1)
 

@@ -1,6 +1,7 @@
 import Combine
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 @MainActor
 public final class ScreenSessionModel: ObservableObject {
@@ -15,6 +16,11 @@ public final class ScreenSessionModel: ObservableObject {
     private static let hoverCloseDelay: Duration = .milliseconds(100)
     private static let horizontalHoverPadding: CGFloat = 0
     private static let bottomHoverPadding: CGFloat = 0
+
+    static let openAnimation: Animation = .interactiveSpring(duration: 0.46, extraBounce: 0.20, blendDuration: 0.125)
+    static let closeAnimation: Animation = .interactiveSpring(duration: 0.42, extraBounce: 0.12, blendDuration: 0.125)
+    static let sneakAnimation: Animation = .interactiveSpring(duration: 0.42, extraBounce: 0.14, blendDuration: 0.125)
+    public static let expandedShadowBottomInset: CGFloat = 40
 
     @Published public private(set) var descriptor: ScreenDescriptor
     @Published public private(set) var notchState: NotchState = .idleClosed
@@ -81,7 +87,7 @@ public final class ScreenSessionModel: ObservableObject {
     public var windowSize: CGSize {
         CGSize(
             width: geometry.expandedSize.width,
-            height: geometry.expandedSize.height
+            height: geometry.expandedSize.height + Self.expandedShadowBottomInset
         )
     }
 
@@ -168,7 +174,9 @@ public final class ScreenSessionModel: ObservableObject {
             lastSelectedPluginID = activePluginID
         }
         openReason = reason
-        notchState = .open
+        withAnimation(Self.openAnimation) {
+            notchState = .open
+        }
         layoutDidChange?()
     }
 
@@ -176,7 +184,9 @@ public final class ScreenSessionModel: ObservableObject {
         hoverOpenTask?.cancel()
         hoverCloseTask?.cancel()
         openReason = nil
-        updatePresentationState()
+        withAnimation(Self.closeAnimation) {
+            updatePresentationState()
+        }
         layoutDidChange?()
     }
 
@@ -196,9 +206,17 @@ public final class ScreenSessionModel: ObservableObject {
 
     private func refreshCurrentSneakPeek() {
         autoDismissTask?.cancel()
-        currentSneakPeek = queue.requests.first(where: isVisibleSneakPeek)
+        let next = queue.requests.first(where: isVisibleSneakPeek)
+        let updatesPresentation = notchState != .open
 
-        if let request = currentSneakPeek, let delay = request.autoDismissAfter {
+        withAnimation(Self.sneakAnimation) {
+            currentSneakPeek = next
+            if updatesPresentation {
+                updatePresentationState()
+            }
+        }
+
+        if let request = next, let delay = request.autoDismissAfter {
             autoDismissTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(delay))
                 guard Task.isCancelled == false else {
@@ -210,8 +228,7 @@ public final class ScreenSessionModel: ObservableObject {
             autoDismissTask = nil
         }
 
-        if notchState != .open {
-            updatePresentationState()
+        if updatesPresentation {
             layoutDidChange?()
         }
     }

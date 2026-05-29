@@ -1,8 +1,10 @@
 import SwiftUI
 
 public struct NotchContentView: View {
-    private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
-    private let closeSpring = Animation.spring(response: 0.32, dampingFraction: 0.95, blendDuration: 0)
+    private static let expandedContentTransition: AnyTransition = .asymmetric(
+        insertion: .scale(scale: 0.5, anchor: .top).combined(with: .opacity),
+        removal: .scale(scale: 0.55, anchor: .top).combined(with: .opacity)
+    )
     private let closedCornerInsets = (top: CGFloat(6), bottom: CGFloat(14))
     private let openedCornerInsets = (top: CGFloat(19), bottom: CGFloat(24))
     private let hoverClosedExpansion = CGSize.zero
@@ -38,7 +40,7 @@ public struct NotchContentView: View {
 
                 if session.notchState == .open {
                     expandedBody(plugins: plugins, context: context)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                        .transition(Self.expandedContentTransition)
                 } else if session.notchState == .previewClosed,
                           let previewPlugin {
                     previewClosedBody(previewPlugin: previewPlugin, context: context)
@@ -50,15 +52,14 @@ public struct NotchContentView: View {
             }
             .frame(width: displaySize.width, height: displaySize.height)
             .clipShape(currentNotchShape, style: NotchRenderingStyle.edgeFillStyle)
+            .compositingGroup()
+            .shadow(color: .black.opacity(isOpen ? 0.34 : 0), radius: isOpen ? 8 : 0, y: isOpen ? 5 : 0)
+            .shadow(color: .black.opacity(isOpen ? 0.46 : 0), radius: isOpen ? 13 : 0, y: isOpen ? 9 : 0)
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
         }
         .frame(width: session.windowSize.width, height: session.windowSize.height, alignment: .top)
-        .animation(currentAnimation, value: session.notchState)
-        .animation(animationSpring, value: session.currentSneakPeek?.id)
-        .animation(animationSpring, value: previewPlugin?.id)
-        .animation(animationSpring, value: displaySize)
-        .animation(animationSpring, value: session.hoverState)
+        .animation(ScreenSessionModel.sneakAnimation, value: previewPlugin?.id)
         .sensoryFeedback(.alignment, trigger: session.hoverFeedbackTrigger)
     }
 
@@ -73,12 +74,16 @@ public struct NotchContentView: View {
         }
     }
 
-    private var background: some View {
-        Color.black
+    private var isOpen: Bool {
+        session.notchState == .open
     }
 
-    private var currentAnimation: Animation {
-        session.notchState == .open ? animationSpring : closeSpring
+    private var background: some View {
+        LinearGradient(
+            colors: [Color.black, Color.black.opacity(0.96)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     private var currentNotchShape: NotchShape {
