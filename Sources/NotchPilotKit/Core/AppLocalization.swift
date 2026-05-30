@@ -451,6 +451,10 @@ enum AppStrings {
             return text(.submit, language: language)
         case "Skip":
             return text(.skip, language: language)
+        case "Allow":
+            return language == .zhHans ? "允许" : title
+        case "Cancel":
+            return language == .zhHans ? "取消" : title
         default:
             return title
         }
@@ -464,8 +468,18 @@ enum AppStrings {
         switch title {
         case "Yes":
             return "是"
+        case "Allow":
+            return "允许"
+        case "Cancel":
+            return "取消"
         case "Yes, and don't ask again for this command in this session":
             return "是，且本会话不再询问这条命令"
+        case "Allow for this chat":
+            return "仅在此对话中允许"
+        case "Always allow":
+            return "始终允许"
+        case "Don't ask again":
+            return "不再询问"
         case "Yes, and don't ask again for these files":
             return "是，且不再询问这些文件"
         case "No, continue without running it":

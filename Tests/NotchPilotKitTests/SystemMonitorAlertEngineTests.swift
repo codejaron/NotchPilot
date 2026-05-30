@@ -253,7 +253,8 @@ final class SystemMonitorAlertEngineTests: XCTestCase {
         XCTAssertEqual(byID["memory.warn"]?.threshold, 55)
         XCTAssertEqual(byID["temperature.warn"]?.threshold, 70)
         XCTAssertEqual(byID["battery.warn"]?.threshold, 35)
-        XCTAssertEqual(byID["disk.warn"]?.threshold, 25)
+        XCTAssertNil(byID["disk.warn"])
+        XCTAssertEqual(byID["disk.critical"]?.threshold, 25)
         // Network threshold is supplied in MB/s but stored in bytes/s so the
         // engine can compare against raw counters.
         XCTAssertEqual(byID["network.spike"]?.threshold, 50_000_000)
@@ -271,14 +272,14 @@ final class SystemMonitorAlertEngineTests: XCTestCase {
         let rules = SystemMonitorAlertRuleCatalog.rules(for: custom)
         let byID = Dictionary(uniqueKeysWithValues: rules.map { ($0.id, $0) })
 
-        XCTAssertEqual(byID["memory.critical"]?.threshold, 70)        // 55 + 15
+        XCTAssertEqual(byID["memory.critical"]?.threshold, 65)        // 55 + 10
         XCTAssertEqual(byID["temperature.critical"]?.threshold, 80)   // 70 + 10
         XCTAssertEqual(byID["battery.critical"]?.threshold, 15)       // 30 / 2
-        XCTAssertEqual(byID["disk.critical"]?.threshold, 10)          // 30 / 3
+        XCTAssertEqual(byID["disk.critical"]?.threshold, 30)          // critical-only disk line
     }
 
     func testParametricCatalogClampsExtremeMemoryThreshold() {
-        // memoryPercent above 84 must keep memory.critical sane (≤99).
+        // memoryPercent above 89 must keep memory.critical sane (≤99).
         let custom = SystemMonitorAlertThresholds(
             cpuPercent: 85,
             memoryPercent: 90,
@@ -305,6 +306,8 @@ final class SystemMonitorAlertEngineTests: XCTestCase {
         )
         // In-range values pass through untouched.
         XCTAssertEqual(base.setting(70, for: .cpu).cpuPercent, 70)
+        XCTAssertEqual(base.setting(1, for: .cpu).cpuPercent, 1)
+        XCTAssertEqual(base.setting(1, for: .memory).memoryPercent, 1)
     }
 
     // MARK: - Severity palette

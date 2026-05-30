@@ -47,9 +47,9 @@ extension SystemMonitorAlertRule: CustomStringConvertible {
     }
 }
 
-/// User-facing reactive thresholds. Each value is the *warn-severity* trigger
+/// User-facing reactive thresholds. Each value is the user-editable trigger
 /// for its metric; critical-severity rules are derived from these in the
-/// catalog so the settings UI only needs to expose one number per metric.
+/// catalog where a metric has a separate critical state.
 ///
 /// Units intentionally match what users type in the UI:
 /// - `cpuPercent`, `memoryPercent`, `batteryPercent` are 0-100 percentages.
@@ -73,12 +73,12 @@ struct SystemMonitorAlertThresholds: Equatable, Sendable {
         networkMBps: 30
     )
 
-    static let cpuPercentRange: ClosedRange<Double> = 50...99
-    static let memoryPercentRange: ClosedRange<Double> = 50...99
-    static let temperatureCelsiusRange: ClosedRange<Double> = 50...100
-    static let batteryPercentRange: ClosedRange<Double> = 5...50
-    static let diskFreeGBRange: ClosedRange<Double> = 1...100
-    static let networkMBpsRange: ClosedRange<Double> = 5...500
+    static let cpuPercentRange: ClosedRange<Double> = 1...99
+    static let memoryPercentRange: ClosedRange<Double> = 1...99
+    static let temperatureCelsiusRange: ClosedRange<Double> = 1...120
+    static let batteryPercentRange: ClosedRange<Double> = 1...100
+    static let diskFreeGBRange: ClosedRange<Double> = 1...1000
+    static let networkMBpsRange: ClosedRange<Double> = 1...2000
 
     static let cpuPercentStep: Double = 1
     static let memoryPercentStep: Double = 1
@@ -147,8 +147,8 @@ enum SystemMonitorAlertRuleCatalog {
     static let defaults: [SystemMonitorAlertRule] = rules(for: .default)
 
     /// Builds the canonical rule list for a given user-tunable threshold set.
-    /// Critical-severity rules are derived from the warn value so users only
-    /// need to think about a single sensitivity number per metric.
+    /// Most critical-severity rules are derived from the user value so settings
+    /// only need to expose one sensitivity number per metric.
     static func rules(for thresholds: SystemMonitorAlertThresholds) -> [SystemMonitorAlertRule] {
         [
             SystemMonitorAlertRule(
@@ -171,7 +171,7 @@ enum SystemMonitorAlertRuleCatalog {
                 id: "memory.critical",
                 metric: .memory,
                 comparison: .greaterThan,
-                threshold: min(thresholds.memoryPercent + 15, 99),
+                threshold: min(thresholds.memoryPercent + 10, 99),
                 sustainSeconds: 0,
                 severity: .critical
             ),
@@ -208,18 +208,10 @@ enum SystemMonitorAlertRuleCatalog {
                 severity: .critical
             ),
             SystemMonitorAlertRule(
-                id: "disk.warn",
-                metric: .disk,
-                comparison: .lessThan,
-                threshold: thresholds.diskFreeGB,
-                sustainSeconds: 0,
-                severity: .warn
-            ),
-            SystemMonitorAlertRule(
                 id: "disk.critical",
                 metric: .disk,
                 comparison: .lessThan,
-                threshold: max(thresholds.diskFreeGB / 3, 1),
+                threshold: thresholds.diskFreeGB,
                 sustainSeconds: 0,
                 severity: .critical
             ),

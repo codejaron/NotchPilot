@@ -132,8 +132,10 @@ struct CodexApprovalInteractionState: Equatable {
             targets.append(.textInput(optionID: nil))
         }
 
-        targets.append(.cancel)
-        targets.append(.submit)
+        if surface.showsActionButtons {
+            targets.append(.cancel)
+            targets.append(.submit)
+        }
         return targets
     }
 

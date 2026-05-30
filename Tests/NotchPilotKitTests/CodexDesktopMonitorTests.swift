@@ -53,6 +53,26 @@ final class CodexDesktopMonitorTests: XCTestCase {
             targetClientID: nil,
             version: 1
         )
+        let mcpToolApprovalRequest = CodexDesktopIPCRequestFrame(
+            requestID: "req-1d",
+            method: "mcpServer/elicitation/request",
+            params: [
+                "_meta": .object([
+                    "codex_approval_kind": .string("mcp_tool_call"),
+                ]),
+                "threadId": .string("thread-mcp"),
+                "mode": .string("form"),
+                "message": .string("Allow the Linear MCP tool call?"),
+                "serverName": .string("linear"),
+                "requestedSchema": .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                ]),
+            ],
+            sourceClientID: "desktop-client",
+            targetClientID: nil,
+            version: 1
+        )
         let nonApprovalRequest = CodexDesktopIPCRequestFrame(
             requestID: "req-2",
             method: "ide-context",
@@ -67,7 +87,8 @@ final class CodexDesktopMonitorTests: XCTestCase {
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyExecRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyPatchRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(userInputRequest))
-        XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(permissionsRequest))
+        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(permissionsRequest))
+        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(mcpToolApprovalRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nonApprovalRequest))
         XCTAssertFalse(CodexDesktopMonitor.canHandleDiscoveryRequest(nil))
     }

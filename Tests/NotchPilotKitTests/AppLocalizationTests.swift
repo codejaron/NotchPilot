@@ -27,6 +27,23 @@ final class AppLocalizationTests: XCTestCase {
             ),
             "是，且对于以后续内容开头的命令不再询问 /bin/zsh -lc date"
         )
+        XCTAssertEqual(
+            AppStrings.codexOptionTitle(
+                "Allow for this chat",
+                language: .zhHans
+            ),
+            "仅在此对话中允许"
+        )
+        XCTAssertEqual(
+            AppStrings.codexOptionTitle(
+                "Always allow",
+                language: .zhHans
+            ),
+            "始终允许"
+        )
+        XCTAssertEqual(AppStrings.codexButtonTitle("Allow", language: .zhHans), "允许")
+        XCTAssertEqual(AppStrings.codexButtonTitle("Cancel", language: .zhHans), "取消")
+        XCTAssertEqual(AppStrings.codexOptionTitle("Cancel", language: .zhHans), "取消")
     }
 
     func testClaudePermissionActionTitlesPassThroughVerbatim() {

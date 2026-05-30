@@ -649,6 +649,421 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
         XCTAssertNil(controller.currentSurface)
     }
 
+    func testPermissionsApprovalCreatesSurfaceAndGrantsRequestedPermissions() {
+        let controller = CodexDesktopApprovalController()
+        let permissions = JSONValue.object([
+            "fileSystem": .object([
+                "write": .array([
+                    .string("/Users/jaron/data/project/NotchPilot"),
+                ]),
+            ]),
+            "network": .object([
+                "enabled": .bool(true),
+            ]),
+        ])
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "permissions-1",
+                method: "item/permissions/requestApproval",
+                params: [
+                    "threadId": .string("thread-permissions"),
+                    "turnId": .string("turn-permissions"),
+                    "itemId": .string("item-permissions"),
+                    "cwd": .string("/Users/jaron/data/project/NotchPilot"),
+                    "reason": .string("Codex needs extra access for this MCP tool call."),
+                    "permissions": permissions,
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(surface?.id, "codex-ipc-permissions-1")
+        XCTAssertEqual(surface?.summary, "Codex needs extra access for this MCP tool call.")
+        XCTAssertEqual(
+            surface?.commandPreview,
+            "Files: /Users/jaron/data/project/NotchPilot\nNetwork: enabled"
+        )
+        XCTAssertEqual(surface?.options.map(\.title), ["Yes", "Yes, for this session"])
+        XCTAssertEqual(surface?.threadID, "thread-permissions")
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-permissions-1")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "permissions-1",
+                method: "item/permissions/requestApproval",
+                result: .object([
+                    "permissions": permissions,
+                    "scope": .string("turn"),
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testCancellingPermissionsApprovalReturnsEmptyGrant() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "permissions-2",
+                method: "item/permissions/requestApproval",
+                params: [
+                    "threadId": .string("thread-permissions"),
+                    "cwd": .string("/Users/jaron/data/project/NotchPilot"),
+                    "permissions": .object([
+                        "fileSystem": .object([
+                            "write": .array([
+                                .string("/Users/jaron/data/project/NotchPilot"),
+                            ]),
+                        ]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        let response = controller.perform(action: .cancel, on: "codex-ipc-permissions-2")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "permissions-2",
+                method: "item/permissions/requestApproval",
+                result: .object([
+                    "permissions": .object([:]),
+                    "scope": .string("turn"),
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testSubmittingLivePermissionsApprovalBuildsThreadFollowerResponseRequest() {
+        let controller = CodexDesktopApprovalController()
+        let permissions = JSONValue.object([
+            "fileSystem": .object([
+                "write": .array([
+                    .string("/Users/jaron/data/project/NotchPilot"),
+                ]),
+            ]),
+        ])
+        _ = controller.handleLiveRequest(
+            CodexDesktopIPCRequestFrame(
+                requestID: "71",
+                rawRequestID: .integer(71),
+                method: "item/permissions/requestApproval",
+                params: [
+                    "threadId": .string("thread-live-permissions"),
+                    "cwd": .string("/Users/jaron/data/project/NotchPilot"),
+                    "permissions": permissions,
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: nil
+            )
+        )
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-71")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "71",
+                method: "item/permissions/requestApproval",
+                result: .object([
+                    "permissions": permissions,
+                    "scope": .string("turn"),
+                ]),
+                submission: .request(
+                    method: "thread-follower-permissions-request-approval-response",
+                    params: [
+                        "conversationId": .string("thread-live-permissions"),
+                        "requestId": .integer(71),
+                        "response": .object([
+                            "permissions": permissions,
+                            "scope": .string("turn"),
+                        ]),
+                    ],
+                    targetClientID: "desktop-owner-client",
+                    version: 1
+                )
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testMCPToolApprovalElicitationCreatesSurfaceAndAcceptsWithEmptyContent() {
+        let controller = CodexDesktopApprovalController()
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "mcp-approval-1",
+                method: "mcpServer/elicitation/request",
+                params: [
+                    "threadId": .string("thread-mcp"),
+                    "turnId": .string("turn-mcp"),
+                    "serverName": .string("linear"),
+                    "mode": .string("form"),
+                    "message": .string("Allow Linear to create an issue?"),
+                    "_meta": .object([
+                        "codex_approval_kind": .string("mcp_tool_call"),
+                    ]),
+                    "requestedSchema": .object([
+                        "type": .string("object"),
+                        "properties": .object([:]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(surface?.id, "codex-ipc-mcp-approval-1")
+        XCTAssertEqual(surface?.summary, "Allow Linear to create an issue?")
+        XCTAssertEqual(surface?.commandPreview, "MCP server: linear")
+        XCTAssertEqual(surface?.primaryButtonTitle, "Allow")
+        XCTAssertEqual(surface?.cancelButtonTitle, "Cancel")
+        XCTAssertEqual(surface?.showsActionButtons, false)
+        XCTAssertEqual(surface?.options.map(\.title), ["Allow", "Cancel"])
+        XCTAssertEqual(surface?.threadID, "thread-mcp")
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-mcp-approval-1")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "mcp-approval-1",
+                method: "mcpServer/elicitation/request",
+                result: .object([
+                    "action": .string("accept"),
+                    "content": .object([:]),
+                    "_meta": .null,
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testMCPToolApprovalElicitationShowsAdvertisedPersistenceOptions() {
+        let controller = CodexDesktopApprovalController()
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "mcp-approval-persist",
+                method: "mcpServer/elicitation/request",
+                params: [
+                    "threadId": .string("thread-mcp"),
+                    "serverName": .string("codegraph"),
+                    "mode": .string("form"),
+                    "message": .string("Allow the codegraph MCP server to run tool \"codegraph_context\"?"),
+                    "_meta": .object([
+                        "codex_approval_kind": .string("mcp_tool_call"),
+                        "tool_params": .object([
+                            "task": .string("Find where monitor alert severity colors are computed."),
+                        ]),
+                        "persist": .array([
+                            .string("session"),
+                            .string("always"),
+                        ]),
+                    ]),
+                    "requestedSchema": .object([
+                        "type": .string("object"),
+                        "properties": .object([:]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(
+            surface?.options.map(\.title),
+            [
+                "Allow",
+                "Allow for this chat",
+                "Always allow",
+                "Cancel",
+            ]
+        )
+        XCTAssertEqual(
+            surface?.commandPreview,
+            "MCP server: codegraph\ntask: Find where monitor alert severity colors are computed."
+        )
+
+        _ = controller.selectOption(
+            "codex-ipc-mcp-approval-persist-option-1",
+            on: "codex-ipc-mcp-approval-persist"
+        )
+        let response = controller.perform(action: .primary, on: "codex-ipc-mcp-approval-persist")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "mcp-approval-persist",
+                method: "mcpServer/elicitation/request",
+                result: .object([
+                    "action": .string("accept"),
+                    "content": .object([:]),
+                    "_meta": .object([
+                        "persist": .string("session"),
+                    ]),
+                ]),
+                submission: .response
+            )
+        )
+    }
+
+    func testMCPToolApprovalElicitationHonorsSingleAdvertisedPersistenceOption() {
+        let controller = CodexDesktopApprovalController()
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "mcp-approval-session",
+                method: "mcpServer/elicitation/request",
+                params: [
+                    "threadId": .string("thread-mcp"),
+                    "serverName": .string("codegraph"),
+                    "mode": .string("form"),
+                    "message": .string("Allow the codegraph MCP server to run tool \"codegraph_context\"?"),
+                    "_meta": .object([
+                        "codex_approval_kind": .string("mcp_tool_call"),
+                        "persist": .string("session"),
+                    ]),
+                    "requestedSchema": .object([
+                        "type": .string("object"),
+                        "properties": .object([:]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(
+            surface?.options.map(\.title),
+            [
+                "Allow",
+                "Allow for this chat",
+                "Cancel",
+            ]
+        )
+    }
+
+    func testMCPToolApprovalCancelOptionDeclinesLikeCodexCancelButton() {
+        let controller = CodexDesktopApprovalController()
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "mcp-approval-2",
+                method: "mcpServer/elicitation/request",
+                params: [
+                    "threadId": .string("thread-mcp"),
+                    "serverName": .string("linear"),
+                    "mode": .string("form"),
+                    "message": .string("Allow Linear to create an issue?"),
+                    "_meta": .object([
+                        "codex_approval_kind": .string("mcp_tool_call"),
+                    ]),
+                    "requestedSchema": .object([
+                        "type": .string("object"),
+                        "properties": .object([:]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(surface?.showsActionButtons, false)
+        XCTAssertEqual(surface?.options.map(\.title), ["Allow", "Cancel"])
+
+        _ = controller.selectOption(
+            "codex-ipc-mcp-approval-2-option-1",
+            on: "codex-ipc-mcp-approval-2"
+        )
+        let response = controller.perform(action: .primary, on: "codex-ipc-mcp-approval-2")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "mcp-approval-2",
+                method: "mcpServer/elicitation/request",
+                result: .object([
+                    "action": .string("decline"),
+                    "content": .null,
+                    "_meta": .null,
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
+    func testSubmittingLiveMCPToolApprovalElicitationBuildsThreadFollowerResponseRequest() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handleLiveRequest(
+            CodexDesktopIPCRequestFrame(
+                requestID: "92",
+                rawRequestID: .integer(92),
+                method: "mcpServer/elicitation/request",
+                params: [
+                    "threadId": .string("thread-live-mcp"),
+                    "serverName": .string("linear"),
+                    "mode": .string("form"),
+                    "message": .string("Allow Linear to create an issue?"),
+                    "_meta": .object([
+                        "codex_approval_kind": .string("mcp_tool_call"),
+                    ]),
+                    "requestedSchema": .object([
+                        "type": .string("object"),
+                        "properties": .object([:]),
+                    ]),
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: nil
+            )
+        )
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-92")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "92",
+                method: "mcpServer/elicitation/request",
+                result: .object([
+                    "action": .string("accept"),
+                    "content": .object([:]),
+                    "_meta": .null,
+                ]),
+                submission: .request(
+                    method: "thread-follower-submit-mcp-server-elicitation-response",
+                    params: [
+                        "conversationId": .string("thread-live-mcp"),
+                        "requestId": .integer(92),
+                        "response": .object([
+                            "action": .string("accept"),
+                            "content": .object([:]),
+                            "_meta": .null,
+                        ]),
+                    ],
+                    targetClientID: "desktop-owner-client",
+                    version: 1
+                )
+            )
+        )
+        XCTAssertNil(controller.currentSurface)
+    }
+
     func testUserInputRequestCreatesStandaloneThirdRowSurfaceFromIPCRequest() {
         let controller = CodexDesktopApprovalController()
         let surface = controller.handle(

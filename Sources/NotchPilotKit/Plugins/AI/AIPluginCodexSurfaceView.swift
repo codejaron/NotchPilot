@@ -82,7 +82,9 @@ struct AIPluginCodexSurfaceView: View {
                 Spacer(minLength: 0)
             }
 
-            codexSurfaceActionButtons(surface)
+            if surface.showsActionButtons {
+                codexSurfaceActionButtons(surface)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: CodexApprovalCompactLayout.headerButtonSize)
     }

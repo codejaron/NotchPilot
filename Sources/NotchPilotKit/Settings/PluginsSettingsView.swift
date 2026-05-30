@@ -567,21 +567,32 @@ struct SystemMonitorPluginSettingsView: View {
             detail: detail,
             isEnabled: areAlertThresholdsActive
         ) {
-            HStack(spacing: 10) {
-                Text(AppStrings.systemMonitorThresholdValueText(metric: metric, value: value))
-                    .font(.system(size: 13, weight: .medium))
-                    .monospacedDigit()
-                    .frame(minWidth: 64, alignment: .trailing)
-
-                Stepper(
-                    "",
+            HStack(spacing: 8) {
+                Slider(
                     value: thresholdBinding(for: metric),
-                    in: SystemMonitorAlertThresholds.range(for: metric),
-                    step: SystemMonitorAlertThresholds.step(for: metric)
+                    in: SystemMonitorAlertThresholds.range(for: metric)
                 )
-                .labelsHidden()
-                .disabled(areAlertThresholdsActive == false)
+                .frame(width: 170)
+
+                HStack(spacing: 4) {
+                    TextField(
+                        "",
+                        value: thresholdBinding(for: metric),
+                        format: .number.precision(.fractionLength(0))
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .frame(width: 58)
+                    .accessibilityLabel(thresholdRowTitle(for: metric))
+
+                    Text(thresholdUnitText(for: metric))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: thresholdUnitWidth(for: metric), alignment: .leading)
+                }
             }
+            .disabled(areAlertThresholdsActive == false)
         }
     }
 
@@ -607,9 +618,26 @@ struct SystemMonitorPluginSettingsView: View {
             get: { store.systemMonitorAlertThresholds.value(for: metric) },
             set: { newValue in
                 store.systemMonitorAlertThresholds = store.systemMonitorAlertThresholds
-                    .setting(newValue, for: metric)
+                    .setting(newValue.rounded(), for: metric)
             }
         )
+    }
+
+    private func thresholdUnitText(for metric: SystemMonitorMetric) -> String {
+        switch metric {
+        case .cpu, .memory, .battery:
+            return "%"
+        case .temperature:
+            return "°C"
+        case .disk:
+            return "GB"
+        case .network:
+            return "MB/s"
+        }
+    }
+
+    private func thresholdUnitWidth(for metric: SystemMonitorMetric) -> CGFloat {
+        metric == .network ? 34 : 22
     }
 
     private var arePinnedSlotsActive: Bool {

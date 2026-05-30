@@ -84,7 +84,9 @@ final class CodexDesktopApprovalController {
     private enum SupportedMethod: String {
         case commandExecution = "item/commandExecution/requestApproval"
         case fileChange = "item/fileChange/requestApproval"
+        case permissions = "item/permissions/requestApproval"
         case toolRequestUserInput = "item/tool/requestUserInput"
+        case mcpServerElicitation = "mcpServer/elicitation/request"
         case legacyExecCommand = "execCommandApproval"
         case legacyApplyPatch = "applyPatchApproval"
     }
@@ -105,11 +107,23 @@ final class CodexDesktopApprovalController {
     }
 
     static func canHandle(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
-        guard let method = request?.method else {
+        guard let request,
+              let method = SupportedMethod(rawValue: request.method)
+        else {
             return false
         }
 
-        return SupportedMethod(rawValue: method) != nil
+        switch method {
+        case .mcpServerElicitation:
+            return isMCPToolApprovalElicitation(params: request.params)
+        case .commandExecution,
+             .fileChange,
+             .permissions,
+             .toolRequestUserInput,
+             .legacyExecCommand,
+             .legacyApplyPatch:
+            return true
+        }
     }
 
     func handle(request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
@@ -138,8 +152,15 @@ final class CodexDesktopApprovalController {
             pendingApproval = makeCommandApproval(from: request, delivery: delivery)
         case .fileChange:
             pendingApproval = makeFileChangeApproval(from: request, delivery: delivery)
+        case .permissions:
+            pendingApproval = makePermissionsApproval(from: request, delivery: delivery)
         case .toolRequestUserInput:
             pendingApproval = makeUserInputRequest(from: request, delivery: delivery)
+        case .mcpServerElicitation:
+            guard Self.isMCPToolApprovalElicitation(params: request.params) else {
+                return nil
+            }
+            pendingApproval = makeMCPToolApprovalElicitation(from: request, delivery: delivery)
         case .legacyExecCommand:
             pendingApproval = makeLegacyCommandApproval(from: request, delivery: delivery)
         case .legacyApplyPatch:
@@ -344,6 +365,50 @@ final class CodexDesktopApprovalController {
         )
     }
 
+    private func makePermissionsApproval(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
+        let requestedPermissions = request.params.jsonValue(at: ["permissions"]) ?? .object([:])
+        let options = makeStaticOptions(
+            request: request,
+            titlesAndResults: [
+                (
+                    title: "Yes",
+                    result: permissionsGrantResult(
+                        permissions: requestedPermissions,
+                        scope: "turn"
+                    )
+                ),
+                (
+                    title: "Yes, for this session",
+                    result: permissionsGrantResult(
+                        permissions: requestedPermissions,
+                        scope: "session"
+                    )
+                ),
+            ]
+        )
+
+        return makePendingApproval(
+            request: request,
+            summary: request.params.stringValue(at: ["reason"])
+                ?? "Codex is requesting additional permissions.",
+            preview: permissionsPreview(
+                from: requestedPermissions,
+                cwd: request.params.stringValue(at: ["cwd"])
+            ),
+            threadID: request.params.stringValue(at: ["threadId"]),
+            options: options,
+            textInput: nil,
+            selectionMode: .optionResults(
+                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
+            ),
+            cancelResult: emptyPermissionsGrantResult(),
+            delivery: delivery
+        )
+    }
+
     private func makeUserInputRequest(
         from request: CodexDesktopIPCRequestFrame,
         delivery: Delivery
@@ -391,6 +456,64 @@ final class CodexDesktopApprovalController {
             ]),
             delivery: delivery
         )
+    }
+
+    private func makeMCPToolApprovalElicitation(
+        from request: CodexDesktopIPCRequestFrame,
+        delivery: Delivery
+    ) -> PendingApproval {
+        let options = makeMCPToolApprovalOptions(from: request)
+
+        return makePendingApproval(
+            request: request,
+            summary: request.params.stringValue(at: ["message"])
+                ?? "Codex is requesting MCP tool approval.",
+            preview: mcpElicitationPreview(from: request.params),
+            threadID: request.params.stringValue(at: ["threadId"]),
+            options: options,
+            textInput: nil,
+            selectionMode: .optionResults(
+                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
+            ),
+            cancelResult: mcpElicitationResult(action: "decline"),
+            delivery: delivery,
+            primaryButtonTitle: "Allow",
+            cancelButtonTitle: "Cancel",
+            showsActionButtons: false
+        )
+    }
+
+    private func makeMCPToolApprovalOptions(
+        from request: CodexDesktopIPCRequestFrame
+    ) -> [(option: CodexSurfaceOption, result: JSONValue)] {
+        var titlesAndResults: [(title: String, result: JSONValue)] = [
+            (
+                title: "Allow",
+                result: mcpElicitationResult(action: "accept")
+            ),
+        ]
+
+        for persistence in advertisedMCPToolApprovalPersistence(from: request.params) {
+            titlesAndResults.append(
+                (
+                    title: mcpToolApprovalPersistenceTitle(persistence),
+                    result: mcpElicitationResult(
+                        action: "accept",
+                        meta: .object([
+                            "persist": .string(persistence),
+                        ])
+                    )
+                )
+            )
+        }
+        titlesAndResults.append(
+            (
+                title: "Cancel",
+                result: mcpElicitationResult(action: "decline")
+            )
+        )
+
+        return makeStaticOptions(request: request, titlesAndResults: titlesAndResults)
     }
 
     private func makeLegacyCommandApproval(
@@ -481,6 +604,24 @@ final class CodexDesktopApprovalController {
         }
     }
 
+    private func makeStaticOptions(
+        request: CodexDesktopIPCRequestFrame,
+        titlesAndResults: [(title: String, result: JSONValue)]
+    ) -> [(option: CodexSurfaceOption, result: JSONValue)] {
+        let surfaceID = surfaceID(for: request)
+        return titlesAndResults.enumerated().map { index, item in
+            (
+                option: CodexSurfaceOption(
+                    id: "\(surfaceID)-option-\(index)",
+                    index: index + 1,
+                    title: item.title,
+                    isSelected: index == 0
+                ),
+                result: item.result
+            )
+        }
+    }
+
     private func makePendingApproval(
         request: CodexDesktopIPCRequestFrame,
         summary: String,
@@ -490,7 +631,10 @@ final class CodexDesktopApprovalController {
         textInput: CodexSurfaceTextInput?,
         selectionMode: SelectionMode,
         cancelResult: JSONValue,
-        delivery: Delivery
+        delivery: Delivery,
+        primaryButtonTitle: String = "Submit",
+        cancelButtonTitle: String = "Skip",
+        showsActionButtons: Bool = true
     ) -> PendingApproval {
         let surfaceID = surfaceID(for: request)
         let followUpDelivery = liveDelivery(for: request) ?? delivery
@@ -507,8 +651,9 @@ final class CodexDesktopApprovalController {
                 id: surfaceID,
                 summary: summary,
                 commandPreview: preview,
-                primaryButtonTitle: "Submit",
-                cancelButtonTitle: "Skip",
+                primaryButtonTitle: primaryButtonTitle,
+                cancelButtonTitle: cancelButtonTitle,
+                showsActionButtons: showsActionButtons,
                 options: options.map(\.option),
                 textInput: textInput,
                 threadID: threadID
@@ -522,7 +667,11 @@ final class CodexDesktopApprovalController {
         }
 
         switch method {
-        case .commandExecution, .fileChange, .toolRequestUserInput:
+        case .commandExecution,
+             .fileChange,
+             .permissions,
+             .toolRequestUserInput,
+             .mcpServerElicitation:
             guard let conversationID = request.params.stringValue(at: ["threadId"])?.trimmingCharacters(in: .whitespacesAndNewlines),
                   conversationID.isEmpty == false
             else {
@@ -588,6 +737,28 @@ final class CodexDesktopApprovalController {
                     targetClientID: ownerClientID,
                     version: version
                 )
+            case SupportedMethod.permissions.rawValue:
+                return .request(
+                    method: "thread-follower-permissions-request-approval-response",
+                    params: [
+                        "conversationId": .string(conversationID),
+                        "requestId": pendingApproval.rawRequestID,
+                        "response": result,
+                    ],
+                    targetClientID: ownerClientID,
+                    version: version
+                )
+            case SupportedMethod.mcpServerElicitation.rawValue:
+                return .request(
+                    method: "thread-follower-submit-mcp-server-elicitation-response",
+                    params: [
+                        "conversationId": .string(conversationID),
+                        "requestId": pendingApproval.rawRequestID,
+                        "response": result,
+                    ],
+                    targetClientID: ownerClientID,
+                    version: version
+                )
             default:
                 return .response
             }
@@ -609,8 +780,12 @@ final class CodexDesktopApprovalController {
             } else {
                 decision = .string("decline")
             }
+        case .permissions:
+            return emptyPermissionsGrantResult()
         case .toolRequestUserInput:
             decision = .null
+        case .mcpServerElicitation:
+            return mcpElicitationResult(action: "decline")
         case .legacyExecCommand, .legacyApplyPatch:
             decision = .string("abort")
         }
@@ -817,7 +992,11 @@ final class CodexDesktopApprovalController {
         switch method {
         case .commandExecution, .fileChange:
             return rawDecision == "decline" || rawDecision == "cancel"
+        case .permissions:
+            return false
         case .toolRequestUserInput:
+            return false
+        case .mcpServerElicitation:
             return false
         case .legacyExecCommand, .legacyApplyPatch:
             return rawDecision == "denied" || rawDecision == "abort"
@@ -842,6 +1021,7 @@ final class CodexDesktopApprovalController {
             commandPreview: surface.commandPreview,
             primaryButtonTitle: surface.primaryButtonTitle,
             cancelButtonTitle: surface.cancelButtonTitle,
+            showsActionButtons: surface.showsActionButtons,
             options: surface.options.map { option in
                 CodexSurfaceOption(
                     id: option.id,
@@ -900,6 +1080,173 @@ final class CodexDesktopApprovalController {
                 ]),
             ]),
         ])
+    }
+
+    private static func isMCPToolApprovalElicitation(params: [String: JSONValue]) -> Bool {
+        let kindPaths = [
+            ["_meta", "codex_approval_kind"],
+            ["_meta", "codexApprovalKind"],
+            ["meta", "codex_approval_kind"],
+            ["meta", "codexApprovalKind"],
+        ]
+
+        return kindPaths.contains { path in
+            params.stringValue(at: path) == "mcp_tool_call"
+        }
+    }
+
+    private func permissionsGrantResult(
+        permissions: JSONValue,
+        scope: String
+    ) -> JSONValue {
+        .object([
+            "permissions": permissions,
+            "scope": .string(scope),
+        ])
+    }
+
+    private func emptyPermissionsGrantResult() -> JSONValue {
+        permissionsGrantResult(permissions: .object([:]), scope: "turn")
+    }
+
+    private func permissionsPreview(
+        from permissions: JSONValue,
+        cwd: String?
+    ) -> String? {
+        guard let object = permissions.objectValue else {
+            return normalizedInputText(cwd)
+        }
+
+        var lines: [String] = []
+        if let fileSystem = object["fileSystem"]?.objectValue {
+            let fileTargets = ["write", "read", "readWrite"]
+                .flatMap { key in
+                    fileSystem[key]?.arrayValue?.compactMap(\.stringValue) ?? []
+                }
+            if fileTargets.isEmpty == false {
+                lines.append("Files: \(fileTargets.joined(separator: ", "))")
+            }
+        }
+
+        if object["network"]?.objectValue?["enabled"]?.boolValue == true {
+            lines.append("Network: enabled")
+        }
+
+        if lines.isEmpty {
+            return normalizedInputText(cwd)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func mcpElicitationResult(
+        action: String,
+        meta: JSONValue? = nil
+    ) -> JSONValue {
+        .object([
+            "action": .string(action),
+            "content": action == "accept" ? .object([:]) : .null,
+            "_meta": meta ?? .null,
+        ])
+    }
+
+    private func advertisedMCPToolApprovalPersistence(from params: [String: JSONValue]) -> [String] {
+        let persistValues = [
+            params.jsonValue(at: ["_meta", "persist"]),
+            params.jsonValue(at: ["meta", "persist"]),
+        ]
+
+        var seen = Set<String>()
+        var scopes: [String] = []
+        for value in persistValues {
+            for scope in mcpToolApprovalPersistenceValues(from: value) {
+                guard seen.insert(scope).inserted else {
+                    continue
+                }
+                scopes.append(scope)
+            }
+        }
+
+        return scopes
+    }
+
+    private func mcpToolApprovalPersistenceValues(from value: JSONValue?) -> [String] {
+        let rawValues: [String]
+        switch value {
+        case let .string(rawValue):
+            rawValues = [rawValue]
+        case let .array(values):
+            rawValues = values.compactMap(\.stringValue)
+        default:
+            rawValues = []
+        }
+
+        return rawValues.filter { $0 == "session" || $0 == "always" }
+    }
+
+    private func mcpToolApprovalPersistenceTitle(_ persistence: String) -> String {
+        switch persistence {
+        case "session":
+            return "Allow for this chat"
+        case "always":
+            return "Always allow"
+        default:
+            return "Allow"
+        }
+    }
+
+    private func mcpElicitationPreview(from params: [String: JSONValue]) -> String? {
+        var lines: [String] = []
+        let serverName = normalizedInputText(params.stringValue(at: ["serverName"]))
+        if let serverName {
+            lines.append("MCP server: \(serverName)")
+        } else if let url = normalizedInputText(params.stringValue(at: ["url"])) {
+            lines.append(url)
+        }
+
+        if let url = normalizedInputText(params.stringValue(at: ["url"])),
+           serverName != nil {
+            lines.append(url)
+        }
+
+        let toolParameters = params.objectValue(at: ["_meta", "tool_params"])
+            ?? params.objectValue(at: ["meta", "tool_params"])
+        if let toolParameters {
+            for (name, value) in toolParameters.sorted(by: { $0.key < $1.key }) {
+                lines.append("\(name): \(mcpPreviewText(for: value))")
+            }
+        }
+
+        guard lines.isEmpty == false else {
+            return nil
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func mcpPreviewText(for value: JSONValue) -> String {
+        switch value {
+        case let .string(text):
+            return text
+        case let .integer(number):
+            return "\(number)"
+        case let .double(number):
+            return "\(number)"
+        case let .bool(flag):
+            return flag ? "true" : "false"
+        case .null:
+            return "null"
+        case .array, .object:
+            guard JSONSerialization.isValidJSONObject(value.jsonObject),
+                  let data = try? JSONSerialization.data(
+                    withJSONObject: value.jsonObject,
+                    options: [.sortedKeys]
+                  ),
+                  let text = String(data: data, encoding: .utf8)
+            else {
+                return String(describing: value.jsonObject)
+            }
+            return text
+        }
     }
 
     private func feedbackFollowUpPlan(

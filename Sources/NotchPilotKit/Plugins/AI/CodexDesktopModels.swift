@@ -97,6 +97,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let commandPreview: String?
     public let primaryButtonTitle: String
     public let cancelButtonTitle: String
+    public let showsActionButtons: Bool
     public let options: [CodexSurfaceOption]
     public let textInput: CodexSurfaceTextInput?
     public let threadID: String?
@@ -108,6 +109,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         commandPreview: String? = nil,
         primaryButtonTitle: String,
         cancelButtonTitle: String,
+        showsActionButtons: Bool = true,
         options: [CodexSurfaceOption] = [],
         textInput: CodexSurfaceTextInput? = nil,
         threadID: String? = nil,
@@ -118,6 +120,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         self.commandPreview = commandPreview
         self.primaryButtonTitle = primaryButtonTitle
         self.cancelButtonTitle = cancelButtonTitle
+        self.showsActionButtons = showsActionButtons
         self.options = options
         self.textInput = textInput
         self.threadID = threadID
@@ -139,6 +142,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
+            showsActionButtons: showsActionButtons,
             options: options,
             textInput: textInput,
             threadID: threadID ?? context.threadID,
@@ -157,6 +161,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
+            showsActionButtons: showsActionButtons,
             options: options.map { option in
                 CodexSurfaceOption(
                     id: option.id,
@@ -182,6 +187,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             commandPreview: commandPreview,
             primaryButtonTitle: primaryButtonTitle,
             cancelButtonTitle: cancelButtonTitle,
+            showsActionButtons: showsActionButtons,
             options: options,
             textInput: CodexSurfaceTextInput(
                 title: textInput.title,

@@ -350,6 +350,26 @@ final class CodexApprovalInteractionTests: XCTestCase {
         XCTAssertNil(CodexApprovalInteractionState.feedbackOptionID(for: surface))
     }
 
+    func testSurfaceWithoutActionButtonsOnlyFocusesOptionsAndInput() {
+        let surface = CodexActionableSurface(
+            id: "surface-no-action-buttons",
+            summary: "Approve MCP tool?",
+            primaryButtonTitle: "Allow",
+            cancelButtonTitle: "Cancel",
+            showsActionButtons: false,
+            options: [
+                CodexSurfaceOption(id: "option-1", index: 1, title: "Allow", isSelected: true),
+                CodexSurfaceOption(id: "option-2", index: 2, title: "Cancel", isSelected: false),
+            ]
+        )
+        var state = CodexApprovalInteractionState(surface: surface)
+
+        XCTAssertEqual(state.focusedTarget, .option(id: "option-1"))
+        XCTAssertEqual(state.moveDown(surface: surface), .option(id: "option-2"))
+        XCTAssertEqual(state.moveDown(surface: surface), .option(id: "option-2"))
+        XCTAssertEqual(state.submitIntent(in: surface), .primary(selectedOptionID: "option-2"))
+    }
+
     private func makeSurface(selectedOptionID: String = "option-1") -> CodexActionableSurface {
         CodexActionableSurface(
             id: "surface-options",
