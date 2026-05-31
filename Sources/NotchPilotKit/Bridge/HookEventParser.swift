@@ -38,6 +38,12 @@ public struct HookEventParser {
             ["tool", "name"],
             ["request", "tool"],
         ])
+        let toolUseID = findString(in: dictionary, paths: [
+            ["tool_use_id"],
+            ["toolUseID"],
+            ["toolUseId"],
+        ])
+        let toolInput = resolvedToolInput(from: dictionary)
         let permissionMode = findString(in: dictionary, paths: [
             ["permission_mode"],
             ["permissionMode"],
@@ -58,6 +64,9 @@ public struct HookEventParser {
             requestID: frame.requestID,
             sessionID: sessionID,
             eventType: eventType,
+            toolName: toolName,
+            toolInput: toolInput,
+            toolUseID: toolUseID,
             capabilities: capabilities,
             needsResponse: needsResponse,
             launchContext: frame.origin,
@@ -267,6 +276,11 @@ public struct HookEventParser {
             ])
             let toolInput = resolvedToolInput(from: dictionary)
             let claudeQuestions = claudeQuestions(from: dictionary)
+            let toolUseID = findString(in: dictionary, paths: [
+                ["tool_use_id"],
+                ["toolUseID"],
+                ["toolUseId"],
+            ])
 
             let toolKind = Self.resolveToolKind(toolName: toolName)
             let bashPrefix = toolKind == .bash ? Self.extractBashCommandPrefix(from: command) : nil
@@ -289,6 +303,7 @@ public struct HookEventParser {
                         description: description
                     ),
                     toolName: toolName,
+                    toolUseID: toolUseID,
                     description: description,
                     previewText: previewText,
                     filePath: filePath,

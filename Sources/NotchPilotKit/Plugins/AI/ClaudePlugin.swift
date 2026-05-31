@@ -37,6 +37,7 @@ public final class ClaudePlugin: AIPluginRendering {
     private var sneakPeekIDs: [String: UUID] = [:]
     private var settingsCancellables: Set<AnyCancellable> = []
     private var activityTracker = ClaudeSessionActivityTracker(activityExpiry: ClaudePlugin.claudeSessionActivityExpiry)
+    private var cachedToolUseIDs: [ToolUseCorrelationKey: [String]] = [:]
 
     public init(
         settingsStore: SettingsStore = .shared,
@@ -122,6 +123,7 @@ public final class ClaudePlugin: AIPluginRendering {
     public func deactivate() {
         responders.removeAll()
         sneakPeekIDs.removeAll()
+        cachedToolUseIDs.removeAll()
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
@@ -149,7 +151,9 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         do {
-            let envelope = try parser.parse(frame: frame)
+            var envelope = try parser.parse(frame: frame)
+            cacheToolUseIDIfAvailable(from: envelope)
+            envelope = correlateCachedToolUseIDIfNeeded(in: envelope)
             activityTracker.observe(
                 sessionID: envelope.sessionID,
                 eventType: envelope.eventType,
@@ -157,8 +161,18 @@ public final class ClaudePlugin: AIPluginRendering {
             )
 
             if envelope.eventType == .stop {
+                clearCachedToolUseIDs(forSessionID: envelope.sessionID)
                 sessionScopedApprovalStore.clearSession(envelope.sessionID)
                 expirePendingApprovals(forSessionID: envelope.sessionID)
+            }
+
+            if shouldDeferToNativeApproval(for: envelope) {
+                _ = runtime.handle(envelope: bypass(envelope: envelope))
+                syncState()
+                syncSneakPeek()
+                scheduleTranscriptUsageRefresh(for: envelope)
+                respond(Data("{}".utf8))
+                return
             }
 
             if envelope.needsResponse,
@@ -203,6 +217,78 @@ public final class ClaudePlugin: AIPluginRendering {
         }
     }
 
+    private func shouldDeferToNativeApproval(for envelope: AIBridgeEnvelope) -> Bool {
+        guard envelope.eventType == .permissionRequest,
+              case let .permissionRequest(payload) = envelope.payload
+        else {
+            return false
+        }
+
+        return payload.toolUseID == nil
+    }
+
+    private func cacheToolUseIDIfAvailable(from envelope: AIBridgeEnvelope) {
+        guard envelope.eventType == .preToolUse,
+              let toolUseID = envelope.toolUseID,
+              let key = ToolUseCorrelationKey(envelope: envelope)
+        else {
+            return
+        }
+
+        cachedToolUseIDs[key, default: []].append(toolUseID)
+    }
+
+    private func correlateCachedToolUseIDIfNeeded(in envelope: AIBridgeEnvelope) -> AIBridgeEnvelope {
+        guard envelope.eventType == .permissionRequest,
+              envelope.toolUseID == nil,
+              case let .permissionRequest(payload) = envelope.payload,
+              payload.toolUseID == nil,
+              let key = ToolUseCorrelationKey(
+                sessionID: envelope.sessionID,
+                toolName: payload.toolName,
+                toolInput: payload.toolInput
+              ),
+              let toolUseID = popCachedToolUseID(for: key)
+        else {
+            return envelope
+        }
+
+        return AIBridgeEnvelope(
+            host: envelope.host,
+            requestID: envelope.requestID,
+            sessionID: envelope.sessionID,
+            eventType: envelope.eventType,
+            toolName: envelope.toolName,
+            toolInput: envelope.toolInput,
+            toolUseID: toolUseID,
+            capabilities: envelope.capabilities,
+            needsResponse: envelope.needsResponse,
+            launchContext: envelope.launchContext,
+            payload: .permissionRequest(payload.withToolUseID(toolUseID)),
+            transcriptPath: envelope.transcriptPath
+        )
+    }
+
+    private func popCachedToolUseID(for key: ToolUseCorrelationKey) -> String? {
+        guard var queue = cachedToolUseIDs[key], queue.isEmpty == false else {
+            return nil
+        }
+
+        let toolUseID = queue.removeFirst()
+        if queue.isEmpty {
+            cachedToolUseIDs.removeValue(forKey: key)
+        } else {
+            cachedToolUseIDs[key] = queue
+        }
+        return toolUseID
+    }
+
+    private func clearCachedToolUseIDs(forSessionID sessionID: String) {
+        for key in cachedToolUseIDs.keys where key.sessionID == sessionID {
+            cachedToolUseIDs.removeValue(forKey: key)
+        }
+    }
+
     private func scheduleTranscriptUsageRefresh(for envelope: AIBridgeEnvelope) {
         guard let transcriptPath = envelope.transcriptPath else {
             return
@@ -237,10 +323,14 @@ public final class ClaudePlugin: AIPluginRendering {
             requestID: envelope.requestID,
             sessionID: envelope.sessionID,
             eventType: envelope.eventType,
+            toolName: envelope.toolName,
+            toolInput: envelope.toolInput,
+            toolUseID: envelope.toolUseID,
             capabilities: envelope.capabilities,
             needsResponse: false,
             launchContext: envelope.launchContext,
-            payload: envelope.payload
+            payload: envelope.payload,
+            transcriptPath: envelope.transcriptPath
         )
     }
 
@@ -258,27 +348,18 @@ public final class ClaudePlugin: AIPluginRendering {
     @discardableResult
     private func resolveExternallyHandledApprovals(for envelope: AIBridgeEnvelope) -> Bool {
         guard isExternalApprovalCompletionEvent(envelope.eventType),
-              let observedToolUse = ClaudeObservedToolUse(payload: envelope.payload)
+              let observedToolUse = ClaudeObservedToolUse(envelope: envelope),
+              let toolUseID = observedToolUse.toolUseID
         else {
             return false
         }
 
-        let sessionApprovals = runtime.pendingApprovals.filter { approval in
-            approval.sessionID == envelope.sessionID
-        }
-
-        var requestIDs = sessionApprovals
-            .filter { observedToolUse.matches($0.payload) }
-            .map(\.requestID)
-
-        if requestIDs.isEmpty,
-           let observedName = observedToolUse.toolName {
-            let sameToolApprovals = sessionApprovals
-                .filter { $0.payload.toolName == observedName }
-            if sameToolApprovals.count == 1 {
-                requestIDs = sameToolApprovals.map(\.requestID)
+        let requestIDs = runtime.pendingApprovals
+            .filter { approval in
+                approval.sessionID == envelope.sessionID
+                    && approval.payload.toolUseID == toolUseID
             }
-        }
+            .map(\.requestID)
 
         guard requestIDs.isEmpty == false else {
             return false
@@ -292,6 +373,15 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         return true
+    }
+
+    private func isExternalApprovalCompletionEvent(_ eventType: AIBridgeEventType) -> Bool {
+        switch eventType {
+        case .preToolUse, .postToolUse:
+            return true
+        case .permissionRequest, .sessionStart, .stop, .userPromptSubmit, .unknown:
+            return false
+        }
     }
 
     private func expirePendingApprovals(forSessionID sessionID: String) {
@@ -308,15 +398,6 @@ public final class ClaudePlugin: AIPluginRendering {
                 responder(Data("{}".utf8))
             }
             _ = runtime.expirePendingApproval(requestID: requestID)
-        }
-    }
-
-    private func isExternalApprovalCompletionEvent(_ eventType: AIBridgeEventType) -> Bool {
-        switch eventType {
-        case .preToolUse, .postToolUse:
-            return true
-        case .permissionRequest, .sessionStart, .stop, .userPromptSubmit, .unknown:
-            return false
         }
     }
 
@@ -742,76 +823,78 @@ private extension AIBridgeEventType {
     }
 }
 
-private struct ClaudeObservedToolUse {
-    let toolName: String?
-    let command: String?
-    let filePath: String?
-    let webFetchURL: String?
+private struct ToolUseCorrelationKey: Hashable {
+    let sessionID: String
+    let toolName: String
+    let inputFingerprint: String
 
-    init?(payload: AIBridgePayload) {
-        guard case let .generic(values) = payload else {
+    init?(envelope: AIBridgeEnvelope) {
+        self.init(
+            sessionID: envelope.sessionID,
+            toolName: envelope.toolName,
+            toolInput: envelope.toolInput
+        )
+    }
+
+    init?(sessionID: String, toolName: String?, toolInput: JSONValue?) {
+        guard let normalizedToolName = Self.normalized(toolName) else {
+            return nil
+        }
+        self.sessionID = sessionID
+        self.toolName = normalizedToolName
+        self.inputFingerprint = Self.fingerprint(for: toolInput)
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.isEmpty == false
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func fingerprint(for toolInput: JSONValue?) -> String {
+        guard let toolInput else {
+            return "{}"
+        }
+
+        switch toolInput {
+        case .object, .array:
+            guard JSONSerialization.isValidJSONObject(toolInput.jsonObject),
+                  let data = try? JSONSerialization.data(withJSONObject: toolInput.jsonObject, options: [.sortedKeys]),
+                  let string = String(data: data, encoding: .utf8)
+            else {
+                return String(reflecting: toolInput)
+            }
+            return string
+        case let .string(value):
+            return value
+        case let .integer(value):
+            return "\(value)"
+        case let .double(value):
+            return "\(value)"
+        case let .bool(value):
+            return value ? "true" : "false"
+        case .null:
+            return "null"
+        }
+    }
+}
+
+private struct ClaudeObservedToolUse {
+    let toolUseID: String?
+
+    init?(envelope: AIBridgeEnvelope) {
+        guard case let .generic(values) = envelope.payload else {
             return nil
         }
 
-        self.toolName = Self.firstNonEmptyValue(in: values, keys: [
-            "tool_name",
-            "tool.name",
-            "request.tool",
+        self.toolUseID = envelope.toolUseID ?? Self.firstNonEmptyValue(in: values, keys: [
+            "tool_use_id",
+            "toolUseID",
+            "toolUseId",
         ])
-        self.command = Self.firstNonEmptyValue(in: values, keys: [
-            "tool_input.command",
-            "tool.input.command",
-            "command",
-            "request.command",
-        ])
-        self.filePath = Self.firstNonEmptyValue(in: values, keys: [
-            "tool_input.file_path",
-            "tool_input.filePath",
-            "tool.input.file_path",
-            "tool.input.filePath",
-            "file_path",
-            "filePath",
-        ])
-        self.webFetchURL = Self.firstNonEmptyValue(in: values, keys: [
-            "tool_input.url",
-            "tool.input.url",
-            "url",
-        ])
-    }
-
-    func matches(_ payload: ApprovalPayload) -> Bool {
-        if let toolName, payload.toolName != toolName {
-            return false
-        }
-
-        if let command {
-            return Self.fuzzyEquals(payload.command, command)
-                || Self.fuzzyEquals(payload.previewText, command)
-        }
-
-        if let filePath {
-            return Self.fuzzyEquals(payload.filePath, filePath)
-                || Self.fuzzyEquals(payload.previewText, filePath)
-        }
-
-        if let webFetchURL {
-            return Self.fuzzyEquals(payload.webFetchURL, webFetchURL)
-                || Self.fuzzyEquals(payload.previewText, webFetchURL)
-        }
-
-        return toolName != nil
-    }
-
-    private static func fuzzyEquals(_ lhs: String?, _ rhs: String) -> Bool {
-        guard let lhs else {
-            return false
-        }
-        if lhs == rhs {
-            return true
-        }
-        let trimmedLHS = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedRHS = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedLHS == trimmedRHS && trimmedRHS.isEmpty == false
     }
 
     private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {

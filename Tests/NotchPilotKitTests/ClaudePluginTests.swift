@@ -181,6 +181,14 @@ final class ClaudePluginTests: XCTestCase {
 
         await MainActor.run {
             plugin.activate(bus: bus)
+            Self.sendPreToolUse(
+                plugin: plugin,
+                requestID: "claude-pre-req-1",
+                sessionID: "claude-session-1",
+                command: "rm -rf /tmp/demo",
+                toolUseID: "toolu_req_1"
+            )
+            recorder.events.removeAll()
             plugin.handle(
                 frame: BridgeFrame(
                     host: .claude,
@@ -199,7 +207,13 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         let receivedEvents = await MainActor.run { recorder.events }
-        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+        let attentionRequest = receivedEvents.compactMap { event -> SneakPeekRequest? in
+            guard case let .sneakPeekRequested(request) = event, request.kind == .attention else {
+                return nil
+            }
+            return request
+        }.first
+        guard let request = attentionRequest else {
             return XCTFail("expected a sneak peek request")
         }
 
@@ -366,9 +380,12 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testPermissionRequestDoesNotEmitSneakPeekWhenApprovalSneakSettingIsDisabled() {
         let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
+        let previousActivityValue = SettingsStore.shared.activitySneakPreviewsHidden
         SettingsStore.shared.approvalSneakNotificationsEnabled = false
+        SettingsStore.shared.activitySneakPreviewsHidden = true
         defer {
             SettingsStore.shared.approvalSneakNotificationsEnabled = previousValue
+            SettingsStore.shared.activitySneakPreviewsHidden = previousActivityValue
         }
 
         let bus = EventBus()
@@ -380,6 +397,14 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-pre-disabled",
+            sessionID: "claude-session-disabled",
+            command: "echo hidden",
+            toolUseID: "toolu_disabled"
+        )
+        recorder.events.removeAll()
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
@@ -419,6 +444,14 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-pre-reenable",
+            sessionID: "claude-session-reenable",
+            command: "echo reenable",
+            toolUseID: "toolu_reenable"
+        )
+        recorder.events.removeAll()
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
@@ -435,11 +468,22 @@ final class ClaudePluginTests: XCTestCase {
             respond: { _ in }
         )
 
-        XCTAssertTrue(recorder.events.isEmpty)
+        XCTAssertFalse(recorder.events.contains { event in
+            if case let .sneakPeekRequested(request) = event, request.kind == .attention {
+                return true
+            }
+            return false
+        })
 
         SettingsStore.shared.approvalSneakNotificationsEnabled = true
 
-        guard case let .sneakPeekRequested(request)? = recorder.events.first else {
+        let attentionRequest = recorder.events.compactMap { event -> SneakPeekRequest? in
+            guard case let .sneakPeekRequested(request) = event, request.kind == .attention else {
+                return nil
+            }
+            return request
+        }.first
+        guard let request = attentionRequest else {
             XCTFail("Expected sneak peek request after reenabling approval sneak")
             bus.unsubscribe(token)
             return
@@ -718,6 +762,13 @@ final class ClaudePluginTests: XCTestCase {
             ),
             respond: { _ in }
         )
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-summary-pretool",
+            sessionID: "claude-session-summary",
+            command: "git diff --stat",
+            toolUseID: "toolu_summary"
+        )
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
@@ -742,65 +793,201 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
-    func testPreToolUseFromExternalClaudeApprovalClearsPendingApprovalAndSneakPeek() {
+    func testPostToolUseWithCachedToolUseIDClearsOnlyMatchingParallelApproval() {
         let bus = EventBus()
         let plugin = ClaudePlugin()
-        let recorder = SplitEventRecorder()
-        let preToolResponseBox = SplitResponseBox()
-
-        let token = bus.subscribe { event in
-            recorder.events.append(event)
-        }
+        let firstResponseBox = SplitResponseBox()
+        let secondResponseBox = SplitResponseBox()
+        let firstPreToolResponseBox = SplitResponseBox()
+        let secondPreToolResponseBox = SplitResponseBox()
+        let postToolResponseBox = SplitResponseBox()
 
         plugin.activate(bus: bus)
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
-                requestID: "claude-external-permission",
+                requestID: "claude-parallel-pretool-one",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-parallel",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo one" },
+                  "tool_use_id": "toolu_one"
+                }
+                """
+            ),
+            respond: { data in firstPreToolResponseBox.data = data }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-parallel-pretool-two",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-parallel",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo two" },
+                  "tool_use_id": "toolu_two"
+                }
+                """
+            ),
+            respond: { data in secondPreToolResponseBox.data = data }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-parallel-one",
                 rawJSON: """
                 {
                   "hook_event_name": "PermissionRequest",
-                  "session_id": "claude-session-external-approval",
+                  "session_id": "claude-session-parallel",
                   "tool_name": "Bash",
-                  "tool_input": { "command": "echo externally approved" }
+                  "tool_input": { "command": "echo one" }
+                }
+                """
+            ),
+            respond: { data in firstResponseBox.data = data }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-parallel-two",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-parallel",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo two" }
+                }
+                """
+            ),
+            respond: { data in secondResponseBox.data = data }
+        )
+
+        XCTAssertEqual(
+            plugin.pendingApprovals.map(\.requestID),
+            ["claude-parallel-one", "claude-parallel-two"]
+        )
+        XCTAssertEqual(plugin.pendingApprovals.first?.payload.toolUseID, "toolu_one")
+        XCTAssertEqual(plugin.pendingApprovals.last?.payload.toolUseID, "toolu_two")
+        XCTAssertEqual(String(data: firstPreToolResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertEqual(String(data: secondPreToolResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertNil(firstResponseBox.data)
+        XCTAssertNil(secondResponseBox.data)
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-parallel-posttool-one",
+                rawJSON: """
+                {
+                  "hook_event_name": "PostToolUse",
+                  "session_id": "claude-session-parallel",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo rewritten by shell" },
+                  "tool_use_id": "toolu_one"
+                }
+                """
+            ),
+            respond: { data in postToolResponseBox.data = data }
+        )
+
+        XCTAssertEqual(
+            plugin.pendingApprovals.map(\.requestID),
+            ["claude-parallel-two"]
+        )
+        XCTAssertEqual(String(data: firstResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertNil(secondResponseBox.data)
+        XCTAssertEqual(String(data: postToolResponseBox.data ?? Data(), encoding: .utf8), "{}")
+    }
+
+    @MainActor
+    func testPostToolUseWithDifferentToolUseIDDoesNotClearByMatchingCommand() {
+        let plugin = ClaudePlugin()
+        let permissionResponseBox = SplitResponseBox()
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-pretool-with-id",
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-session-strict-id",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo exact only" },
+                  "tool_use_id": "toolu_expected"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-permission-with-id",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-strict-id",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo exact only" }
+                }
+                """
+            ),
+            respond: { data in permissionResponseBox.data = data }
+        )
+
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-permission-with-id"])
+        XCTAssertEqual(plugin.pendingApprovals.first?.payload.toolUseID, "toolu_expected")
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-posttool-wrong-id",
+                rawJSON: """
+                {
+                  "hook_event_name": "PostToolUse",
+                  "session_id": "claude-session-strict-id",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo exact only" },
+                  "tool_use_id": "toolu_other"
                 }
                 """
             ),
             respond: { _ in }
         )
 
-        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-external-permission"])
-        XCTAssertTrue(recorder.events.contains { event in
-            if case .sneakPeekRequested = event { return true }
-            return false
-        })
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-permission-with-id"])
+        XCTAssertNil(permissionResponseBox.data)
+    }
+
+    @MainActor
+    func testPermissionRequestWithoutCorrelatedToolUseIDDoesNotCreatePendingApproval() {
+        let plugin = ClaudePlugin()
+        let permissionResponseBox = SplitResponseBox()
 
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
-                requestID: "claude-external-pretool",
+                requestID: "claude-permission-without-id",
                 rawJSON: """
                 {
-                  "hook_event_name": "PreToolUse",
-                  "session_id": "claude-session-external-approval",
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-no-tool-id",
                   "tool_name": "Bash",
-                  "tool_input": { "command": "echo externally approved" }
+                  "tool_input": { "command": "echo native only" }
                 }
                 """
             ),
-            respond: { data in
-                preToolResponseBox.data = data
-            }
+            respond: { data in permissionResponseBox.data = data }
         )
 
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
-        XCTAssertEqual(String(data: preToolResponseBox.data ?? Data(), encoding: .utf8), "{}")
-        XCTAssertTrue(recorder.events.contains { event in
-            if case .dismissSneakPeek = event { return true }
-            return false
-        })
-
-        bus.unsubscribe(token)
+        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertEqual(plugin.sessions.first?.activityLabel, "Waiting Approval")
     }
 
     func testStoppedSessionDoesNotRenderCompactPreviewWithoutApproval() async {
@@ -964,6 +1151,13 @@ final class ClaudePluginTests: XCTestCase {
 
         await MainActor.run {
             plugin.activate(bus: bus)
+            Self.sendPreToolUse(
+                plugin: plugin,
+                requestID: "claude-long-pretool",
+                sessionID: "claude-session-long-preview",
+                command: longCommand,
+                toolUseID: "toolu_long_preview"
+            )
             plugin.handle(
                 frame: BridgeFrame(
                     host: .claude,
@@ -989,20 +1183,35 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
-    func testPreToolUseWithNormalizedCommandStillClearsPendingApproval() {
+    func testHandleDisconnectClearsPendingApprovalAndSneakPeek() {
+        let bus = EventBus()
         let plugin = ClaudePlugin()
+        let recorder = SplitEventRecorder()
         let permissionResponseBox = SplitResponseBox()
 
+        let token = bus.subscribe { event in
+            recorder.events.append(event)
+        }
+
+        plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-disconnect-pretool",
+            sessionID: "claude-session-disconnect",
+            command: "echo disconnect",
+            toolUseID: "toolu_disconnect"
+        )
+        recorder.events.removeAll()
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
-                requestID: "claude-normalized-permission",
+                requestID: "claude-disconnect-permission",
                 rawJSON: """
                 {
                   "hook_event_name": "PermissionRequest",
-                  "session_id": "claude-session-normalized",
+                  "session_id": "claude-session-disconnect",
                   "tool_name": "Bash",
-                  "tool_input": { "command": "echo normalized" }
+                  "tool_input": { "command": "echo disconnect" }
                 }
                 """
             ),
@@ -1011,71 +1220,18 @@ final class ClaudePluginTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-normalized-permission"])
+        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-disconnect-permission"])
 
-        plugin.handle(
-            frame: BridgeFrame(
-                host: .claude,
-                requestID: "claude-normalized-pretool",
-                rawJSON: """
-                {
-                  "hook_event_name": "PreToolUse",
-                  "session_id": "claude-session-normalized",
-                  "tool_name": "Bash",
-                  "tool_input": { "command": "  echo normalized\\n" }
-                }
-                """
-            ),
-            respond: { _ in }
-        )
+        plugin.handleDisconnect(requestID: "claude-disconnect-permission")
 
         XCTAssertTrue(plugin.pendingApprovals.isEmpty)
-        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
-    }
+        XCTAssertNil(permissionResponseBox.data)
+        XCTAssertTrue(recorder.events.contains { event in
+            if case .dismissSneakPeek = event { return true }
+            return false
+        })
 
-    @MainActor
-    func testPreToolUseWithDifferingCommandResolvesWhenSinglePendingForSession() {
-        let plugin = ClaudePlugin()
-        let permissionResponseBox = SplitResponseBox()
-
-        plugin.handle(
-            frame: BridgeFrame(
-                host: .claude,
-                requestID: "claude-fallback-permission",
-                rawJSON: """
-                {
-                  "hook_event_name": "PermissionRequest",
-                  "session_id": "claude-session-fallback",
-                  "tool_name": "Bash",
-                  "tool_input": { "command": "echo original" }
-                }
-                """
-            ),
-            respond: { data in
-                permissionResponseBox.data = data
-            }
-        )
-
-        XCTAssertEqual(plugin.pendingApprovals.map(\.requestID), ["claude-fallback-permission"])
-
-        plugin.handle(
-            frame: BridgeFrame(
-                host: .claude,
-                requestID: "claude-fallback-pretool",
-                rawJSON: """
-                {
-                  "hook_event_name": "PreToolUse",
-                  "session_id": "claude-session-fallback",
-                  "tool_name": "Bash",
-                  "tool_input": { "command": "echo rewritten-by-claude" }
-                }
-                """
-            ),
-            respond: { _ in }
-        )
-
-        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
-        XCTAssertEqual(String(data: permissionResponseBox.data ?? Data(), encoding: .utf8), "{}")
+        bus.unsubscribe(token)
     }
 
     @MainActor
@@ -1090,6 +1246,14 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-stop-pretool",
+            sessionID: "claude-session-stop-pending",
+            command: "echo deny-in-claude-desktop",
+            toolUseID: "toolu_stop_pending"
+        )
+        recorder.events.removeAll()
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
@@ -1144,6 +1308,13 @@ final class ClaudePluginTests: XCTestCase {
         let plugin = ClaudePlugin()
         let responseBox = SplitResponseBox()
 
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-deny-pretool",
+            sessionID: "claude-session-deny-feedback",
+            command: "rm -rf /tmp/demo",
+            toolUseID: "toolu_deny_feedback"
+        )
         plugin.handle(
             frame: BridgeFrame(
                 host: .claude,
@@ -1181,6 +1352,32 @@ private extension ClaudePluginTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return SettingsStore(defaults: defaults)
+    }
+
+    @MainActor
+    static func sendPreToolUse(
+        plugin: ClaudePlugin,
+        requestID: String,
+        sessionID: String,
+        command: String,
+        toolUseID: String
+    ) {
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: requestID,
+                rawJSON: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "\(sessionID)",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "\(command)" },
+                  "tool_use_id": "\(toolUseID)"
+                }
+                """
+            ),
+            respond: { _ in }
+        )
     }
 }
 

@@ -76,6 +76,28 @@ final class HookEventParserTests: XCTestCase {
         XCTAssertEqual(envelope.launchContext?.terminalIdentifier, "ttys003")
     }
 
+    func testPreToolUseExtractsToolUseIDAndToolInputForCorrelation() throws {
+        let frame = BridgeFrame(
+            host: .claude,
+            requestID: "req-tool-use-id",
+            rawJSON: """
+            {
+              "hook_event_name": "PreToolUse",
+              "session_id": "claude-session",
+              "tool_name": "Bash",
+              "tool_input": { "command": "echo cached" },
+              "tool_use_id": "toolu_123"
+            }
+            """
+        )
+
+        let envelope = try HookEventParser().parse(frame: frame)
+
+        XCTAssertEqual(envelope.toolName, "Bash")
+        XCTAssertEqual(envelope.toolUseID, "toolu_123")
+        XCTAssertEqual(envelope.toolInput?.objectValue?["command"]?.stringValue, "echo cached")
+    }
+
     func testPermissionPayloadExtractsCommandFileAndDiffPreview() throws {
         let frame = BridgeFrame(
             host: .claude,

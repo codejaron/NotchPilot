@@ -176,6 +176,7 @@ public struct ClaudeUserQuestion: Equatable, Sendable, Identifiable {
 public struct ApprovalPayload: Equatable, Sendable {
     public let title: String
     public let toolName: String
+    public let toolUseID: String?
     public let description: String?
     public let previewText: String
     public let filePath: String?
@@ -197,6 +198,7 @@ public struct ApprovalPayload: Equatable, Sendable {
     public init(
         title: String,
         toolName: String,
+        toolUseID: String? = nil,
         description: String? = nil,
         previewText: String,
         filePath: String? = nil,
@@ -217,6 +219,7 @@ public struct ApprovalPayload: Equatable, Sendable {
     ) {
         self.title = title
         self.toolName = toolName
+        self.toolUseID = Self.normalized(toolUseID)
         self.description = description
         self.previewText = previewText
         self.filePath = filePath
@@ -236,10 +239,44 @@ public struct ApprovalPayload: Equatable, Sendable {
         self.cwd = cwd
     }
 
+    public func withToolUseID(_ toolUseID: String) -> ApprovalPayload {
+        ApprovalPayload(
+            title: title,
+            toolName: toolName,
+            toolUseID: toolUseID,
+            description: description,
+            previewText: previewText,
+            filePath: filePath,
+            command: command,
+            diffContent: diffContent,
+            originalContent: originalContent,
+            toolKind: toolKind,
+            bashCommandPrefix: bashCommandPrefix,
+            webFetchURL: webFetchURL,
+            webFetchDomain: webFetchDomain,
+            mcpServer: mcpServer,
+            mcpTool: mcpTool,
+            permissionMode: permissionMode,
+            permissionSuggestions: permissionSuggestions,
+            toolInput: toolInput,
+            claudeQuestions: claudeQuestions,
+            cwd: cwd
+        )
+    }
+
     public func updatedInput(answering answers: [String: String]) -> JSONValue {
         var object = toolInput?.objectValue ?? [:]
         object["answers"] = .object(answers.mapValues { .string($0) })
         return .object(object)
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.isEmpty == false
+        else {
+            return nil
+        }
+        return trimmed
     }
 }
 
@@ -253,6 +290,9 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
     public let requestID: String
     public let sessionID: String
     public let eventType: AIBridgeEventType
+    public let toolName: String?
+    public let toolInput: JSONValue?
+    public let toolUseID: String?
     public let capabilities: AIBridgeCapabilities
     public let needsResponse: Bool
     public let launchContext: AISessionLaunchContext?
@@ -264,6 +304,9 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         requestID: String,
         sessionID: String,
         eventType: AIBridgeEventType,
+        toolName: String? = nil,
+        toolInput: JSONValue? = nil,
+        toolUseID: String? = nil,
         capabilities: AIBridgeCapabilities,
         needsResponse: Bool,
         launchContext: AISessionLaunchContext? = nil,
@@ -274,6 +317,9 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         self.requestID = requestID
         self.sessionID = sessionID
         self.eventType = eventType
+        self.toolName = Self.normalized(toolName)
+        self.toolInput = toolInput
+        self.toolUseID = Self.normalized(toolUseID)
         self.capabilities = capabilities
         self.needsResponse = needsResponse
         self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
@@ -283,6 +329,15 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
         } else {
             self.transcriptPath = nil
         }
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.isEmpty == false
+        else {
+            return nil
+        }
+        return trimmed
     }
 }
 
