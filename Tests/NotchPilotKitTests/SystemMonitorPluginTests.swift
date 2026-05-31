@@ -190,6 +190,106 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertNil(request.autoDismissAfter)
     }
 
+    func testPersistentSneakPreviewUsesNormalSystemPriorityWhenNoAlertIsActive() {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        let plugin = SystemMonitorPlugin(
+            sampler: SystemMonitorUnavailableSampler(),
+            settingsStore: store
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            XCTFail("Expected system monitor sneak request")
+            return
+        }
+
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.systemMonitor)
+    }
+
+    func testAlertDrivenSneakPreviewUsesAlertPriority() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .ambient,
+            left: [],
+            right: [],
+            reactive: [.memory]
+        )
+        let plugin = SystemMonitorPlugin(
+            sampler: MutableSnapshotSampler(snapshot: Self.memoryHighSnapshot),
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        await plugin.refresh()
+
+        guard case let .sneakPeekRequested(request)? = receivedEvents.first else {
+            XCTFail("Expected system monitor sneak request")
+            return
+        }
+
+        XCTAssertEqual(request.priority, SneakPeekRequestPriority.systemMonitorAlert)
+    }
+
+    func testAlertUpdatesExistingNormalSneakPreviewWithAlertPriority() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            mode: .alwaysOn,
+            left: [.memory],
+            right: [],
+            reactive: [.memory]
+        )
+        let sampler = MutableSnapshotSampler(snapshot: Self.calmSnapshot)
+        let plugin = SystemMonitorPlugin(
+            sampler: sampler,
+            settingsStore: store,
+            alertEngine: SystemMonitorAlertEngine(
+                rules: [Self.memoryWarnRule],
+                clock: SystemMonitorSystemClock()
+            )
+        )
+        let bus = EventBus()
+        var receivedEvents: [NotchEvent] = []
+        bus.subscribe { receivedEvents.append($0) }
+
+        plugin.activate(bus: bus)
+        guard case let .sneakPeekRequested(normalRequest)? = receivedEvents.first else {
+            XCTFail("Expected normal system monitor sneak request")
+            return
+        }
+        XCTAssertEqual(normalRequest.priority, SneakPeekRequestPriority.systemMonitor)
+
+        sampler.storedSnapshot = Self.memoryHighSnapshot
+        await plugin.refresh()
+
+        let requests: [SneakPeekRequest] = receivedEvents.compactMap {
+            if case let .sneakPeekRequested(request) = $0 { return request }
+            return nil
+        }
+        let priorityUpdates: [(UUID, Int)] = receivedEvents.compactMap {
+            if case let .updateSneakPeekPriority(requestID, priority, _) = $0 { return (requestID, priority) }
+            return nil
+        }
+
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.last?.id, normalRequest.id)
+        XCTAssertEqual(priorityUpdates.last?.0, normalRequest.id)
+        XCTAssertEqual(priorityUpdates.last?.1, SneakPeekRequestPriority.systemMonitorAlert)
+    }
+
     func testReenablingGlobalActivitySneaksReissuesPersistentSneakPreview() {
         let store = makeSettingsStore()
         store.systemMonitorSneakPreviewEnabled = true

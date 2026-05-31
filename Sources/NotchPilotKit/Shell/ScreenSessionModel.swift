@@ -195,6 +195,14 @@ public final class ScreenSessionModel: ObservableObject {
         refreshCurrentSneakPeek()
     }
 
+    public func updateSneakPeekPriority(requestID: UUID, priority: Int) {
+        guard queue.updatePriority(requestID: requestID, priority: priority) != nil else {
+            return
+        }
+
+        refreshCurrentSneakPeek()
+    }
+
     public func dismissSneakPeek(requestID: UUID?) {
         if let requestID {
             _ = queue.expire(requestID)

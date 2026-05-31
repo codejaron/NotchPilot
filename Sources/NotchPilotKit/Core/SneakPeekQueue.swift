@@ -24,6 +24,29 @@ public final class SneakPeekQueue {
         nextSequence += 1
     }
 
+    public func updatePriority(
+        requestID: UUID,
+        priority: Int
+    ) -> SneakPeekRequest? {
+        guard let index = entries.firstIndex(where: { $0.request.id == requestID }) else {
+            return nil
+        }
+
+        let existing = entries[index]
+        let updated = SneakPeekRequest(
+            id: existing.request.id,
+            pluginID: existing.request.pluginID,
+            priority: priority,
+            target: existing.request.target,
+            kind: existing.request.kind,
+            isInteractive: existing.request.isInteractive,
+            autoDismissAfter: existing.request.autoDismissAfter,
+            createdAt: existing.request.createdAt
+        )
+        entries[index] = Entry(request: updated, sequence: existing.sequence)
+        return updated
+    }
+
     @discardableResult
     public func dismissCurrent() -> SneakPeekRequest? {
         guard let current else {

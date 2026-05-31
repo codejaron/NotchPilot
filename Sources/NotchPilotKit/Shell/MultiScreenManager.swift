@@ -82,6 +82,10 @@ public final class MultiScreenManager {
             for id in PresentationTargetResolver.resolve(request.target, in: context) {
                 sessions[id]?.enqueue(request)
             }
+        case let .updateSneakPeekPriority(requestID, priority, target):
+            for id in PresentationTargetResolver.resolve(target, in: context) {
+                sessions[id]?.updateSneakPeekPriority(requestID: requestID, priority: priority)
+            }
         case let .dismissSneakPeek(requestID, target):
             for id in PresentationTargetResolver.resolve(target, in: context) {
                 sessions[id]?.dismissSneakPeek(requestID: requestID)

@@ -2,6 +2,7 @@ import Foundation
 
 public enum NotchEvent: Equatable, Sendable {
     case sneakPeekRequested(SneakPeekRequest)
+    case updateSneakPeekPriority(requestID: UUID, priority: Int, target: PresentationTarget)
     case dismissSneakPeek(requestID: UUID?, target: PresentationTarget)
     case openRequested(pluginID: String, target: PresentationTarget)
     case closeRequested(target: PresentationTarget)

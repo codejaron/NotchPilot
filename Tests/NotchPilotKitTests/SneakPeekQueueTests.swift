@@ -40,6 +40,31 @@ final class SneakPeekQueueTests: XCTestCase {
         XCTAssertLessThan(SneakPeekRequestPriority.aiActivity, SneakPeekRequestPriority.mediaPlayback)
     }
 
+    func testPriorityRanksSystemAlertBetweenAIApprovalAndAIActivity() {
+        XCTAssertLessThan(SneakPeekRequestPriority.aiApproval, SneakPeekRequestPriority.systemMonitorAlert)
+        XCTAssertLessThan(SneakPeekRequestPriority.systemMonitorAlert, SneakPeekRequestPriority.aiActivity)
+        XCTAssertLessThan(SneakPeekRequestPriority.aiActivity, SneakPeekRequestPriority.mediaPlayback)
+        XCTAssertLessThan(SneakPeekRequestPriority.mediaPlayback, SneakPeekRequestPriority.systemMonitor)
+    }
+
+    func testUpdatingPriorityKeepsRequestIdentityAndReordersQueue() {
+        let queue = SneakPeekQueue()
+        let normalSystem = makeRequest(priority: SneakPeekRequestPriority.systemMonitor)
+        let aiActivity = makeRequest(priority: SneakPeekRequestPriority.aiActivity)
+
+        queue.enqueue(normalSystem)
+        queue.enqueue(aiActivity)
+
+        let updated = queue.updatePriority(
+            requestID: normalSystem.id,
+            priority: SneakPeekRequestPriority.systemMonitorAlert
+        )
+
+        XCTAssertEqual(updated?.id, normalSystem.id)
+        XCTAssertEqual(queue.current?.id, normalSystem.id)
+        XCTAssertEqual(queue.current?.priority, SneakPeekRequestPriority.systemMonitorAlert)
+    }
+
     func testAIPriorityResolvesApprovalAndActivityKindsSeparately() {
         XCTAssertEqual(SneakPeekRequestPriority.ai(for: .attention), SneakPeekRequestPriority.aiApproval)
         XCTAssertEqual(SneakPeekRequestPriority.ai(for: .activity), SneakPeekRequestPriority.aiActivity)

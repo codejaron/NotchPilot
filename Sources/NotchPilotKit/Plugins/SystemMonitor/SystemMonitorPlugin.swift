@@ -16,7 +16,8 @@ private actor SystemMonitorSamplerWorker {
 @MainActor
 public final class SystemMonitorPlugin: NotchPlugin {
     private enum SneakPreviewRequest {
-        static let priority = SneakPeekRequestPriority.systemMonitor
+        static let normalPriority = SneakPeekRequestPriority.systemMonitor
+        static let alertPriority = SneakPeekRequestPriority.systemMonitorAlert
     }
 
     public let id = "system-monitor"
@@ -40,6 +41,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
     private var settingsCancellables: Set<AnyCancellable> = []
     private weak var bus: EventBus?
     private var sneakPeekRequestID: UUID?
+    private var sneakPeekRequestPriority: Int?
     private var dashboardMountCount: Int = 0
 
     public convenience init() {
@@ -264,28 +266,47 @@ public final class SystemMonitorPlugin: NotchPlugin {
             return
         }
 
-        guard sneakPeekRequestID == nil, let bus else {
+        let desiredPriority = activeAlerts.isEmpty ? SneakPreviewRequest.normalPriority : SneakPreviewRequest.alertPriority
+
+        guard let bus else {
+            return
+        }
+
+        if let requestID = sneakPeekRequestID {
+            guard sneakPeekRequestPriority != desiredPriority else {
+                return
+            }
+
+            bus.emit(.updateSneakPeekPriority(
+                requestID: requestID,
+                priority: desiredPriority,
+                target: .allScreens
+            ))
+            sneakPeekRequestPriority = desiredPriority
             return
         }
 
         let request = SneakPeekRequest(
             pluginID: id,
-            priority: SneakPreviewRequest.priority,
+            priority: desiredPriority,
             target: .allScreens,
             isInteractive: false,
             autoDismissAfter: nil
         )
         sneakPeekRequestID = request.id
+        sneakPeekRequestPriority = desiredPriority
         bus.emit(.sneakPeekRequested(request))
     }
 
     private func dismissSneakPeekRequest() {
         guard let requestID = sneakPeekRequestID else {
+            sneakPeekRequestPriority = nil
             return
         }
 
         bus?.emit(.dismissSneakPeek(requestID: requestID, target: .allScreens))
         sneakPeekRequestID = nil
+        sneakPeekRequestPriority = nil
     }
 
     private func handlePluginEnabledChange(_ isEnabled: Bool) {
