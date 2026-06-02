@@ -178,6 +178,77 @@ struct AIPluginMergedExpandedView: View {
         plugin(for: approval.host, in: plugins)?.respond(to: approval.requestID, with: action)
     }
 
+    static func quickApprovalActions(
+        for summary: AIPluginExpandedSessionSummary,
+        approvals: [PendingApproval],
+        codexSurface: CodexActionableSurface?
+    ) -> AIPluginQuickApprovalActions {
+        if let approvalRequestID = summary.approvalRequestID,
+           let approval = approvals.first(where: { $0.requestID == approvalRequestID }) {
+            return AIPluginQuickApprovalResolver.actions(for: approval)
+        }
+
+        if let codexSurfaceID = summary.codexSurfaceID,
+           let codexSurface,
+           codexSurface.id == codexSurfaceID {
+            return AIPluginQuickApprovalResolver.actions(for: codexSurface)
+        }
+
+        return .none
+    }
+
+    @discardableResult
+    static func performQuickApproval(
+        _ intent: AIPluginQuickApprovalIntent,
+        summary: AIPluginExpandedSessionSummary,
+        approvals: [PendingApproval],
+        codexSurface: CodexActionableSurface?,
+        in plugins: [any AIPluginRendering]
+    ) -> Bool {
+        let quickActions = quickApprovalActions(
+            for: summary,
+            approvals: approvals,
+            codexSurface: codexSurface
+        )
+        let quickAction: AIPluginQuickApprovalAction?
+        switch intent {
+        case .approve:
+            quickAction = quickActions.approve
+        case .reject:
+            quickAction = quickActions.reject
+        }
+
+        guard let quickAction else {
+            return false
+        }
+
+        switch quickAction {
+        case let .claude(action):
+            guard let approvalRequestID = summary.approvalRequestID,
+                  let approval = approvals.first(where: { $0.requestID == approvalRequestID })
+            else {
+                return false
+            }
+            respond(to: approval, with: action, in: plugins)
+            return true
+        case let .codex(optionID, action):
+            guard let codexSurfaceID = summary.codexSurfaceID,
+                  let codexSurface,
+                  codexSurface.id == codexSurfaceID,
+                  let codexPlugin = plugins.first(where: { $0.id == "codex" })
+            else {
+                return false
+            }
+
+            if let optionID,
+               codexPlugin.selectCodexOption(optionID, surfaceID: codexSurface.id) == false {
+                return false
+            }
+
+            return codexPlugin.performCodexAction(action, surfaceID: codexSurface.id)
+        }
+    }
+
     // MARK: - Detail selection
 
     private var selectedApproval: PendingApproval? {
@@ -211,6 +282,13 @@ struct AIPluginMergedExpandedView: View {
     private var sessionListView: some View {
         AIPluginSessionListView(
             summaries: combinedSummaries,
+            quickApprovalActions: { summary in
+                Self.quickApprovalActions(
+                    for: summary,
+                    approvals: combinedApprovals,
+                    codexSurface: codexSurface
+                )
+            },
             onActivate: { summary in
                 switch summary.primaryRowAction {
                 case .none:
@@ -232,6 +310,24 @@ struct AIPluginMergedExpandedView: View {
             },
             onStop: { summary in
                 _ = Self.stop(summary: summary, in: plugins)
+            },
+            onQuickApprove: { summary in
+                _ = Self.performQuickApproval(
+                    .approve,
+                    summary: summary,
+                    approvals: combinedApprovals,
+                    codexSurface: codexSurface,
+                    in: plugins
+                )
+            },
+            onQuickReject: { summary in
+                _ = Self.performQuickApproval(
+                    .reject,
+                    summary: summary,
+                    approvals: combinedApprovals,
+                    codexSurface: codexSurface,
+                    in: plugins
+                )
             }
         )
     }

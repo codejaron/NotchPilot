@@ -8,9 +8,12 @@ import SwiftUI
 /// (or by the merged AI tab in Phase 4).
 struct AIPluginSessionListView: View {
     let summaries: [AIPluginExpandedSessionSummary]
+    let quickApprovalActions: (AIPluginExpandedSessionSummary) -> AIPluginQuickApprovalActions
     let onActivate: (AIPluginExpandedSessionSummary) -> Void
     let onJump: ((AIPluginExpandedSessionSummary) -> Void)?
     let onStop: ((AIPluginExpandedSessionSummary) -> Void)?
+    let onQuickApprove: ((AIPluginExpandedSessionSummary) -> Void)?
+    let onQuickReject: ((AIPluginExpandedSessionSummary) -> Void)?
 
     var body: some View {
         let presentation = AIPluginExpandedSessionListPresentation(summaries: summaries)
@@ -19,12 +22,19 @@ struct AIPluginSessionListView: View {
                 ForEach(summaries) { summary in
                     AIPluginSessionRow(
                         summary: summary,
+                        quickApprovalActions: quickApprovalActions(summary),
                         onActivate: { onActivate(summary) },
                         onJump: onJump.map { jump in
                             { jump(summary) }
                         },
                         onStop: onStop.map { stop in
                             { stop(summary) }
+                        },
+                        onQuickApprove: onQuickApprove.map { approve in
+                            { approve(summary) }
+                        },
+                        onQuickReject: onQuickReject.map { reject in
+                            { reject(summary) }
                         }
                     )
                 }
@@ -35,9 +45,12 @@ struct AIPluginSessionListView: View {
 
 private struct AIPluginSessionRow: View {
     let summary: AIPluginExpandedSessionSummary
+    let quickApprovalActions: AIPluginQuickApprovalActions
     let onActivate: () -> Void
     let onJump: (() -> Void)?
     let onStop: (() -> Void)?
+    let onQuickApprove: (() -> Void)?
+    let onQuickReject: (() -> Void)?
 
     @ObservedObject private var settingsStore = SettingsStore.shared
 
@@ -110,6 +123,23 @@ private struct AIPluginSessionRow: View {
             .buttonStyle(.plain)
             .opacity(jumpAccessory.primaryContentOpacity)
 
+            if quickApprovalActions.shouldRender {
+                HStack(spacing: 4) {
+                    quickApprovalButton(
+                        systemName: "checkmark",
+                        label: quickApproveLabel,
+                        isEnabled: quickApprovalActions.approve != nil,
+                        action: onQuickApprove
+                    )
+                    quickApprovalButton(
+                        systemName: "xmark",
+                        label: quickRejectLabel,
+                        isEnabled: quickApprovalActions.reject != nil,
+                        action: onQuickReject
+                    )
+                }
+            }
+
             if let onJump {
                 Button(action: onJump) {
                     ZStack {
@@ -155,6 +185,59 @@ private struct AIPluginSessionRow: View {
                 .help(AppStrings.text(.stopSessionDetection, language: settingsStore.interfaceLanguage))
             }
         }
+    }
+
+    private var quickApproveLabel: String {
+        switch settingsStore.interfaceLanguage {
+        case .zhHans:
+            return "同意"
+        case .english:
+            return "Approve"
+        }
+    }
+
+    private var quickRejectLabel: String {
+        switch settingsStore.interfaceLanguage {
+        case .zhHans:
+            return "拒绝"
+        case .english:
+            return "Reject"
+        }
+    }
+
+    private func quickApprovalButton(
+        systemName: String,
+        label: String,
+        isEnabled: Bool,
+        action: (() -> Void)?
+    ) -> some View {
+        Button {
+            action?()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(isEnabled ? 0.06 : 0.025))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.white.opacity(isEnabled ? 0.14 : 0.06), lineWidth: 1)
+                    )
+
+                Image(systemName: systemName)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(
+                        isEnabled
+                            ? NotchPilotTheme.islandTextPrimary.opacity(0.9)
+                            : NotchPilotTheme.islandTextMuted.opacity(0.48)
+                    )
+            }
+            .frame(width: 24, height: 24)
+            .frame(width: 30, height: 38)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isEnabled == false || action == nil)
+        .accessibilityLabel(label)
+        .help(label)
     }
 
     private var attentionAccent: some View {

@@ -91,6 +91,24 @@ public struct CodexSurfaceTextInput: Equatable, Sendable {
     }
 }
 
+public struct CodexSurfaceQuickActions: Equatable, Sendable {
+    public let approveOptionID: String?
+    public let rejectOptionID: String?
+    public let rejectUsesCancel: Bool
+
+    public init(
+        approveOptionID: String? = nil,
+        rejectOptionID: String? = nil,
+        rejectUsesCancel: Bool = false
+    ) {
+        self.approveOptionID = approveOptionID
+        self.rejectOptionID = rejectOptionID
+        self.rejectUsesCancel = rejectUsesCancel
+    }
+
+    public static let none = CodexSurfaceQuickActions()
+}
+
 public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let id: String
     public let summary: String
@@ -102,6 +120,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let textInput: CodexSurfaceTextInput?
     public let threadID: String?
     public let threadTitle: String?
+    public let quickActions: CodexSurfaceQuickActions
 
     public init(
         id: String,
@@ -113,7 +132,8 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         options: [CodexSurfaceOption] = [],
         textInput: CodexSurfaceTextInput? = nil,
         threadID: String? = nil,
-        threadTitle: String? = nil
+        threadTitle: String? = nil,
+        quickActions: CodexSurfaceQuickActions = .none
     ) {
         self.id = id
         self.summary = summary
@@ -125,6 +145,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         self.textInput = textInput
         self.threadID = threadID
         self.threadTitle = threadTitle
+        self.quickActions = quickActions
     }
 
     public func merged(with context: CodexThreadContext?) -> CodexActionableSurface {
@@ -146,7 +167,8 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             options: options,
             textInput: textInput,
             threadID: threadID ?? context.threadID,
-            threadTitle: resolvedThreadTitle
+            threadTitle: resolvedThreadTitle,
+            quickActions: quickActions
         )
     }
 
@@ -172,7 +194,8 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             },
             textInput: textInput,
             threadID: threadID,
-            threadTitle: threadTitle
+            threadTitle: threadTitle,
+            quickActions: quickActions
         )
     }
 
@@ -196,7 +219,8 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
                 attachedOptionID: textInput.attachedOptionID
             ),
             threadID: threadID,
-            threadTitle: threadTitle
+            threadTitle: threadTitle,
+            quickActions: quickActions
         )
     }
 

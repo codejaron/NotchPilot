@@ -120,6 +120,113 @@ final class AIPluginMergedExpandedViewTests: XCTestCase {
         XCTAssertEqual(codex.respondedApprovals.map(\.action), [action])
         XCTAssertEqual(claude.respondedApprovals.map(\.requestID), [])
     }
+
+    func testQuickApproveRoutesClaudeOrdinaryAllowAction() {
+        let claude = MergedViewProbeAIPlugin(id: "claude")
+        let approval = makeApproval(
+            requestID: "claude-quick-approval",
+            host: .claude,
+            actions: [
+                ApprovalAction(
+                    id: "claude-deny",
+                    title: "No",
+                    style: .outline,
+                    payload: .claude(.denyOnce)
+                ),
+                ApprovalAction(
+                    id: "claude-allow",
+                    title: "Yes",
+                    style: .primary,
+                    payload: .claude(.allowOnce)
+                ),
+            ]
+        )
+        let summary = makeSummary(
+            id: approval.sessionID,
+            host: .claude,
+            approvalRequestID: approval.requestID
+        )
+
+        let didPerform = AIPluginMergedExpandedView.performQuickApproval(
+            .approve,
+            summary: summary,
+            approvals: [approval],
+            codexSurface: nil,
+            in: [claude]
+        )
+
+        XCTAssertTrue(didPerform)
+        XCTAssertEqual(claude.respondedApprovals.map(\.requestID), ["claude-quick-approval"])
+        XCTAssertEqual(claude.respondedApprovals.map(\.action.id), ["claude-allow"])
+    }
+
+    func testQuickApproveRoutesCodexBySelectingOrdinaryOptionThenSubmitting() {
+        let codexSurface = CodexActionableSurface(
+            id: "codex-surface-quick",
+            summary: "Run command?",
+            primaryButtonTitle: "Submit",
+            cancelButtonTitle: "Skip",
+            options: [
+                CodexSurfaceOption(id: "accept-once", index: 1, title: "Yes", isSelected: true),
+                CodexSurfaceOption(id: "accept-session", index: 2, title: "Yes, for session", isSelected: false),
+            ],
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: "accept-once",
+                rejectUsesCancel: true
+            )
+        )
+        let codex = MergedViewProbeAIPlugin(id: "codex")
+        codex.codexActionableSurface = codexSurface
+        let summary = makeSummary(
+            id: "codex-thread",
+            host: .codex,
+            codexSurfaceID: codexSurface.id
+        )
+
+        let didPerform = AIPluginMergedExpandedView.performQuickApproval(
+            .approve,
+            summary: summary,
+            approvals: [],
+            codexSurface: codexSurface,
+            in: [codex]
+        )
+
+        XCTAssertTrue(didPerform)
+        XCTAssertEqual(codex.selectedCodexOptions.map(\.optionID), ["accept-once"])
+        XCTAssertEqual(codex.performedCodexActions.map(\.action), [.primary])
+    }
+
+    func testQuickRejectRoutesCodexCancelWhenNoRejectOptionIsNeeded() {
+        let codexSurface = CodexActionableSurface(
+            id: "codex-surface-reject",
+            summary: "Run command?",
+            primaryButtonTitle: "Submit",
+            cancelButtonTitle: "Skip",
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: "accept-once",
+                rejectUsesCancel: true
+            )
+        )
+        let codex = MergedViewProbeAIPlugin(id: "codex")
+        codex.codexActionableSurface = codexSurface
+        let summary = makeSummary(
+            id: "codex-thread",
+            host: .codex,
+            codexSurfaceID: codexSurface.id
+        )
+
+        let didPerform = AIPluginMergedExpandedView.performQuickApproval(
+            .reject,
+            summary: summary,
+            approvals: [],
+            codexSurface: codexSurface,
+            in: [codex]
+        )
+
+        XCTAssertTrue(didPerform)
+        XCTAssertTrue(codex.selectedCodexOptions.isEmpty)
+        XCTAssertEqual(codex.performedCodexActions.map(\.action), [.cancel])
+    }
 }
 
 @MainActor
@@ -138,6 +245,8 @@ private final class MergedViewProbeAIPlugin: AIPluginRendering {
     private(set) var activatedSessionIDs: [String] = []
     private(set) var stoppedSessionIDs: [String] = []
     private(set) var respondedApprovals: [(requestID: String, action: ApprovalAction)] = []
+    private(set) var performedCodexActions: [(action: CodexSurfaceAction, surfaceID: String)] = []
+    private(set) var selectedCodexOptions: [(optionID: String, surfaceID: String)] = []
 
     init(
         id: String,
@@ -173,6 +282,18 @@ private final class MergedViewProbeAIPlugin: AIPluginRendering {
         respondedApprovals.append((requestID, action))
     }
 
+    @discardableResult
+    func performCodexAction(_ action: CodexSurfaceAction, surfaceID: String) -> Bool {
+        performedCodexActions.append((action, surfaceID))
+        return true
+    }
+
+    @discardableResult
+    func selectCodexOption(_ optionID: String, surfaceID: String) -> Bool {
+        selectedCodexOptions.append((optionID, surfaceID))
+        return true
+    }
+
     func activate(bus: EventBus) {}
 
     func deactivate() {}
@@ -201,7 +322,11 @@ private func makeSummary(
     )
 }
 
-private func makeApproval(requestID: String, host: AIHost) -> PendingApproval {
+private func makeApproval(
+    requestID: String,
+    host: AIHost,
+    actions: [ApprovalAction] = []
+) -> PendingApproval {
     PendingApproval(
         requestID: requestID,
         sessionID: "\(requestID)-session",
@@ -215,7 +340,7 @@ private func makeApproval(requestID: String, host: AIHost) -> PendingApproval {
             toolKind: .bash
         ),
         capabilities: .none,
-        availableActions: [],
+        availableActions: actions,
         status: .pending
     )
 }

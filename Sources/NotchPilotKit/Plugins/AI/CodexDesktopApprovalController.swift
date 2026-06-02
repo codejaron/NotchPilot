@@ -320,7 +320,11 @@ final class CodexDesktopApprovalController {
                 followUp: makeFollowUpRequest(from: request)
             ),
             cancelResult: negativeResult,
-            delivery: delivery
+            delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: optionID(in: positiveOptions, matchingDecision: "accept"),
+                rejectUsesCancel: true
+            )
         )
     }
 
@@ -361,7 +365,11 @@ final class CodexDesktopApprovalController {
                 followUp: makeFollowUpRequest(from: request)
             ),
             cancelResult: negativeResult,
-            delivery: delivery
+            delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: optionID(in: positiveOptions, matchingDecision: "accept"),
+                rejectUsesCancel: true
+            )
         )
     }
 
@@ -405,7 +413,11 @@ final class CodexDesktopApprovalController {
                 Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
             ),
             cancelResult: emptyPermissionsGrantResult(),
-            delivery: delivery
+            delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: options.first?.option.id,
+                rejectUsesCancel: true
+            )
         )
     }
 
@@ -477,6 +489,10 @@ final class CodexDesktopApprovalController {
             ),
             cancelResult: mcpElicitationResult(action: "decline"),
             delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: mcpAcceptOptionID(in: options),
+                rejectUsesCancel: true
+            ),
             primaryButtonTitle: "Allow",
             cancelButtonTitle: "Cancel",
             showsActionButtons: false
@@ -552,7 +568,11 @@ final class CodexDesktopApprovalController {
             cancelResult: .object([
                 "decision": .string("abort"),
             ]),
-            delivery: delivery
+            delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: optionID(in: options, matchingDecision: "approved"),
+                rejectOptionID: optionID(in: options, matchingDecision: "denied")
+            )
         )
     }
 
@@ -583,7 +603,11 @@ final class CodexDesktopApprovalController {
             cancelResult: .object([
                 "decision": .string("abort"),
             ]),
-            delivery: delivery
+            delivery: delivery,
+            quickActions: CodexSurfaceQuickActions(
+                approveOptionID: optionID(in: options, matchingDecision: "approved"),
+                rejectOptionID: optionID(in: options, matchingDecision: "denied")
+            )
         )
     }
 
@@ -632,6 +656,7 @@ final class CodexDesktopApprovalController {
         selectionMode: SelectionMode,
         cancelResult: JSONValue,
         delivery: Delivery,
+        quickActions: CodexSurfaceQuickActions = .none,
         primaryButtonTitle: String = "Submit",
         cancelButtonTitle: String = "Skip",
         showsActionButtons: Bool = true
@@ -656,7 +681,8 @@ final class CodexDesktopApprovalController {
                 showsActionButtons: showsActionButtons,
                 options: options.map(\.option),
                 textInput: textInput,
-                threadID: threadID
+                threadID: threadID,
+                quickActions: quickActions
             )
         )
     }
@@ -822,6 +848,28 @@ final class CodexDesktopApprovalController {
                 "decision": decision,
             ])
         )
+    }
+
+    private func optionID(
+        in options: [(option: CodexSurfaceOption, result: JSONValue)],
+        matchingDecision decision: String
+    ) -> String? {
+        options.first { item in
+            item.result.objectValue?["decision"]?.stringValue == decision
+        }?.option.id
+    }
+
+    private func mcpAcceptOptionID(
+        in options: [(option: CodexSurfaceOption, result: JSONValue)]
+    ) -> String? {
+        options.first { item in
+            guard let object = item.result.objectValue else {
+                return false
+            }
+
+            return object["action"]?.stringValue == "accept"
+                && (object["_meta"] == nil || object["_meta"] == .null)
+        }?.option.id
     }
 
     private func optionTitle(
@@ -1032,7 +1080,8 @@ final class CodexDesktopApprovalController {
             },
             textInput: surface.textInput,
             threadID: surface.threadID,
-            threadTitle: surface.threadTitle
+            threadTitle: surface.threadTitle,
+            quickActions: surface.quickActions
         )
     }
 
