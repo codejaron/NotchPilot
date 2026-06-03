@@ -221,6 +221,11 @@ public struct NotchContentView: View {
 
             Spacer(minLength: 0)
 
+            if aiTabActive {
+                AIUsageQuotaHeaderView(snapshots: aiPlugins.compactMap(\.usageQuotaSnapshot))
+                    .layoutPriority(1)
+            }
+
             shellSettingsButton
         }
         .frame(height: NotchExpandedLayout.headerHeight)

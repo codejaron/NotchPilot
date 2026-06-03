@@ -11,7 +11,7 @@ from typing import Optional
 import uuid
 
 
-NOTCHPILOT_BRIDGE_VERSION = 4
+NOTCHPILOT_BRIDGE_VERSION = 5
 DEFAULT_SOCKET_PATH = "/tmp/notchpilot.sock"
 TERMINAL_BUNDLE_IDS = {
     "Apple_Terminal": "com.apple.Terminal",
@@ -197,6 +197,20 @@ def maybe_inject_session_id(raw_json: str, agent_pid: int) -> str:
     return json.dumps(parsed)
 
 
+def wrap_status_line_payload(raw_json: str) -> str:
+    try:
+        payload = json.loads(raw_json)
+    except (TypeError, ValueError):
+        payload = {"raw": raw_json}
+
+    return json.dumps(
+        {
+            "notchpilot_event_name": "StatusLine",
+            "payload": payload,
+        }
+    )
+
+
 def collect_origin(rows: Optional[list[dict[str, object]]] = None) -> dict[str, object]:
     if rows is None:
         rows = process_tree()
@@ -236,26 +250,30 @@ def main() -> int:
     parser.add_argument("--host", required=True, choices=["claude", "codex", "devin"])
     parser.add_argument("--socket-path", default=os.environ.get("NOTCHPILOT_SOCKET_PATH", DEFAULT_SOCKET_PATH))
     parser.add_argument("--request-id", default=os.environ.get("NOTCHPILOT_REQUEST_ID", str(uuid.uuid4())))
+    parser.add_argument("--status-line", action="store_true")
     args = parser.parse_args()
 
     raw_json = read_stdin()
     rows = process_tree()
-    detected = detect_agent_process(rows)
 
     effective_host = args.host
-    agent_pid: Optional[int] = None
-    if detected is not None:
-        agent_name, agent_pid = detected
-        # Override host only when we have stronger evidence than the static
-        # --host flag. The hook command is hard-installed as `--host claude`
-        # in ~/.claude/settings.json, but Devin Local reuses that same hooks
-        # file. When the real ancestor is `devin`, re-tag the frame so the
-        # Swift side routes it to the Devin display branch.
-        if agent_name == "devin":
-            effective_host = "devin"
+    if args.status_line:
+        raw_json = wrap_status_line_payload(raw_json)
+    else:
+        detected = detect_agent_process(rows)
+        agent_pid: Optional[int] = None
+        if detected is not None:
+            agent_name, agent_pid = detected
+            # Override host only when we have stronger evidence than the static
+            # --host flag. The hook command is hard-installed as `--host claude`
+            # in ~/.claude/settings.json, but Devin Local reuses that same hooks
+            # file. When the real ancestor is `devin`, re-tag the frame so the
+            # Swift side routes it to the Devin display branch.
+            if agent_name == "devin":
+                effective_host = "devin"
 
-    if agent_pid is not None:
-        raw_json = maybe_inject_session_id(raw_json, agent_pid)
+        if agent_pid is not None:
+            raw_json = maybe_inject_session_id(raw_json, agent_pid)
 
     frame = {
         "host": effective_host,
@@ -266,11 +284,18 @@ def main() -> int:
     if origin:
         frame["origin"] = origin
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(args.socket_path)
-        client.sendall(json.dumps(frame).encode("utf-8") + b"\n")
-        response = read_line(client)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(args.socket_path)
+            client.sendall(json.dumps(frame).encode("utf-8") + b"\n")
+            response = read_line(client)
+    except OSError:
+        if args.status_line:
+            return 0
+        raise
 
+    if args.status_line:
+        return 0
     sys.stdout.write(response or "{}")
     return 0
 

@@ -21,6 +21,7 @@ public final class ClaudePlugin: AIPluginRendering {
     @Published public private(set) var sessions: [AISession] = []
     @Published public private(set) var pendingApprovals: [PendingApproval] = []
     @Published public private(set) var codexActionableSurface: CodexActionableSurface?
+    @Published private(set) var usageQuotaSnapshot: AIUsageQuotaSnapshot?
     @Published public private(set) var lastErrorMessage: String?
 
     private let runtime = AIAgentRuntime()
@@ -127,6 +128,7 @@ public final class ClaudePlugin: AIPluginRendering {
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
+        usageQuotaSnapshot = nil
         lastErrorMessage = nil
         activityTracker.reset()
         let reader = transcriptReader
@@ -146,6 +148,11 @@ public final class ClaudePlugin: AIPluginRendering {
         }
 
         guard isEnabled(forHost: frame.host) else {
+            respond(Data("{}".utf8))
+            return
+        }
+
+        if handleStatusLineFrameIfPresent(frame) {
             respond(Data("{}".utf8))
             return
         }
@@ -215,6 +222,20 @@ public final class ClaudePlugin: AIPluginRendering {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
             respond(Data("{}".utf8))
         }
+    }
+
+    private func handleStatusLineFrameIfPresent(_ frame: BridgeFrame) -> Bool {
+        guard frame.host == .claude,
+              AIUsageQuotaSnapshot.isClaudeStatusLine(rawJSON: frame.rawJSON)
+        else {
+            return false
+        }
+
+        usageQuotaSnapshot = AIUsageQuotaSnapshot.claudeStatusLine(
+            rawJSON: frame.rawJSON,
+            collectedAt: nowProvider()
+        )
+        return true
     }
 
     private func shouldDeferToNativeApproval(for envelope: AIBridgeEnvelope) -> Bool {

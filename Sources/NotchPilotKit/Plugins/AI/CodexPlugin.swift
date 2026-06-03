@@ -18,11 +18,15 @@ public final class CodexPlugin: AIPluginRendering {
     @Published public private(set) var sessions: [AISession] = []
     @Published public private(set) var pendingApprovals: [PendingApproval] = []
     @Published public private(set) var codexActionableSurface: CodexActionableSurface?
+    @Published private(set) var usageQuotaSnapshot: AIUsageQuotaSnapshot?
 
     private static let codexThreadActivityExpiry: TimeInterval = 24 * 60 * 60
+    private static let usageQuotaRefreshInterval: TimeInterval = 30
 
     private let settingsStore: SettingsStore
     private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
+    private let quotaReader: any CodexSessionQuotaReading
+    private let quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
 
@@ -38,15 +42,35 @@ public final class CodexPlugin: AIPluginRendering {
     /// `input.required` when a new surface appears (or replaces a different
     /// one), not on every nil → nil refresh.
     private var lastSeenSurfaceID: String?
+    private var lastQuotaRefreshAt: Date?
 
-    public init(
+    public convenience init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
+        self.init(
+            settingsStore: settingsStore,
+            codexMonitor: codexMonitor,
+            quotaReader: CodexSessionQuotaReader(),
+            sessionFocuser: sessionFocuser,
+            nowProvider: nowProvider
+        )
+    }
+
+    init(
+        settingsStore: SettingsStore = .shared,
+        codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
+        quotaReader: any CodexSessionQuotaReading = CodexSessionQuotaReader(),
+        quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = CodexSessionQuotaRefreshScheduler(),
+        sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
+        nowProvider: @escaping @Sendable () -> Date = Date.init
+    ) {
         self.settingsStore = settingsStore
         self.codexMonitor = codexMonitor
+        self.quotaReader = quotaReader
+        self.quotaRefreshScheduler = quotaRefreshScheduler
         self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
         self.codexThreads = CodexThreadRegistry(activityExpiry: Self.codexThreadActivityExpiry)
@@ -54,6 +78,7 @@ public final class CodexPlugin: AIPluginRendering {
 
         settingsStore.$codexPluginEnabled
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] isEnabled in
                 self?.handlePluginEnabledChange(isEnabled)
             }
@@ -103,11 +128,14 @@ public final class CodexPlugin: AIPluginRendering {
                 $0.handleCodexSurfaceChange(surface)
             }
         }
+        startQuotaRefreshScheduler()
+        refreshUsageQuotaSnapshot(force: true)
         codexMonitor.start()
     }
 
     public func deactivate() {
         dismissAllSneakPeeks()
+        quotaRefreshScheduler.deactivate()
         codexMonitor.stop()
         codexMonitor.onThreadContextChanged = nil
         codexMonitor.onConnectionStateChanged = nil
@@ -118,6 +146,8 @@ public final class CodexPlugin: AIPluginRendering {
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
+        usageQuotaSnapshot = nil
+        lastQuotaRefreshAt = nil
         lastSeenPhasesByThreadID.removeAll()
         lastSeenSurfaceID = nil
         bus = nil
@@ -201,6 +231,7 @@ public final class CodexPlugin: AIPluginRendering {
         return sessions
             .map { session in
                 let codexSurface = codexSurfaceForSession(session)
+                let context = codexThreads.preferredContext(for: session.id)
                 return AIPluginExpandedSessionSummary(
                     id: session.id,
                     host: session.host,
@@ -213,6 +244,8 @@ public final class CodexPlugin: AIPluginRendering {
                     updatedAt: session.updatedAt,
                     inputTokenCount: session.inputTokenCount,
                     outputTokenCount: session.outputTokenCount,
+                    contextInputTokenCount: context?.contextInputTokenCount,
+                    contextWindowTokenCount: context?.contextWindowTokenCount,
                     runtimeDurationText: runtimeDurationText(forThreadID: session.id, now: now)
                 )
             }
@@ -378,6 +411,7 @@ public final class CodexPlugin: AIPluginRendering {
         codexThreads.apply(update)
         syncState()
         syncSneakPeek()
+        refreshUsageQuotaSnapshot(force: false)
 
         lastSeenPhasesByThreadID[threadID] = nextPhase
         if previousPhase != .completed, nextPhase == .completed {
@@ -419,6 +453,7 @@ public final class CodexPlugin: AIPluginRendering {
         codexThreads.prune(now: nowProvider())
         sessions = codexThreads.sessions()
         codexActionableSurface = mergedCodexSurface()
+        syncQuotaRefreshFallbackTimer()
     }
 
     var approvalSneakNotificationsEnabled: Bool {
@@ -548,8 +583,49 @@ public final class CodexPlugin: AIPluginRendering {
 
     private func handlePluginEnabledChange(_ isEnabled: Bool) {
         self.isEnabled = isEnabled
+        if isEnabled {
+            if bus != nil {
+                startQuotaRefreshScheduler()
+            }
+            refreshUsageQuotaSnapshot(force: true)
+        } else {
+            quotaRefreshScheduler.deactivate()
+            usageQuotaSnapshot = nil
+            lastQuotaRefreshAt = nil
+        }
         syncSneakPeek()
         objectWillChange.send()
+    }
+
+    private func refreshUsageQuotaSnapshot(force: Bool) {
+        guard isEnabled else {
+            usageQuotaSnapshot = nil
+            lastQuotaRefreshAt = nil
+            return
+        }
+
+        let now = nowProvider()
+        if force == false,
+           let lastQuotaRefreshAt,
+           now.timeIntervalSince(lastQuotaRefreshAt) < Self.usageQuotaRefreshInterval {
+            return
+        }
+
+        lastQuotaRefreshAt = now
+        usageQuotaSnapshot = quotaReader.latestSnapshot(collectedAt: now)
+    }
+
+    private func startQuotaRefreshScheduler() {
+        quotaRefreshScheduler.activate { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refreshUsageQuotaSnapshot(force: false)
+            }
+        }
+        syncQuotaRefreshFallbackTimer()
+    }
+
+    private func syncQuotaRefreshFallbackTimer() {
+        quotaRefreshScheduler.setFallbackTimerEnabled(isEnabled && codexThreads.hasLiveExecution)
     }
 
     private func desiredSneakPeek(

@@ -6,6 +6,7 @@ protocol AIPluginRendering: NotchPlugin {
     var sessions: [AISession] { get }
     var pendingApprovals: [PendingApproval] { get }
     var codexActionableSurface: CodexActionableSurface? { get }
+    var usageQuotaSnapshot: AIUsageQuotaSnapshot? { get }
     var currentCompactActivity: AIPluginCompactActivity? { get }
     var expandedSessionSummaries: [AIPluginExpandedSessionSummary] { get }
     var approvalSneakNotificationsEnabled: Bool { get }
@@ -31,6 +32,8 @@ protocol AIPluginRendering: NotchPlugin {
 }
 
 extension AIPluginRendering {
+    var usageQuotaSnapshot: AIUsageQuotaSnapshot? { nil }
+
     public func preview(context: NotchContext) -> NotchPluginPreview? {
         guard isEnabled, shouldRenderCompactPreview else {
             return nil

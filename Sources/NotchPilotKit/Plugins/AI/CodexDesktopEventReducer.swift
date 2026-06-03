@@ -234,10 +234,69 @@ public struct CodexDesktopEventReducer {
             title: conversationTitle(from: state),
             activityLabel: conversationActivityLabel(from: state),
             phase: conversationPhase(from: state),
-            inputTokenCount: state.integerValue(at: ["latestTokenUsageInfo", "total", "inputTokens"]),
-            outputTokenCount: state.integerValue(at: ["latestTokenUsageInfo", "total", "outputTokens"]),
+            inputTokenCount: contextInputTokenCount(from: state),
+            outputTokenCount: lastOutputTokenCount(from: state),
+            contextInputTokenCount: contextInputTokenCount(from: state),
+            contextWindowTokenCount: contextWindowTokenCount(from: state),
             launchContext: conversationLaunchContext(conversationID: conversationID)
         )
+    }
+
+    private func contextInputTokenCount(from state: [String: JSONValue]) -> Int? {
+        firstNonNegativeInteger(in: state, paths: [
+            ["latestTokenUsageInfo", "last", "inputTokens"],
+            ["latestTokenUsageInfo", "last", "input_tokens"],
+            ["latestTokenUsageInfo", "lastTokenUsage", "inputTokens"],
+            ["latestTokenUsageInfo", "lastTokenUsage", "input_tokens"],
+            ["latestTokenUsageInfo", "last_token_usage", "inputTokens"],
+            ["latestTokenUsageInfo", "last_token_usage", "input_tokens"],
+            ["latestTokenUsageInfo", "info", "lastTokenUsage", "inputTokens"],
+            ["latestTokenUsageInfo", "info", "lastTokenUsage", "input_tokens"],
+            ["latestTokenUsageInfo", "info", "last_token_usage", "inputTokens"],
+            ["latestTokenUsageInfo", "info", "last_token_usage", "input_tokens"],
+        ])
+    }
+
+    private func lastOutputTokenCount(from state: [String: JSONValue]) -> Int? {
+        firstNonNegativeInteger(in: state, paths: [
+            ["latestTokenUsageInfo", "last", "outputTokens"],
+            ["latestTokenUsageInfo", "last", "output_tokens"],
+            ["latestTokenUsageInfo", "lastTokenUsage", "outputTokens"],
+            ["latestTokenUsageInfo", "lastTokenUsage", "output_tokens"],
+            ["latestTokenUsageInfo", "last_token_usage", "outputTokens"],
+            ["latestTokenUsageInfo", "last_token_usage", "output_tokens"],
+            ["latestTokenUsageInfo", "info", "lastTokenUsage", "outputTokens"],
+            ["latestTokenUsageInfo", "info", "lastTokenUsage", "output_tokens"],
+            ["latestTokenUsageInfo", "info", "last_token_usage", "outputTokens"],
+            ["latestTokenUsageInfo", "info", "last_token_usage", "output_tokens"],
+        ])
+    }
+
+    private func contextWindowTokenCount(from state: [String: JSONValue]) -> Int? {
+        let candidatePaths: [[String]] = [
+            ["latestTokenUsageInfo", "modelContextWindow"],
+            ["latestTokenUsageInfo", "model_context_window"],
+            ["latestTokenUsageInfo", "info", "modelContextWindow"],
+            ["latestTokenUsageInfo", "info", "model_context_window"],
+        ]
+
+        for path in candidatePaths {
+            if let value = state.integerValue(at: path), value > 0 {
+                return value
+            }
+        }
+
+        return nil
+    }
+
+    private func firstNonNegativeInteger(in state: [String: JSONValue], paths: [[String]]) -> Int? {
+        for path in paths {
+            if let value = state.integerValue(at: path), value >= 0 {
+                return value
+            }
+        }
+
+        return nil
     }
 
     private func conversationLaunchContext(conversationID: String) -> AISessionLaunchContext? {

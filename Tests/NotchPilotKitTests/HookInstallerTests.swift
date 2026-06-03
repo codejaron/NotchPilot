@@ -47,8 +47,12 @@ final class HookInstallerTests: XCTestCase {
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
         let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
         let commands = stopEntries.flatMap(commandStrings(in:))
+        let statusLine = try XCTUnwrap(json["statusLine"] as? [String: Any])
+        let statusLineCommand = try XCTUnwrap(statusLine["command"] as? String)
         XCTAssertEqual(stopEntries.count, 2)
         XCTAssertTrue(commands.contains { $0.contains("/tmp/notch-bridge.py") && $0.contains("--host claude") })
+        XCTAssertTrue(statusLineCommand.contains("/tmp/notch-bridge.py"))
+        XCTAssertTrue(statusLineCommand.contains("--status-line"))
     }
 
     func testUninstallClaudeHooksRemovesOnlyManagedEntries() throws {
@@ -78,6 +82,10 @@ final class HookInstallerTests: XCTestCase {
                     ]
                   }
                 ]
+              },
+              "statusLine": {
+                "type": "command",
+                "command": "\\"/tmp/notch-bridge.py\\" --host claude --status-line"
               }
             }
             """.utf8
@@ -90,6 +98,7 @@ final class HookInstallerTests: XCTestCase {
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
         let stopEntries = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(stopEntries.count, 1)
+        XCTAssertNil(json["statusLine"])
         XCTAssertTrue(serializedJSONString(json).contains("echo keep"))
         XCTAssertFalse(serializedJSONString(json).contains("notch-bridge.py"))
     }
@@ -159,12 +168,16 @@ final class HookInstallerTests: XCTestCase {
         let bridgeURL = tempHomeURL.appendingPathComponent("notch-bridge.py")
         let bridgePath = bridgeURL.path
         let escapedBridgePath = bridgePath.replacingOccurrences(of: "\"", with: "\\\"")
-        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 4\n".write(
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 5\n".write(
             to: bridgeURL, atomically: true, encoding: .utf8
         )
         try Data(
             """
             {
+              "statusLine": {
+                "type": "command",
+                "command": "\\"\(escapedBridgePath)\\" --host claude --status-line"
+              },
               "hooks": {
                 "PreToolUse": [
                   { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
@@ -452,6 +465,10 @@ final class HookInstallerTests: XCTestCase {
         try Data(
             """
             {
+              "statusLine": {
+                "type": "command",
+                "command": "\\"\(escapedBridgePath)\\" --host claude --status-line"
+              },
               "hooks": {
                 "PreToolUse": [
                   { "matcher": "*", "hooks": [ { "type": "command", "command": "\\"\(escapedBridgePath)\\" --host claude" } ] }
@@ -477,7 +494,7 @@ final class HookInstallerTests: XCTestCase {
         ).write(to: settingsURL)
 
         // Pretend the installed bridge script is still on the *previous* version.
-        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 3\n".write(
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 4\n".write(
             to: bridgeURL, atomically: true, encoding: .utf8
         )
 
@@ -487,7 +504,7 @@ final class HookInstallerTests: XCTestCase {
                       "An older bridge version on disk must be flagged for update")
 
         // Now upgrade the on-disk bridge to the current version — should clear.
-        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 4\n".write(
+        try "#!/usr/bin/env python3\nNOTCHPILOT_BRIDGE_VERSION = 5\n".write(
             to: bridgeURL, atomically: true, encoding: .utf8
         )
         XCTAssertFalse(installer.claudeHooksNeedUpdate(bridgeScript: bridgePath),

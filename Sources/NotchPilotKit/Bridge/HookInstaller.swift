@@ -18,7 +18,7 @@ public enum HookInstallError: LocalizedError {
 }
 
 public struct HookInstaller {
-    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 4"
+    private static let bridgeVersionNeedle = "NOTCHPILOT_BRIDGE_VERSION = 5"
 
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
@@ -41,6 +41,7 @@ public struct HookInstaller {
         var root = try loadJSONObjectIfPresent(at: settingsURL)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         let command = "\"\(bridgeScript)\" --host claude"
+        let statusLineCommand = "\"\(bridgeScript)\" --host claude --status-line"
         let configuration = claudeHookConfiguration(command: command)
         let managedEventNames = Set(configuration.keys)
 
@@ -62,6 +63,10 @@ public struct HookInstaller {
         }
 
         root["hooks"] = hooks
+        root["statusLine"] = [
+            "type": "command",
+            "command": statusLineCommand,
+        ]
         try writeJSONObject(root, to: settingsURL)
     }
 
@@ -72,9 +77,7 @@ public struct HookInstaller {
         }
 
         var root = try loadJSONObject(at: settingsURL)
-        guard var hooks = root["hooks"] as? [String: Any] else {
-            return
-        }
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
 
         for eventName in hooks.keys.sorted() {
             guard let entries = hooks[eventName] as? [[String: Any]] else { continue }
@@ -90,6 +93,11 @@ public struct HookInstaller {
             root.removeValue(forKey: "hooks")
         } else {
             root["hooks"] = hooks
+        }
+
+        if let statusLine = root["statusLine"] as? [String: Any],
+           isManagedStatusLine(statusLine, bridgeScript: bridgeScript) {
+            root.removeValue(forKey: "statusLine")
         }
 
         try writeJSONObject(root, to: settingsURL)
@@ -151,6 +159,9 @@ public struct HookInstaller {
         }
 
         let managedEventNames = Set(claudeHookConfiguration(command: "").keys)
+        if isManagedStatusLine(root["statusLine"] as? [String: Any], bridgeScript: bridgeScript) == false {
+            return true
+        }
 
         for (eventName, value) in hooks {
             guard let entries = value as? [[String: Any]] else { continue }
@@ -334,5 +345,14 @@ public struct HookInstaller {
             }
             return hook["timeout"] != nil
         }
+    }
+
+    private func isManagedStatusLine(_ statusLine: [String: Any]?, bridgeScript: String?) -> Bool {
+        guard let command = statusLine?["command"] as? String else {
+            return false
+        }
+
+        let commandNeedle = bridgeScript?.isEmpty == false ? bridgeScript! : "notch-bridge.py"
+        return command.contains(commandNeedle) && command.contains("--status-line")
     }
 }

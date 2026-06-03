@@ -50,7 +50,7 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertTrue(reenabled)
     }
 
-    func testActionableSurfaceDrivesCompactActivityAndSessionSummary() async {
+    func testActionableSurfaceDrivesCompactActivityAndSessionSummary() async throws {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
@@ -69,7 +69,8 @@ final class CodexPluginTests: XCTestCase {
                     activityLabel: "Plan",
                     phase: .plan,
                     inputTokenCount: 120,
-                    outputTokenCount: 45
+                    outputTokenCount: 45,
+                    contextWindowTokenCount: 1_000
                 )
             )
             codexMonitor.emit(
@@ -91,9 +92,179 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(activity?.sessionTitle, "Write plan")
         XCTAssertEqual(summaries.first?.inputTokenCount, 120)
         XCTAssertEqual(summaries.first?.outputTokenCount, 45)
+        XCTAssertEqual(try XCTUnwrap(summaries.first?.contextUsagePercent), 16.5, accuracy: 0.001)
         XCTAssertEqual(summaries.first?.approvalCount, 0)
         XCTAssertEqual(summaries.first?.codexSurfaceID, "surface-1")
         XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
+    }
+
+    func testActivateReadsUsageQuotaSnapshotFromSessionLog() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
+            AIUsageQuotaSnapshot(
+                host: .codex,
+                source: .codexSessionLog,
+                collectedAt: Date(timeIntervalSince1970: 0),
+                windows: [
+                    AIUsageQuotaWindow(
+                        kind: .fiveHour,
+                        usedPercent: 25,
+                        resetsAt: nil,
+                        windowMinutes: 300
+                    ),
+                ],
+                planType: "plus"
+            ),
+        ])
+        let plugin = await MainActor.run {
+            CodexPlugin(codexMonitor: codexMonitor, quotaReader: quotaReader)
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+
+        let snapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        XCTAssertEqual(snapshot?.window(.fiveHour)?.remainingPercent, 75)
+        XCTAssertEqual(quotaReader.readCount, 1)
+    }
+
+    func testThreadContextChangeRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
+            AIUsageQuotaSnapshot(
+                host: .codex,
+                source: .codexSessionLog,
+                collectedAt: Date(timeIntervalSince1970: 0),
+                windows: [
+                    AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 25, resetsAt: nil, windowMinutes: 300),
+                ],
+                planType: "plus"
+            ),
+            nil,
+        ])
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaReader: quotaReader,
+                nowProvider: { now.value }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+        let initialSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        XCTAssertNotNil(initialSnapshot)
+
+        now.value = Date(timeIntervalSince1970: 31)
+        await MainActor.run {
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-quota-refresh",
+                    title: "Quota Refresh",
+                    activityLabel: "Working",
+                    phase: .working,
+                    updatedAt: Date(timeIntervalSince1970: 31)
+                )
+            )
+        }
+
+        let refreshedSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        XCTAssertNil(refreshedSnapshot)
+        XCTAssertEqual(quotaReader.readCount, 2)
+    }
+
+    func testQuotaRefreshSchedulerRequestRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
+        let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaRefreshScheduler = SplitFakeCodexQuotaRefreshScheduler()
+        let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
+            AIUsageQuotaSnapshot(
+                host: .codex,
+                source: .codexSessionLog,
+                collectedAt: Date(timeIntervalSince1970: 0),
+                windows: [
+                    AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 25, resetsAt: nil, windowMinutes: 300),
+                ],
+                planType: "plus"
+            ),
+            AIUsageQuotaSnapshot(
+                host: .codex,
+                source: .codexSessionLog,
+                collectedAt: Date(timeIntervalSince1970: 31),
+                windows: [
+                    AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 10, resetsAt: nil, windowMinutes: 300),
+                ],
+                planType: "plus"
+            ),
+        ])
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaReader: quotaReader,
+                quotaRefreshScheduler: quotaRefreshScheduler,
+                nowProvider: { now.value }
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+        XCTAssertEqual(quotaReader.readCount, 1)
+
+        now.value = Date(timeIntervalSince1970: 31)
+        quotaRefreshScheduler.emitRefreshRequest()
+
+        let refreshedSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        XCTAssertEqual(refreshedSnapshot?.window(.fiveHour)?.remainingPercent, 90)
+        XCTAssertEqual(quotaReader.readCount, 2)
+    }
+
+    func testQuotaFallbackTimerRunsOnlyWhileCodexThreadIsLive() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaRefreshScheduler = SplitFakeCodexQuotaRefreshScheduler()
+        let plugin = await MainActor.run {
+            CodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaRefreshScheduler: quotaRefreshScheduler
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false])
+
+        await MainActor.run {
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-live-quota",
+                    title: "Live quota",
+                    activityLabel: "Working",
+                    phase: .working
+                ),
+                marksActivity: false
+            )
+        }
+        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false, true])
+
+        await MainActor.run {
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-live-quota",
+                    title: "Live quota",
+                    activityLabel: "Done",
+                    phase: .completed
+                )
+            )
+        }
+        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false, true, false])
     }
 
     func testActiveThreadEmitsSneakPeekWithoutActionableSurface() async {
@@ -808,6 +979,52 @@ private final class MutableDateProvider: @unchecked Sendable {
 
     init(_ value: Date) {
         self.value = value
+    }
+}
+
+private final class SplitFakeCodexQuotaReader: @unchecked Sendable, CodexSessionQuotaReading {
+    private var snapshots: [AIUsageQuotaSnapshot?]
+    private(set) var readCount = 0
+
+    init(snapshots: [AIUsageQuotaSnapshot?]) {
+        self.snapshots = snapshots
+    }
+
+    func latestSnapshot(collectedAt: Date) -> AIUsageQuotaSnapshot? {
+        readCount += 1
+        guard snapshots.isEmpty == false else {
+            return nil
+        }
+        return snapshots.removeFirst()
+    }
+}
+
+private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
+    private var onRefreshRequested: (@Sendable () -> Void)?
+    private(set) var activateCount = 0
+    private(set) var deactivateCount = 0
+    private(set) var fallbackTimerEnabledChanges: [Bool] = []
+
+    func activate(onRefreshRequested: @escaping @Sendable () -> Void) {
+        activateCount += 1
+        self.onRefreshRequested = onRefreshRequested
+    }
+
+    func setFallbackTimerEnabled(_ isEnabled: Bool) {
+        guard fallbackTimerEnabledChanges.last != isEnabled else {
+            return
+        }
+        fallbackTimerEnabledChanges.append(isEnabled)
+    }
+
+    func deactivate() {
+        deactivateCount += 1
+        onRefreshRequested = nil
+        setFallbackTimerEnabled(false)
+    }
+
+    func emitRefreshRequest() {
+        onRefreshRequested?()
     }
 }
 

@@ -76,6 +76,8 @@ struct CodexThreadRegistry {
             phase: .interrupted,
             inputTokenCount: context.inputTokenCount,
             outputTokenCount: context.outputTokenCount,
+            contextInputTokenCount: context.contextInputTokenCount,
+            contextWindowTokenCount: context.contextWindowTokenCount,
             updatedAt: date,
             launchContext: context.launchContext
         )
@@ -92,6 +94,10 @@ struct CodexThreadRegistry {
 
     func sessions() -> [AISession] {
         contextsByID.keys.compactMap(session(threadID:)).sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var hasLiveExecution: Bool {
+        contextsByID.values.contains { $0.phase.isLiveExecution }
     }
 
     func session(threadID: String) -> AISession? {
@@ -226,6 +232,15 @@ struct CodexThreadRegistry {
 }
 
 private extension CodexThreadPhase {
+    var isLiveExecution: Bool {
+        switch self {
+        case .plan, .working:
+            return true
+        case .completed, .connected, .interrupted, .error, .unknown:
+            return false
+        }
+    }
+
     var isTerminal: Bool {
         switch self {
         case .completed, .interrupted, .error:

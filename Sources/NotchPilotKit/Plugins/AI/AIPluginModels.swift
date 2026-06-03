@@ -40,6 +40,8 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
     let updatedAt: Date
     let inputTokenCount: Int?
     let outputTokenCount: Int?
+    let contextInputTokenCount: Int?
+    let contextWindowTokenCount: Int?
     let runtimeDurationText: String?
 
     init(
@@ -54,6 +56,8 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         updatedAt: Date,
         inputTokenCount: Int?,
         outputTokenCount: Int?,
+        contextInputTokenCount: Int? = nil,
+        contextWindowTokenCount: Int? = nil,
         runtimeDurationText: String? = nil
     ) {
         self.id = id
@@ -67,6 +71,8 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         self.updatedAt = updatedAt
         self.inputTokenCount = inputTokenCount
         self.outputTokenCount = outputTokenCount
+        self.contextInputTokenCount = contextInputTokenCount
+        self.contextWindowTokenCount = contextWindowTokenCount
         self.runtimeDurationText = runtimeDurationText
     }
 
@@ -94,13 +100,30 @@ struct AIPluginExpandedSessionSummary: Equatable, Identifiable {
         inputTokenCount != nil || outputTokenCount != nil
     }
 
+    var contextUsagePercent: Double? {
+        guard let contextWindowTokenCount, contextWindowTokenCount > 0 else {
+            return nil
+        }
+
+        let contextTokens = contextInputTokenCount ?? ((inputTokenCount ?? 0) + (outputTokenCount ?? 0))
+        guard contextTokens > 0 else {
+            return 0
+        }
+
+        return min(100, max(0, Double(contextTokens) / Double(contextWindowTokenCount) * 100))
+    }
+
+    var hasContextUsage: Bool {
+        contextUsagePercent != nil
+    }
+
     var hasRuntime: Bool {
         guard let runtimeDurationText else { return false }
         return runtimeDurationText.isEmpty == false
     }
 
     var hasMeta: Bool {
-        hasTokenUsage || hasRuntime
+        hasContextUsage || hasTokenUsage || hasRuntime
     }
 }
 

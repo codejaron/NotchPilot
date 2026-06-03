@@ -20,7 +20,12 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                     "type": .string("notLoaded"),
                                 ]),
                                 "latestTokenUsageInfo": .object([
+                                    "modelContextWindow": .integer(20_000),
                                     "total": .object([
+                                        "inputTokens": .integer(4567),
+                                        "outputTokens": .integer(890),
+                                    ]),
+                                    "lastTokenUsage": .object([
                                         "inputTokens": .integer(4567),
                                         "outputTokens": .integer(890),
                                     ]),
@@ -52,7 +57,66 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(context.phase, .working)
         XCTAssertEqual(context.inputTokenCount, 4567)
         XCTAssertEqual(context.outputTokenCount, 890)
+        XCTAssertEqual(context.contextWindowTokenCount, 20_000)
+        XCTAssertEqual(try XCTUnwrap(context.contextUsagePercent), 22.835, accuracy: 0.001)
         XCTAssertEqual(context.launchContext?.codexClientID, "desktop-client")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamSnapshotUsesLastTokenUsageForSessionTokenCountsAndContextWindowOccupancy() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-context"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-context"),
+                                "title": .string("Track Codex context"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("notLoaded"),
+                                ]),
+                                "latestTokenUsageInfo": .object([
+                                    "modelContextWindow": .integer(258_400),
+                                    "total": .object([
+                                        "inputTokens": .integer(22_300_000),
+                                        "outputTokens": .integer(77_200),
+                                    ]),
+                                    "lastTokenUsage": .object([
+                                        "inputTokens": .integer(69_000),
+                                        "outputTokens": .integer(1_200),
+                                    ]),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-1"),
+                                        "status": .string("inProgress"),
+                                        "items": .array([]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.inputTokenCount, 69_000)
+        XCTAssertEqual(context.outputTokenCount, 1_200)
+        XCTAssertEqual(context.contextInputTokenCount, 69_000)
+        XCTAssertEqual(context.contextWindowTokenCount, 258_400)
+        XCTAssertEqual(try XCTUnwrap(context.contextUsagePercent), 26.702, accuracy: 0.001)
         XCTAssertFalse(marksActivity)
     }
 
@@ -113,7 +177,12 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                     "op": .string("replace"),
                                     "path": .array([.string("latestTokenUsageInfo")]),
                                     "value": .object([
+                                        "modelContextWindow": .integer(20_000),
                                         "total": .object([
+                                            "inputTokens": .integer(7000),
+                                            "outputTokens": .integer(1500),
+                                        ]),
+                                        "lastTokenUsage": .object([
                                             "inputTokens": .integer(7000),
                                             "outputTokens": .integer(1500),
                                         ]),
@@ -139,6 +208,8 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertEqual(context.phase, .working)
         XCTAssertEqual(context.inputTokenCount, 7000)
         XCTAssertEqual(context.outputTokenCount, 1500)
+        XCTAssertEqual(context.contextWindowTokenCount, 20_000)
+        XCTAssertEqual(try XCTUnwrap(context.contextUsagePercent), 35, accuracy: 0.001)
         XCTAssertTrue(marksActivity)
     }
 

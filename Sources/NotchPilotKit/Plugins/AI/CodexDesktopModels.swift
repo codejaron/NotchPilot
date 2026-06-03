@@ -19,6 +19,8 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
     public let phase: CodexThreadPhase
     public let inputTokenCount: Int?
     public let outputTokenCount: Int?
+    public let contextInputTokenCount: Int?
+    public let contextWindowTokenCount: Int?
     public let updatedAt: Date
     public let launchContext: AISessionLaunchContext?
 
@@ -29,6 +31,8 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
         phase: CodexThreadPhase,
         inputTokenCount: Int? = nil,
         outputTokenCount: Int? = nil,
+        contextInputTokenCount: Int? = nil,
+        contextWindowTokenCount: Int? = nil,
         updatedAt: Date = Date(),
         launchContext: AISessionLaunchContext? = nil
     ) {
@@ -38,8 +42,23 @@ public struct CodexThreadContext: Equatable, Sendable, Identifiable {
         self.phase = phase
         self.inputTokenCount = inputTokenCount
         self.outputTokenCount = outputTokenCount
+        self.contextInputTokenCount = contextInputTokenCount
+        self.contextWindowTokenCount = contextWindowTokenCount
         self.updatedAt = updatedAt
         self.launchContext = launchContext?.isEmpty == true ? nil : launchContext
+    }
+
+    public var contextUsagePercent: Double? {
+        guard let contextWindowTokenCount, contextWindowTokenCount > 0 else {
+            return nil
+        }
+
+        let contextTokens = contextInputTokenCount ?? ((inputTokenCount ?? 0) + (outputTokenCount ?? 0))
+        guard contextTokens > 0 else {
+            return 0
+        }
+
+        return min(100, max(0, Double(contextTokens) / Double(contextWindowTokenCount) * 100))
     }
 }
 

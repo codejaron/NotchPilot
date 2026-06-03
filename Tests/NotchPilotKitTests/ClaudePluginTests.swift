@@ -59,6 +59,81 @@ final class ClaudePluginTests: XCTestCase {
         bus.unsubscribe(token)
     }
 
+    @MainActor
+    func testStatusLineFrameUpdatesUsageQuotaWithoutCreatingSession() {
+        let store = Self.makeSettingsStore()
+        let plugin = ClaudePlugin(
+            settingsStore: store,
+            nowProvider: { Date(timeIntervalSince1970: 0) }
+        )
+        let responseBox = SplitResponseBox()
+
+        plugin.activate(bus: EventBus())
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-status-line",
+                rawJSON: """
+                {
+                  "notchpilot_event_name": "StatusLine",
+                  "payload": {
+                    "rate_limits": {
+                      "five_hour": {
+                        "used_percentage": 25,
+                        "resets_at": "2026-06-02T12:00:00Z"
+                      },
+                      "seven_day": {
+                        "used_percentage": 40,
+                        "resets_at": "2026-06-08T12:00:00Z"
+                      }
+                    }
+                  }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        XCTAssertTrue(plugin.sessions.isEmpty)
+        XCTAssertEqual(plugin.usageQuotaSnapshot?.window(.fiveHour)?.remainingPercent, 75)
+        XCTAssertEqual(plugin.usageQuotaSnapshot?.window(.sevenDay)?.remainingPercent, 60)
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-status-line-refresh",
+                rawJSON: """
+                {
+                  "notchpilot_event_name": "StatusLine",
+                  "payload": {
+                    "rate_limits": {
+                      "five_hour": {
+                        "used_percentage": 10,
+                        "resets_at": "2026-06-02T13:00:00Z"
+                      },
+                      "seven_day": {
+                        "used_percentage": 55,
+                        "resets_at": "2026-06-08T13:00:00Z"
+                      }
+                    }
+                  }
+                }
+                """
+            ),
+            respond: { data in
+                responseBox.data = data
+            }
+        )
+
+        XCTAssertTrue(plugin.sessions.isEmpty)
+        XCTAssertEqual(plugin.usageQuotaSnapshot?.window(.fiveHour)?.remainingPercent, 90)
+        XCTAssertEqual(plugin.usageQuotaSnapshot?.window(.sevenDay)?.remainingPercent, 45)
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+    }
+
     /// When the user disables only the Claude toggle but keeps Devin on, the
     /// plugin must keep processing Devin frames while silently dropping Claude
     /// ones. This is the headline feature of the per-host enable split.

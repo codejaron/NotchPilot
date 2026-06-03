@@ -249,6 +249,15 @@ private struct AIPluginSessionRow: View {
     @ViewBuilder
     private var sessionMetaColumn: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            if let contextUsagePercent = summary.contextUsagePercent {
+                Text("\(contextUsageLabel) \(formattedContextPercent(contextUsagePercent))")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.9))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
             if summary.hasTokenUsage {
                 HStack(spacing: 6) {
                     Text("↑\(formattedTokenCount(summary.inputTokenCount))")
@@ -270,6 +279,19 @@ private struct AIPluginSessionRow: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
+    }
+
+    private var contextUsageLabel: String {
+        switch settingsStore.interfaceLanguage {
+        case .zhHans:
+            return "上下文"
+        case .english:
+            return "CTX"
+        }
+    }
+
+    private func formattedContextPercent(_ value: Double) -> String {
+        "\(Int(value.rounded()))%"
     }
 
     private func formattedTokenCount(_ value: Int?) -> String {
