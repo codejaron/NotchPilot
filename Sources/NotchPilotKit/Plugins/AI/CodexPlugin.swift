@@ -27,6 +27,7 @@ public final class CodexPlugin: AIPluginRendering {
     private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
     private let quotaReader: any CodexSessionQuotaReading
     private let quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling
+    private let soundPlayer: any SoundPlaying
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
 
@@ -54,6 +55,8 @@ public final class CodexPlugin: AIPluginRendering {
             settingsStore: settingsStore,
             codexMonitor: codexMonitor,
             quotaReader: CodexSessionQuotaReader(),
+            quotaRefreshScheduler: CodexSessionQuotaRefreshScheduler(),
+            soundPlayer: SoundManager.shared,
             sessionFocuser: sessionFocuser,
             nowProvider: nowProvider
         )
@@ -64,6 +67,7 @@ public final class CodexPlugin: AIPluginRendering {
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
         quotaReader: any CodexSessionQuotaReading = CodexSessionQuotaReader(),
         quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = CodexSessionQuotaRefreshScheduler(),
+        soundPlayer: any SoundPlaying = SoundManager.shared,
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
@@ -71,6 +75,7 @@ public final class CodexPlugin: AIPluginRendering {
         self.codexMonitor = codexMonitor
         self.quotaReader = quotaReader
         self.quotaRefreshScheduler = quotaRefreshScheduler
+        self.soundPlayer = soundPlayer
         self.sessionFocuser = sessionFocuser
         self.nowProvider = nowProvider
         self.codexThreads = CodexThreadRegistry(activityExpiry: Self.codexThreadActivityExpiry)
@@ -415,7 +420,7 @@ public final class CodexPlugin: AIPluginRendering {
 
         lastSeenPhasesByThreadID[threadID] = nextPhase
         if previousPhase != .completed, nextPhase == .completed {
-            SoundManager.shared.play(.taskComplete)
+            soundPlayer.play(.taskComplete)
         }
     }
 
@@ -433,7 +438,7 @@ public final class CodexPlugin: AIPluginRendering {
 
         lastSeenSurfaceID = newSurfaceID
         if let newSurfaceID, newSurfaceID != previousSurfaceID {
-            SoundManager.shared.play(.inputRequired)
+            soundPlayer.play(.inputRequired)
         }
     }
 

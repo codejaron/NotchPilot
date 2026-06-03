@@ -32,6 +32,7 @@ public final class ClaudePlugin: AIPluginRendering {
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
     private let transcriptReader: any ClaudeTranscriptReading
+    private let soundPlayer: any SoundPlaying
 
     private weak var bus: EventBus?
     private var responders: [String: @Sendable (Data) -> Void] = [:]
@@ -46,6 +47,7 @@ public final class ClaudePlugin: AIPluginRendering {
         sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         transcriptReader: any ClaudeTranscriptReading = ClaudeTranscriptReader(),
+        soundPlayer: any SoundPlaying = SoundManager.shared,
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
@@ -53,6 +55,7 @@ public final class ClaudePlugin: AIPluginRendering {
         self.sessionScopedApprovalStore = sessionScopedApprovalStore
         self.sessionFocuser = sessionFocuser
         self.transcriptReader = transcriptReader
+        self.soundPlayer = soundPlayer
         self.nowProvider = nowProvider
         self.isEnabled = Self.aggregateEnabled(
             claude: settingsStore.claudePluginEnabled,
@@ -212,11 +215,11 @@ public final class ClaudePlugin: AIPluginRendering {
             case let .respondNow(data):
                 respond(data)
                 if envelope.eventType == .stop {
-                    SoundManager.shared.play(.taskComplete)
+                    soundPlayer.play(.taskComplete)
                 }
             case let .awaitDecision(requestID):
                 responders[requestID] = respond
-                SoundManager.shared.play(.inputRequired)
+                soundPlayer.play(.inputRequired)
             }
         } catch {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."

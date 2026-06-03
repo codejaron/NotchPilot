@@ -20,7 +20,7 @@ final class ClaudePluginTests: XCTestCase {
         store.claudePluginEnabled = false
         store.devinPluginEnabled = false
         let bus = EventBus()
-        let plugin = ClaudePlugin(settingsStore: store)
+        let plugin = Self.makePlugin(settingsStore: store)
         let recorder = SplitEventRecorder()
         let responseBox = SplitResponseBox()
 
@@ -62,7 +62,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testStatusLineFrameUpdatesUsageQuotaWithoutCreatingSession() {
         let store = Self.makeSettingsStore()
-        let plugin = ClaudePlugin(
+        let plugin = Self.makePlugin(
             settingsStore: store,
             nowProvider: { Date(timeIntervalSince1970: 0) }
         )
@@ -143,7 +143,7 @@ final class ClaudePluginTests: XCTestCase {
         store.claudePluginEnabled = false
         store.devinPluginEnabled = true
         let bus = EventBus()
-        let plugin = ClaudePlugin(settingsStore: store)
+        let plugin = Self.makePlugin(settingsStore: store)
         let claudeResponse = SplitResponseBox()
         let devinResponse = SplitResponseBox()
 
@@ -199,7 +199,7 @@ final class ClaudePluginTests: XCTestCase {
         store.claudePluginEnabled = true
         store.devinPluginEnabled = false
         let bus = EventBus()
-        let plugin = ClaudePlugin(settingsStore: store)
+        let plugin = Self.makePlugin(settingsStore: store)
         let claudeResponse = SplitResponseBox()
         let devinResponse = SplitResponseBox()
 
@@ -245,7 +245,7 @@ final class ClaudePluginTests: XCTestCase {
 
     func testPermissionRequestEmitsInteractiveSneakPeek() async {
         let bus = await MainActor.run { EventBus() }
-        let plugin = await MainActor.run { ClaudePlugin() }
+        let plugin = await MainActor.run { Self.makePlugin() }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
         let token = await MainActor.run {
@@ -312,7 +312,7 @@ final class ClaudePluginTests: XCTestCase {
     func testActiveClaudeSessionEmitsActivitySneakPeekAndTracksRuntime() {
         let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
         let bus = EventBus()
-        let plugin = ClaudePlugin(nowProvider: { now.value })
+        let plugin = Self.makePlugin(nowProvider: { now.value })
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -359,7 +359,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testClaudeActivitySneakDismissesWhenSessionStops() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -412,7 +412,7 @@ final class ClaudePluginTests: XCTestCase {
     func testManualStopSessionFreezesRuntimeAndDismissesActivitySneakPeek() {
         let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
         let bus = EventBus()
-        let plugin = ClaudePlugin(nowProvider: { now.value })
+        let plugin = Self.makePlugin(nowProvider: { now.value })
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -464,7 +464,7 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -503,6 +503,39 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testPermissionRequestUsesInjectedSoundPlayer() {
+        let bus = EventBus()
+        let soundPlayer = SplitFakeSoundPlayer()
+        let plugin = Self.makePlugin(soundPlayer: soundPlayer)
+
+        plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-pre-sound",
+            sessionID: "claude-session-sound",
+            command: "echo sound",
+            toolUseID: "toolu_sound"
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-req-sound",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-sound",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo sound" }
+                }
+                """
+            ),
+            respond: { _ in }
+        )
+
+        XCTAssertEqual(soundPlayer.playedCategories, [.inputRequired])
+    }
+
+    @MainActor
     func testReenablingApprovalSneakPresentsExistingPendingApproval() {
         let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
         SettingsStore.shared.approvalSneakNotificationsEnabled = false
@@ -511,7 +544,7 @@ final class ClaudePluginTests: XCTestCase {
         }
 
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -572,7 +605,7 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     func testCodexHookFramesAreIgnored() async {
-        let plugin = await MainActor.run { ClaudePlugin() }
+        let plugin = await MainActor.run { Self.makePlugin() }
         let bus = await MainActor.run { EventBus() }
         let responseBox = SplitResponseBox()
 
@@ -603,7 +636,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testPreToolUseCreatesActivitySneakPeekWithoutApproval() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
         let responseBox = SplitResponseBox()
 
@@ -646,7 +679,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testPostToolUseKeepsActivitySneakPeekUntilStop() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
 
         let token = bus.subscribe { event in
@@ -725,7 +758,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testAskUserQuestionPreToolUseShowsQuestionAndReturnsUpdatedInputAnswer() throws {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
         let responseBox = SplitResponseBox()
 
@@ -820,7 +853,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testPendingApprovalUsesCodexStyleExpandedSummaryPresentation() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
 
         plugin.activate(bus: bus)
         plugin.handle(
@@ -870,7 +903,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testPostToolUseWithCachedToolUseIDClearsOnlyMatchingParallelApproval() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let firstResponseBox = SplitResponseBox()
         let secondResponseBox = SplitResponseBox()
         let firstPreToolResponseBox = SplitResponseBox()
@@ -980,7 +1013,7 @@ final class ClaudePluginTests: XCTestCase {
 
     @MainActor
     func testPostToolUseWithDifferentToolUseIDDoesNotClearByMatchingCommand() {
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let permissionResponseBox = SplitResponseBox()
 
         plugin.handle(
@@ -1041,7 +1074,7 @@ final class ClaudePluginTests: XCTestCase {
 
     @MainActor
     func testPermissionRequestWithoutCorrelatedToolUseIDDoesNotCreatePendingApproval() {
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let permissionResponseBox = SplitResponseBox()
 
         plugin.handle(
@@ -1066,7 +1099,7 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     func testStoppedSessionDoesNotRenderCompactPreviewWithoutApproval() async {
-        let plugin = await MainActor.run { ClaudePlugin() }
+        let plugin = await MainActor.run { Self.makePlugin() }
         let bus = await MainActor.run { EventBus() }
 
         await MainActor.run {
@@ -1096,7 +1129,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testConnectedOnlyClaudeSessionsAreHiddenFromExpandedSummaries() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
 
         plugin.activate(bus: bus)
         plugin.handle(
@@ -1133,7 +1166,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testStoppedClaudeSessionWithUserActivityRemainsVisibleButConnectedOnlySessionsStayHidden() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
 
         plugin.activate(bus: bus)
         plugin.handle(
@@ -1186,7 +1219,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testActivateSessionUsesStoredLaunchContext() {
         let focuser = RecordingAISessionFocuser()
-        let plugin = ClaudePlugin(sessionFocuser: focuser)
+        let plugin = Self.makePlugin(sessionFocuser: focuser)
         let bus = EventBus()
 
         plugin.activate(bus: bus)
@@ -1217,7 +1250,7 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     func testVeryLongPermissionRequestPreviewCanGrowBeyondTwoLines() async {
-        let plugin = await MainActor.run { ClaudePlugin() }
+        let plugin = await MainActor.run { Self.makePlugin() }
         let bus = await MainActor.run { EventBus() }
         let longCommand = String(
             repeating: "echo approval-preview-visibility-check ",
@@ -1260,7 +1293,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testHandleDisconnectClearsPendingApprovalAndSneakPeek() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
         let permissionResponseBox = SplitResponseBox()
 
@@ -1312,7 +1345,7 @@ final class ClaudePluginTests: XCTestCase {
     @MainActor
     func testStopEventReleasesHeldResponderAndClearsPendingApprovalForSession() {
         let bus = EventBus()
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let recorder = SplitEventRecorder()
         let permissionResponseBox = SplitResponseBox()
 
@@ -1380,7 +1413,7 @@ final class ClaudePluginTests: XCTestCase {
 
     @MainActor
     func testDenyReturnsDenyAndClearsPendingApproval() {
-        let plugin = ClaudePlugin()
+        let plugin = Self.makePlugin()
         let responseBox = SplitResponseBox()
 
         Self.sendPreToolUse(
@@ -1430,6 +1463,27 @@ private extension ClaudePluginTests {
     }
 
     @MainActor
+    static func makePlugin(
+        settingsStore: SettingsStore = .shared,
+        permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
+        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
+        sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
+        transcriptReader: any ClaudeTranscriptReading = ClaudeTranscriptReader(),
+        soundPlayer: any SoundPlaying = SplitFakeSoundPlayer(),
+        nowProvider: @escaping @Sendable () -> Date = Date.init
+    ) -> ClaudePlugin {
+        ClaudePlugin(
+            settingsStore: settingsStore,
+            permissionRuleStore: permissionRuleStore,
+            sessionScopedApprovalStore: sessionScopedApprovalStore,
+            sessionFocuser: sessionFocuser,
+            transcriptReader: transcriptReader,
+            soundPlayer: soundPlayer,
+            nowProvider: nowProvider
+        )
+    }
+
+    @MainActor
     static func sendPreToolUse(
         plugin: ClaudePlugin,
         requestID: String,
@@ -1453,6 +1507,15 @@ private extension ClaudePluginTests {
             ),
             respond: { _ in }
         )
+    }
+}
+
+@MainActor
+private final class SplitFakeSoundPlayer: SoundPlaying {
+    private(set) var playedCategories: [CESPCategory] = []
+
+    func play(_ category: CESPCategory) {
+        playedCategories.append(category)
     }
 }
 

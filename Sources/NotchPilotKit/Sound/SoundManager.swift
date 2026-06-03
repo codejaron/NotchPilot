@@ -3,6 +3,11 @@ import Combine
 import Foundation
 import os
 
+@MainActor
+public protocol SoundPlaying: AnyObject {
+    func play(_ category: CESPCategory)
+}
+
 /// Coordinates sound playback for NotchPilot.
 ///
 /// Owns the list of available packs, the active pack selection, and the actual
@@ -236,3 +241,5 @@ public final class SoundManager: ObservableObject {
         }
     }
 }
+
+extension SoundManager: SoundPlaying {}

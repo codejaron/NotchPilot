@@ -20,7 +20,7 @@ final class CodexPluginTests: XCTestCase {
             settingsStore.codexPluginEnabled = false
         }
         let plugin = await MainActor.run {
-            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+            makeCodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
         }
 
         await MainActor.run {
@@ -54,7 +54,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 5) }
             )
@@ -98,6 +98,35 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(summaries.first?.subtitle, "Action Needed")
     }
 
+    func testActionableSurfaceUsesInjectedSoundPlayer() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let soundPlayer = await MainActor.run { SplitFakeSoundPlayer() }
+        let plugin = await MainActor.run {
+            makeCodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaReader: SplitFakeCodexQuotaReader(snapshots: [nil]),
+                quotaRefreshScheduler: SplitFakeCodexQuotaRefreshScheduler(),
+                soundPlayer: soundPlayer
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-sound",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let playedCategories = await MainActor.run { soundPlayer.playedCategories }
+        XCTAssertEqual(playedCategories, [.inputRequired])
+    }
+
     func testActivateReadsUsageQuotaSnapshotFromSessionLog() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
@@ -118,7 +147,7 @@ final class CodexPluginTests: XCTestCase {
             ),
         ])
         let plugin = await MainActor.run {
-            CodexPlugin(codexMonitor: codexMonitor, quotaReader: quotaReader)
+            makeCodexPlugin(codexMonitor: codexMonitor, quotaReader: quotaReader)
         }
 
         await MainActor.run {
@@ -147,7 +176,7 @@ final class CodexPluginTests: XCTestCase {
             nil,
         ])
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 quotaReader: quotaReader,
                 nowProvider: { now.value }
@@ -204,7 +233,7 @@ final class CodexPluginTests: XCTestCase {
             ),
         ])
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 quotaReader: quotaReader,
                 quotaRefreshScheduler: quotaRefreshScheduler,
@@ -230,7 +259,7 @@ final class CodexPluginTests: XCTestCase {
         let codexMonitor = SplitFakeCodexContextMonitor()
         let quotaRefreshScheduler = SplitFakeCodexQuotaRefreshScheduler()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 quotaRefreshScheduler: quotaRefreshScheduler
             )
@@ -271,7 +300,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 5) }
             )
@@ -321,7 +350,7 @@ final class CodexPluginTests: XCTestCase {
             makeSettingsStore(activitySneakPreviewsHidden: true)
         }
         let plugin = await MainActor.run {
-            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+            makeCodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
         }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
@@ -362,7 +391,7 @@ final class CodexPluginTests: XCTestCase {
         let codexMonitor = SplitFakeCodexContextMonitor()
         let settingsStore = await MainActor.run { makeSettingsStore() }
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 settingsStore: settingsStore,
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 5) }
@@ -438,7 +467,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 5) }
             )
@@ -479,7 +508,7 @@ final class CodexPluginTests: XCTestCase {
     func testActivateSessionFocusesCodexThreadThroughMonitor() {
         let bus = EventBus()
         let codexMonitor = SplitFakeCodexContextMonitor()
-        let plugin = CodexPlugin(codexMonitor: codexMonitor)
+        let plugin = makeCodexPlugin(codexMonitor: codexMonitor)
 
         plugin.activate(bus: bus)
         codexMonitor.emit(
@@ -500,7 +529,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 70) }
             )
@@ -558,7 +587,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 66) }
             )
@@ -585,7 +614,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { Date(timeIntervalSince1970: 70) }
             )
@@ -613,7 +642,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { now.value }
             )
@@ -653,7 +682,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(
+            makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 nowProvider: { now.value }
             )
@@ -691,7 +720,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(codexMonitor: codexMonitor)
+            makeCodexPlugin(codexMonitor: codexMonitor)
         }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
@@ -734,7 +763,7 @@ final class CodexPluginTests: XCTestCase {
         let codexMonitor = SplitFakeCodexContextMonitor()
         let settingsStore = await MainActor.run { makeSettingsStore(approvalSneakNotificationsEnabled: false) }
         let plugin = await MainActor.run {
-            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+            makeCodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
         }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
@@ -774,7 +803,7 @@ final class CodexPluginTests: XCTestCase {
             makeSettingsStore(activitySneakPreviewsHidden: true)
         }
         let plugin = await MainActor.run {
-            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+            makeCodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
         }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
@@ -818,10 +847,10 @@ final class CodexPluginTests: XCTestCase {
         let shortMonitor = SplitFakeCodexContextMonitor()
         let longMonitor = SplitFakeCodexContextMonitor()
         let shortPlugin = await MainActor.run {
-            CodexPlugin(codexMonitor: shortMonitor)
+            makeCodexPlugin(codexMonitor: shortMonitor)
         }
         let longPlugin = await MainActor.run {
-            CodexPlugin(codexMonitor: longMonitor)
+            makeCodexPlugin(codexMonitor: longMonitor)
         }
         let bus = await MainActor.run { EventBus() }
 
@@ -867,7 +896,7 @@ final class CodexPluginTests: XCTestCase {
     func testVeryLongApprovalNoticeCanGrowBeyondTwoLines() async {
         let monitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(codexMonitor: monitor)
+            makeCodexPlugin(codexMonitor: monitor)
         }
         let bus = await MainActor.run { EventBus() }
 
@@ -899,7 +928,7 @@ final class CodexPluginTests: XCTestCase {
         let codexMonitor = SplitFakeCodexContextMonitor()
         let settingsStore = await MainActor.run { makeSettingsStore(approvalSneakNotificationsEnabled: false) }
         let plugin = await MainActor.run {
-            CodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
+            makeCodexPlugin(settingsStore: settingsStore, codexMonitor: codexMonitor)
         }
         let recorder = await MainActor.run { SplitEventRecorder() }
 
@@ -949,7 +978,7 @@ final class CodexPluginTests: XCTestCase {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let plugin = await MainActor.run {
-            CodexPlugin(codexMonitor: codexMonitor)
+            makeCodexPlugin(codexMonitor: codexMonitor)
         }
 
         await MainActor.run {
@@ -999,6 +1028,15 @@ private final class SplitFakeCodexQuotaReader: @unchecked Sendable, CodexSession
     }
 }
 
+@MainActor
+private final class SplitFakeSoundPlayer: SoundPlaying {
+    private(set) var playedCategories: [CESPCategory] = []
+
+    func play(_ category: CESPCategory) {
+        playedCategories.append(category)
+    }
+}
+
 private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
     private var onRefreshRequested: (@Sendable () -> Void)?
     private(set) var activateCount = 0
@@ -1041,4 +1079,25 @@ private func makeSettingsStore(
     store.approvalSneakNotificationsEnabled = approvalSneakNotificationsEnabled
     store.activitySneakPreviewsHidden = activitySneakPreviewsHidden
     return store
+}
+
+@MainActor
+private func makeCodexPlugin(
+    settingsStore: SettingsStore = .shared,
+    codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring,
+    quotaReader: any CodexSessionQuotaReading = SplitFakeCodexQuotaReader(snapshots: [nil]),
+    quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = SplitFakeCodexQuotaRefreshScheduler(),
+    soundPlayer: any SoundPlaying = SplitFakeSoundPlayer(),
+    sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
+    nowProvider: @escaping @Sendable () -> Date = Date.init
+) -> CodexPlugin {
+    CodexPlugin(
+        settingsStore: settingsStore,
+        codexMonitor: codexMonitor,
+        quotaReader: quotaReader,
+        quotaRefreshScheduler: quotaRefreshScheduler,
+        soundPlayer: soundPlayer,
+        sessionFocuser: sessionFocuser,
+        nowProvider: nowProvider
+    )
 }
