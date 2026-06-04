@@ -112,7 +112,11 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
             release: nil,
             copyDescription: nil
         )
-        let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)
+        let flags = FSEventStreamCreateFlags(
+            kFSEventStreamCreateFlagUseCFTypes |
+                kFSEventStreamCreateFlagFileEvents |
+                kFSEventStreamCreateFlagNoDefer
+        )
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             Self.handleFileEvents,
@@ -202,8 +206,16 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
     }
 
     private static func changedSessionFileURL(from eventPaths: UnsafeMutableRawPointer) -> URL? {
-        let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] ?? []
+        let cfPaths = Unmanaged<CFArray>
+            .fromOpaque(eventPaths)
+            .takeUnretainedValue()
+        return changedSessionFileURL(fromCFEventPaths: cfPaths)
+    }
+
+    static func changedSessionFileURL(fromCFEventPaths eventPaths: CFArray) -> URL? {
+        let paths = eventPaths as NSArray
         return paths
+            .compactMap { $0 as? String }
             .map { URL(fileURLWithPath: $0) }
             .first { $0.pathExtension == "jsonl" }
     }
