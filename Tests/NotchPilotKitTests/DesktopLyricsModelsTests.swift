@@ -112,6 +112,45 @@ final class DesktopLyricsModelsTests: XCTestCase {
         XCTAssertEqual(presentation.nextLine, "line 3")
     }
 
+    func testDesktopLyricsPresentationResolverSchedulesNextLineRefreshDate() {
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "line 1"),
+                TimedLyricLine(timestamp: 15, text: "line 2"),
+                TimedLyricLine(timestamp: 30, text: "line 3"),
+            ]
+        )
+        let captureDate = Date(timeIntervalSince1970: 100)
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            artworkData: nil,
+            currentTime: 16,
+            duration: 200,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: captureDate
+        )
+
+        let presentation = DesktopLyricsPresentationResolver.resolve(
+            playbackState: .active(snapshot),
+            lyrics: lyrics,
+            at: captureDate
+        )
+
+        XCTAssertEqual(
+            presentation.lineState?.nextLineStartDate,
+            captureDate.addingTimeInterval(14)
+        )
+    }
+
     func testDesktopLyricsPresentationResolverIsStableAcrossResolvesWithinSameLine() {
         let lyrics = TimedLyrics(
             title: "Song",

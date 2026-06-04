@@ -76,21 +76,39 @@ final class LyricsSearchController: ObservableObject {
         selectedResultID = nil
         selectedLyrics = nil
 
-        let lyrics = await searchProvider.searchLyrics(
+        var didReceiveResults = false
+        for await lyrics in searchProvider.searchLyricsUpdates(
             title: searchTitle,
             artist: searchArtist,
             duration: bindingSnapshot.duration,
             limit: 8
-        )
+        ) {
+            guard Task.isCancelled == false else {
+                break
+            }
 
-        results = lyrics
+            results = lyrics
+            if lyrics.isEmpty {
+                continue
+            }
+
+            didReceiveResults = true
+            errorMessage = nil
+            let currentSelectionStillExists = selectedResultID.map { selectedID in
+                lyrics.contains(where: { $0.id == selectedID })
+            } ?? false
+
+            if currentSelectionStillExists == false || selectedResultID != lyrics.first?.id {
+                selectResult(lyrics.first?.id)
+            }
+        }
+
         isSearching = false
 
-        if results.isEmpty {
+        if results.isEmpty || didReceiveResults == false {
             errorMessage = AppStrings.text(.noLyricsFound, language: SettingsStore.shared.interfaceLanguage)
         } else {
             errorMessage = nil
-            selectResult(results.first?.id)
         }
     }
 

@@ -168,6 +168,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
     let album: String
     let duration: TimeInterval?
     let service: String
+    let sourceOffsetMilliseconds: Int
     let lines: [TimedLyricLine]
 
     var hasInlineTags: Bool {
@@ -180,6 +181,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         album: String,
         duration: TimeInterval?,
         service: String,
+        sourceOffsetMilliseconds: Int = 0,
         lines: [TimedLyricLine]
     ) {
         self.title = title
@@ -187,7 +189,31 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         self.album = album
         self.duration = duration
         self.service = service
+        self.sourceOffsetMilliseconds = sourceOffsetMilliseconds
         self.lines = lines
+            .filter { $0.text.isEmpty == false }
+            .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case artist
+        case album
+        case duration
+        case service
+        case sourceOffsetMilliseconds
+        case lines
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        artist = try container.decode(String.self, forKey: .artist)
+        album = try container.decode(String.self, forKey: .album)
+        duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
+        service = try container.decode(String.self, forKey: .service)
+        sourceOffsetMilliseconds = try container.decodeIfPresent(Int.self, forKey: .sourceOffsetMilliseconds) ?? 0
+        lines = try container.decode([TimedLyricLine].self, forKey: .lines)
             .filter { $0.text.isEmpty == false }
             .sorted { $0.timestamp < $1.timestamp }
     }
@@ -217,6 +243,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             album: lyrics.idTags[.album]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             duration: lyrics.length,
             service: service,
+            sourceOffsetMilliseconds: lyrics.offset,
             lines: lyrics.lines.map { line in
                 let inlineTags: [TimedLyricLine.InlineTag]? = line.attachments.timetag.map { timetag in
                     timetag.tags.map { tag in
@@ -277,6 +304,7 @@ struct DesktopLyricsLineState: Equatable, Sendable {
     let nextLine: String?
     let inlineTags: [TimedLyricLine.InlineTag]?
     let lineStartDate: Date
+    let nextLineStartDate: Date?
     let lineDuration: TimeInterval
 }
 
@@ -316,18 +344,27 @@ enum DesktopLyricsPresentationResolver {
             return .hidden
         }
 
-        let offset = TimeInterval(offsetMilliseconds) / 1000.0
+        let totalOffsetMilliseconds = offsetMilliseconds + lyrics.sourceOffsetMilliseconds
+        let offset = TimeInterval(totalOffsetMilliseconds) / 1000.0
         let adjustedTime = snapshot.estimatedCurrentTime(at: date) + offset
         guard let pair = lyrics.linePair(at: adjustedTime) else {
             return .hidden
         }
 
         let lineStartDate = date.addingTimeInterval(-pair.lineTimeOffset)
+        let nextLineStartDate: Date?
+        if let nextLine = pair.next, snapshot.playbackRate > 0 {
+            let secondsUntilNextLine = max(0, nextLine.timestamp - adjustedTime) / snapshot.playbackRate
+            nextLineStartDate = date.addingTimeInterval(secondsUntilNextLine)
+        } else {
+            nextLineStartDate = nil
+        }
         let lineState = DesktopLyricsLineState(
             currentLine: pair.current.text,
             nextLine: pair.current.translation ?? pair.next?.text,
             inlineTags: pair.current.inlineTags,
             lineStartDate: lineStartDate,
+            nextLineStartDate: nextLineStartDate,
             lineDuration: pair.lineDuration
         )
 

@@ -10,6 +10,7 @@ final class DesktopLyricsController: ObservableObject {
     private let cache: LyricsCaching
     private let ignoredTrackStore: LyricsTrackIgnoring
     private let offsetStore: LyricsOffsetStoring
+    private let playbackTimeProvider: (MediaPlaybackSnapshot) -> TimeInterval?
 
     private var currentPlaybackState: MediaPlaybackState = .idle
     private(set) var currentTrackKey: LyricsTrackKey?
@@ -29,13 +30,15 @@ final class DesktopLyricsController: ObservableObject {
         provider: LyricsProviding,
         cache: LyricsCaching,
         ignoredTrackStore: LyricsTrackIgnoring,
-        offsetStore: LyricsOffsetStoring = LyricsOffsetStore()
+        offsetStore: LyricsOffsetStoring = LyricsOffsetStore(),
+        playbackTimeProvider: @escaping (MediaPlaybackSnapshot) -> TimeInterval? = { _ in nil }
     ) {
         self.settingsStore = settingsStore
         self.provider = provider
         self.cache = cache
         self.ignoredTrackStore = ignoredTrackStore
         self.offsetStore = offsetStore
+        self.playbackTimeProvider = playbackTimeProvider
 
         settingsStore.$desktopLyricsEnabled
             .combineLatest(settingsStore.$mediaPlaybackEnabled)
@@ -64,8 +67,15 @@ final class DesktopLyricsController: ObservableObject {
             return
         }
 
+        let resolvedSnapshot: MediaPlaybackSnapshot
+        if let directPlaybackTime = playbackTimeProvider(snapshot) {
+            resolvedSnapshot = snapshot.replacingCurrentTime(directPlaybackTime, at: date)
+        } else {
+            resolvedSnapshot = snapshot
+        }
+
         let nextPresentation = DesktopLyricsPresentationResolver.resolve(
-            playbackState: .active(snapshot),
+            playbackState: .active(resolvedSnapshot),
             lyrics: currentLyrics,
             offsetMilliseconds: currentOffsetMilliseconds,
             at: date
@@ -215,8 +225,18 @@ final class DesktopLyricsController: ObservableObject {
                 guard let self else {
                     return
                 }
-                let lyrics = await provider.lyrics(for: snapshot)
-                self.completeLyricsLoad(lyrics, for: trackKey)
+                var didReceiveLyrics = false
+                for await lyrics in provider.lyricUpdates(for: snapshot) {
+                    guard Task.isCancelled == false else {
+                        break
+                    }
+                    didReceiveLyrics = true
+                    self.completeLyricsLoad(lyrics, for: trackKey)
+                }
+
+                if didReceiveLyrics == false, Task.isCancelled == false {
+                    self.completeLyricsLoad(nil, for: trackKey)
+                }
             }
             return
         }

@@ -97,6 +97,21 @@ public struct MediaPlaybackSnapshot: Equatable, Sendable {
         return clampedTime(projectedTime)
     }
 
+    func replacingCurrentTime(_ currentTime: TimeInterval, at date: Date = Date()) -> MediaPlaybackSnapshot {
+        MediaPlaybackSnapshot(
+            source: source,
+            title: title,
+            artist: artist,
+            album: album,
+            artworkData: artworkData,
+            currentTime: currentTime,
+            duration: duration,
+            playbackRate: playbackRate,
+            isPlaying: isPlaying,
+            lastUpdated: date
+        )
+    }
+
     private func clampedTime(_ value: TimeInterval) -> TimeInterval {
         let upperBound = duration ?? value
         return min(max(0, value), max(0, upperBound))

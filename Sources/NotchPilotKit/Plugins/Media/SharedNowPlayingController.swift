@@ -67,6 +67,10 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
         monitor.seek(to: time)
     }
 
+    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+        monitor.currentPlaybackTime(for: source)
+    }
+
     private func handleMonitorStateChange(_ state: MediaPlaybackState) {
         currentState = state
         onStateChange?(state)

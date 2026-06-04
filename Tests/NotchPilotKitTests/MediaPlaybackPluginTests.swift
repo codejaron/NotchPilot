@@ -383,6 +383,10 @@ private final class TestNowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         seekTimes.append(time)
     }
 
+    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+        nil
+    }
+
     func push(_ state: MediaPlaybackState) {
         currentState = state
         onStateChange?(state)

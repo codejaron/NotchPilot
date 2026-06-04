@@ -87,6 +87,7 @@ protocol NowPlayingSessionMonitoring: AnyObject {
     func nextTrack()
     func previousTrack()
     func seek(to time: Double)
+    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval?
 }
 
 @MainActor
@@ -95,9 +96,14 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
 
     private let commandController: (any MediaRemoteCommandControlling)? = SystemMediaRemoteCommandController()
+    private let playbackTimeProvider: any PlaybackTimeProviding
     private var streamProcess: Process?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
+
+    init(playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider()) {
+        self.playbackTimeProvider = playbackTimeProvider
+    }
 
     func start() {
         guard streamProcess == nil else {
@@ -201,6 +207,10 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         }
         requestStateRefresh(using: resource, after: 0.15)
         requestStateRefresh(using: resource, after: 0.6)
+    }
+
+    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+        playbackTimeProvider.currentPlaybackTime(for: source)
     }
 
     func updateState(_ state: MediaPlaybackState) {

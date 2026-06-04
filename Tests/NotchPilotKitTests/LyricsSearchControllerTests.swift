@@ -56,6 +56,62 @@ final class LyricsSearchControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testSearchControllerPublishesStreamingResultsAndSelectsBestIncomingCandidate() async {
+        let firstLyrics = TimedLyrics(
+            title: "As If It's Your Last",
+            artist: "BLACKPINK",
+            album: "",
+            duration: 260,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "first")]
+        )
+        let betterLyrics = TimedLyrics(
+            title: "As If It's Your Last",
+            artist: "BLACKPINK",
+            album: "",
+            duration: 200,
+            service: "NetEase",
+            lines: [TimedLyricLine(timestamp: 0, text: "better")]
+        )
+        let firstCandidate = LyricsSearchCandidate(
+            id: "qq|blackpink|as if it's your last",
+            title: firstLyrics.title,
+            artist: firstLyrics.artist,
+            service: firstLyrics.service,
+            quality: 0.4,
+            duration: firstLyrics.duration,
+            loadLyrics: { firstLyrics }
+        )
+        let betterCandidate = LyricsSearchCandidate(
+            id: "netease|blackpink|as if it's your last",
+            title: betterLyrics.title,
+            artist: betterLyrics.artist,
+            service: betterLyrics.service,
+            quality: 0.9,
+            duration: betterLyrics.duration,
+            loadLyrics: { betterLyrics }
+        )
+        let provider = StreamingLyricsSearchProvider(
+            updates: [
+                [firstCandidate],
+                [betterCandidate, firstCandidate],
+            ]
+        )
+        let controller = LyricsSearchController(
+            bindingSnapshot: Self.snapshot(title: "As If It's Your Last", artist: "BLACKPINK"),
+            searchProvider: provider,
+            applyHandler: { _ in }
+        )
+
+        await controller.search()
+        await controller.loadSelectedLyrics()
+
+        XCTAssertEqual(controller.results, [betterCandidate, firstCandidate])
+        XCTAssertEqual(controller.selectedResultID, betterCandidate.id)
+        XCTAssertEqual(controller.selectedLyrics, betterLyrics)
+    }
+
+    @MainActor
     func testSearchControllerRetainsCandidatesWhenSelectedLyricsFailToLoad() async {
         let candidate = LyricsSearchCandidate(
             id: "qq|blackpink|broken",
@@ -118,6 +174,38 @@ private final class TestLyricsSearchProvider: LyricsSearching {
     ) async -> [LyricsSearchCandidate] {
         requests.append(.init(title: title, artist: artist, duration: duration, limit: limit))
         return results
+    }
+}
+
+@MainActor
+private final class StreamingLyricsSearchProvider: LyricsSearching {
+    let updates: [[LyricsSearchCandidate]]
+
+    init(updates: [[LyricsSearchCandidate]]) {
+        self.updates = updates
+    }
+
+    func searchLyrics(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int
+    ) async -> [LyricsSearchCandidate] {
+        updates.last ?? []
+    }
+
+    func searchLyricsUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int
+    ) -> AsyncStream<[LyricsSearchCandidate]> {
+        AsyncStream { continuation in
+            for update in updates {
+                continuation.yield(update)
+            }
+            continuation.finish()
+        }
     }
 }
 

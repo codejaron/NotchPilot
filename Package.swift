@@ -15,7 +15,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/MxIris-LyricsX-Project/LyricsKit.git",
-            revision: "9e52e0986b89df6d8815c823fac23b6a775c3b49"
+            exact: "1.8.3"
         ),
         .package(
             url: "https://github.com/sindresorhus/KeyboardShortcuts.git",

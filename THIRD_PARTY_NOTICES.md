@@ -7,17 +7,37 @@ third-party package dependencies required to build or run NotchPilot.
 
 - Project: `MxIris-LyricsX-Project/LyricsKit`
 - Upstream: <https://github.com/MxIris-LyricsX-Project/LyricsKit>
-- Used revision: `9e52e0986b89df6d8815c823fac23b6a775c3b49`
+- Used version: `1.8.3`
+- Used revision: `6f071990d0c9c6f48d29284db805990bffb912ed`
 - License: `MPL-2.0`
 
-NotchPilot consumes LyricsKit as a Swift Package dependency; no LyricsKit
-source files are vendored in this repository. The dependency supplies lyrics
-search and parsing types used by the desktop lyrics feature.
+NotchPilot consumes LyricsKit as a Swift Package dependency. The dependency
+supplies lyrics search and parsing types used by the desktop lyrics feature.
 
 LyricsKit is licensed under MPL 2.0. The MPL text is available from the
 upstream `LICENSE` file and <https://mozilla.org/MPL/2.0/>. Source for the
 exact dependency revision can be obtained from the upstream repository using
 the revision above.
+
+## LyricsX
+
+- Project: `MxIris-LyricsX-Project/LyricsX`
+- Upstream: <https://github.com/MxIris-LyricsX-Project/LyricsX>
+- License: `MPL-2.0`
+
+NotchPilot's desktop lyrics search and synchronization behavior is informed
+by LyricsX. NotchPilot is grateful to the LyricsX project and contributors.
+
+## FrameworkToolbox
+
+- Project: `Mx-Iris/FrameworkToolbox`
+- Upstream: <https://github.com/Mx-Iris/FrameworkToolbox>
+- Used version: `0.7.1`
+- Used revision: `b82281eb8a6ffcb312941c3d06584182837f4ca9`
+- License: `MIT`
+
+FrameworkToolbox is pulled in as a transitive Swift Package dependency of
+LyricsKit 1.8.3. It provides compile-time macros used by LyricsKit's build.
 
 ## Stats
 

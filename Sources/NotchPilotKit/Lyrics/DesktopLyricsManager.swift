@@ -12,13 +12,13 @@ final class DesktopLyricsManager {
     private let fileManager: FileManager
     private let lyricsSearchWindowController: LyricsSearchWindowController
 
-    private static let refreshInterval: TimeInterval = 0.25
+    private static let lineRefreshTolerance: TimeInterval = 0.02
 
     private var windows: [String: DesktopLyricsWindow] = [:]
     private var playbackCancellable: AnyCancellable?
     private var presentationCancellable: AnyCancellable?
     private var desktopLyricsEnabledCancellable: AnyCancellable?
-    private var displayTimer: Timer?
+    private var lineRefreshTimer: Timer?
     private var screenObserver: NSObjectProtocol?
     private var isStarted = false
     private var isNowPlayingMonitoringRequested = false
@@ -40,7 +40,10 @@ final class DesktopLyricsManager {
             settingsStore: settingsStore,
             provider: provider,
             cache: cache,
-            ignoredTrackStore: ignoredTrackStore
+            ignoredTrackStore: ignoredTrackStore,
+            playbackTimeProvider: { snapshot in
+                nowPlayingController.currentPlaybackTime(for: snapshot.source)
+            }
         )
         self.fileManager = fileManager
         self.lyricsSearchWindowController = lyricsSearchWindowController
@@ -68,10 +71,10 @@ final class DesktopLyricsManager {
 
         presentationCancellable = controller.$presentation.sink { [weak self] presentation in
             self?.refreshWindows()
-            self?.updateTimerSchedule(isVisible: presentation.isVisible)
+            self?.scheduleLineRefresh(for: presentation)
         }
 
-        updateTimerSchedule(isVisible: controller.presentation.isVisible)
+        scheduleLineRefresh(for: controller.presentation)
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -94,8 +97,8 @@ final class DesktopLyricsManager {
         isStarted = false
         syncNowPlayingMonitoring()
         desktopLyricsEnabledCancellable = nil
-        displayTimer?.invalidate()
-        displayTimer = nil
+        lineRefreshTimer?.invalidate()
+        lineRefreshTimer = nil
         playbackCancellable = nil
         presentationCancellable = nil
         if let screenObserver {
@@ -177,21 +180,29 @@ final class DesktopLyricsManager {
         }
     }
 
-    private func updateTimerSchedule(isVisible: Bool) {
-        if isVisible {
-            guard displayTimer == nil else { return }
-            let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.controller.refreshPresentation()
-                    self?.refreshWindows()
-                }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            displayTimer = timer
-        } else {
-            displayTimer?.invalidate()
-            displayTimer = nil
+    private func scheduleLineRefresh(for presentation: DesktopLyricsPresentation) {
+        lineRefreshTimer?.invalidate()
+        lineRefreshTimer = nil
+
+        guard presentation.isVisible,
+              let nextLineStartDate = presentation.lineState?.nextLineStartDate else {
+            return
         }
+
+        let fireDate = max(Date(), nextLineStartDate.addingTimeInterval(Self.lineRefreshTolerance))
+        let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                self.lineRefreshTimer = nil
+                self.controller.refreshPresentation()
+                self.refreshWindows()
+                self.scheduleLineRefresh(for: self.controller.presentation)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        lineRefreshTimer = timer
     }
 
     private func screenDescriptor(for screen: NSScreen) -> ScreenDescriptor? {

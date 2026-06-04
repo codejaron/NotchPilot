@@ -93,4 +93,58 @@ final class MediaPlaybackModelsTests: XCTestCase {
             accuracy: 0.01
         )
     }
+
+    func testMediaPlaybackSnapshotCanReplaceCurrentTimeForDirectPlayerReads() {
+        let captureDate = Date(timeIntervalSince1970: 120)
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Track",
+            artist: "Artist",
+            album: "Album",
+            artworkData: nil,
+            currentTime: 30,
+            duration: 240,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: Date(timeIntervalSince1970: 100)
+        )
+
+        let directSnapshot = snapshot.replacingCurrentTime(42, at: captureDate)
+
+        XCTAssertEqual(directSnapshot.currentTime, 42)
+        XCTAssertEqual(directSnapshot.lastUpdated, captureDate)
+        XCTAssertEqual(directSnapshot.estimatedCurrentTime(at: captureDate), 42, accuracy: 0.01)
+    }
+
+    func testAppleScriptPlaybackTimeProviderReadsSpotifyPlayerPosition() {
+        var receivedScripts: [String] = []
+        let provider = AppleScriptPlaybackTimeProvider { script in
+            receivedScripts.append(script)
+            return 42.5
+        }
+
+        let playbackTime = provider.currentPlaybackTime(
+            for: .fromBundleIdentifier("com.spotify.client")
+        )
+
+        XCTAssertEqual(playbackTime, 42.5)
+        XCTAssertEqual(receivedScripts.count, 1)
+        XCTAssertTrue(receivedScripts[0].contains("com.spotify.client"))
+        XCTAssertTrue(receivedScripts[0].contains("player position"))
+    }
+
+    func testAppleScriptPlaybackTimeProviderIgnoresUnsupportedPlayers() {
+        var didRunScript = false
+        let provider = AppleScriptPlaybackTimeProvider { _ in
+            didRunScript = true
+            return 12
+        }
+
+        XCTAssertNil(
+            provider.currentPlaybackTime(
+                for: .fromBundleIdentifier("com.tencent.qqmusic")
+            )
+        )
+        XCTAssertFalse(didRunScript)
+    }
 }

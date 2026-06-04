@@ -113,6 +113,10 @@ private final class TestDesktopLyricsNowPlayingMonitor: NowPlayingSessionMonitor
     func previousTrack() {}
 
     func seek(to time: Double) {}
+
+    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+        nil
+    }
 }
 
 @MainActor

@@ -27,6 +27,42 @@ final class LyricsProviderTests: XCTestCase {
         XCTAssertEqual(timedLyrics.lines.map(\.text), ["line 1", "line 2"])
     }
 
+    func testTimedLyricsAppliesLyricsKitOffsetWhenResolvingPresentation() throws {
+        let lyrics = Lyrics(
+            lines: [
+                LyricsLine(content: "line 1", position: 10),
+                LyricsLine(content: "line 2", position: 15),
+            ],
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+        lyrics.offset = 2_000
+
+        let timedLyrics = try XCTUnwrap(TimedLyrics(lyricsKitLyrics: lyrics, service: "QQMusic"))
+        let captureDate = Date(timeIntervalSince1970: 100)
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Song",
+            artist: "Artist",
+            album: "",
+            artworkData: nil,
+            currentTime: 13,
+            duration: 200,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: captureDate
+        )
+        let presentation = DesktopLyricsPresentationResolver.resolve(
+            playbackState: .active(snapshot),
+            lyrics: timedLyrics,
+            at: captureDate
+        )
+
+        XCTAssertEqual(presentation.currentLine, "line 2")
+    }
+
     func testTimedLyricsInitializesTranslationFromLyricsKitAttachments() throws {
         let lyrics = Lyrics(
             lines: [
@@ -126,7 +162,7 @@ final class LyricsProviderTests: XCTestCase {
             limit: 10
         )
 
-        XCTAssertEqual(results, [candidateA, candidateB])
+        XCTAssertEqual(Set(results.map(\.id)), Set([candidateA.id, candidateB.id]))
         XCTAssertEqual(serviceA.requests.count, 1)
         XCTAssertEqual(serviceB.requests.count, 1)
     }
@@ -161,6 +197,61 @@ final class LyricsProviderTests: XCTestCase {
         )
 
         XCTAssertEqual(results, [duplicateA])
+    }
+
+    @MainActor
+    func testLyricsKitProviderSearchRanksCandidatesByQualityMatchAndDurationDifference() async {
+        let lowerQuality = LyricsSearchCandidate(
+            id: "lrclib|artist|song|lower",
+            title: "Song",
+            artist: "Artist",
+            service: "LRCLIB",
+            quality: 0.3,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "LRCLIB") }
+        )
+        let fartherDuration = LyricsSearchCandidate(
+            id: "qq|artist|song|farther",
+            title: "Song",
+            artist: "Artist",
+            service: "QQMusic",
+            quality: 0.9,
+            duration: 260,
+            loadLyrics: { Self.makeLyrics(service: "QQMusic") }
+        )
+        let closerDuration = LyricsSearchCandidate(
+            id: "netease|artist|song|closer",
+            title: "Song",
+            artist: "Artist",
+            service: "NetEase",
+            quality: 0.9,
+            duration: 201,
+            loadLyrics: { Self.makeLyrics(service: "NetEase") }
+        )
+        let weakerMatch = LyricsSearchCandidate(
+            id: "kugou|artist|alternate|match",
+            title: "Alternate Song",
+            artist: "Artist",
+            service: "Kugou",
+            quality: 0.9,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "Kugou") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [lowerQuality, fartherDuration]),
+                TestLyricsSearchService(results: [closerDuration, weakerMatch]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "Song",
+            artist: "Artist",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results, [closerDuration, fartherDuration, weakerMatch, lowerQuality])
     }
 
     func testLyricsCachePersistsLyricsUsingTrackKeyFileName() throws {

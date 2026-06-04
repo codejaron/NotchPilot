@@ -5,6 +5,7 @@ import LyricsKit
 @MainActor
 protocol LyricsProviding: AnyObject {
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics?
+    func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics>
 }
 
 @MainActor
@@ -15,6 +16,12 @@ protocol LyricsSearching: AnyObject {
         duration: TimeInterval?,
         limit: Int
     ) async -> [LyricsSearchCandidate]
+    func searchLyricsUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int
+    ) -> AsyncStream<[LyricsSearchCandidate]>
 }
 
 protocol LyricsCaching: AnyObject {
@@ -26,6 +33,49 @@ protocol LyricsCaching: AnyObject {
 
 extension LyricsSearchRequest: @retroactive @unchecked Sendable {}
 extension Lyrics: @retroactive @unchecked Sendable {}
+
+extension LyricsProviding {
+    func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics> {
+        AsyncStream { continuation in
+            let task = Task { @MainActor in
+                if let lyrics = await self.lyrics(for: snapshot) {
+                    continuation.yield(lyrics)
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
+extension LyricsSearching {
+    func searchLyricsUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int
+    ) -> AsyncStream<[LyricsSearchCandidate]> {
+        AsyncStream { continuation in
+            let task = Task { @MainActor in
+                let results = await self.searchLyrics(
+                    title: title,
+                    artist: artist,
+                    duration: duration,
+                    limit: limit
+                )
+                continuation.yield(results)
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
 
 final class LyricsCache: LyricsCaching {
     private let directoryURL: URL
@@ -93,18 +143,39 @@ final class CachedLyricsProvider: LyricsProviding {
     }
 
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics? {
+        for await lyrics in lyricUpdates(for: snapshot) {
+            return lyrics
+        }
+
+        return nil
+    }
+
+    func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics> {
         let key = LyricsTrackKey(snapshot: snapshot)
 
         if let cached = cache.loadLyrics(for: key) {
-            return cached
+            return AsyncStream { continuation in
+                continuation.yield(cached)
+                continuation.finish()
+            }
         }
 
-        let remote = await remoteProvider.lyrics(for: snapshot)
-        if let remote {
-            try? cache.saveLyrics(remote, for: key)
-        }
+        return AsyncStream { continuation in
+            let task = Task { @MainActor in
+                for await remote in remoteProvider.lyricUpdates(for: snapshot) {
+                    guard Task.isCancelled == false else {
+                        break
+                    }
+                    try? cache.saveLyrics(remote, for: key)
+                    continuation.yield(remote)
+                }
+                continuation.finish()
+            }
 
-        return remote
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
     }
 }
 
@@ -165,43 +236,63 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
     }
 
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics? {
-        guard let request = Self.makeRequest(for: snapshot) else {
-            return nil
+        for await lyrics in lyricUpdates(for: snapshot) {
+            return lyrics
         }
 
-        var best: Lyrics?
-        var windowStart: Date?
-        let priorityWindow: TimeInterval = 3
+        return nil
+    }
 
-        do {
-            for try await lyric in provider.lyrics(for: request) {
-                guard Task.isCancelled == false else { break }
-
-                if let start = windowStart,
-                   Date().timeIntervalSince(start) > priorityWindow {
-                    break
-                }
-
-                if let current = best, !Self.hasHigherPriority(lyric, over: current) {
-                    continue
-                }
-
-                best = lyric
-                if windowStart == nil {
-                    windowStart = Date()
-                }
-
-                if lyric.metadata.attachmentTags.contains(.timetag) {
-                    break
-                }
+    func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics> {
+        guard let request = Self.makeRequest(for: snapshot) else {
+            return AsyncStream { continuation in
+                continuation.finish()
             }
-        } catch {}
+        }
 
-        guard let best else { return nil }
-        return TimedLyrics(
-            lyricsKitLyrics: best,
-            service: best.metadata.service ?? "LyricsKit"
-        )
+        return AsyncStream { continuation in
+            let task = Task { @MainActor in
+                var best: Lyrics?
+                var windowStart: Date?
+                let priorityWindow: TimeInterval = 3
+
+                do {
+                    for try await lyric in provider.lyrics(for: request) {
+                        guard Task.isCancelled == false else {
+                            break
+                        }
+
+                        if let start = windowStart,
+                           Date().timeIntervalSince(start) > priorityWindow {
+                            break
+                        }
+
+                        if let current = best, !Self.hasHigherPriority(lyric, over: current) {
+                            continue
+                        }
+
+                        guard let timedLyrics = TimedLyrics(
+                            lyricsKitLyrics: lyric,
+                            service: lyric.metadata.service ?? "LyricsKit"
+                        ) else {
+                            continue
+                        }
+
+                        best = lyric
+                        if windowStart == nil {
+                            windowStart = Date()
+                        }
+                        continuation.yield(timedLyrics)
+                    }
+                } catch {}
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
     }
 
     private static func hasHigherPriority(_ new: Lyrics, over existing: Lyrics) -> Bool {
@@ -225,11 +316,32 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         duration: TimeInterval?,
         limit: Int = 40
     ) async -> [LyricsSearchCandidate] {
+        var latestResults: [LyricsSearchCandidate] = []
+        for await results in searchLyricsUpdates(
+            title: title,
+            artist: artist,
+            duration: duration,
+            limit: limit
+        ) {
+            latestResults = results
+        }
+
+        return latestResults
+    }
+
+    func searchLyricsUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int = 40
+    ) -> AsyncStream<[LyricsSearchCandidate]> {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard normalizedTitle.isEmpty == false || normalizedArtist.isEmpty == false else {
-            return []
+            return AsyncStream { continuation in
+                continuation.finish()
+            }
         }
 
         let request = LyricsSearchRequest(
@@ -240,53 +352,46 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
             limit: max(1, min(limit, 8))
         )
 
-        var seenIdentifiers: Set<String> = []
-        var results: [LyricsSearchCandidate] = []
         let perServiceLimit = max(1, min(limit, 8))
-        let serviceResults = await withTaskGroup(of: (Int, [LyricsSearchCandidate]).self) { group in
-            for (index, service) in searchServices.enumerated() {
-                group.addTask {
-                    (
-                        index,
-                        await service.searchCandidates(
-                            for: request,
-                            limit: perServiceLimit
+        let services = searchServices
+
+        return AsyncStream { continuation in
+            let task = Task { @MainActor in
+                var collectedResults: [LyricsSearchCandidate] = []
+                await withTaskGroup(of: [LyricsSearchCandidate].self) { group in
+                    for service in services {
+                        group.addTask {
+                            await service.searchCandidates(
+                                for: request,
+                                limit: perServiceLimit
+                            )
+                        }
+                    }
+
+                    for await candidates in group {
+                        guard Task.isCancelled == false else {
+                            break
+                        }
+
+                        collectedResults.append(contentsOf: candidates)
+                        let rankedResults = LyricsSearchCandidateRanker.ranked(
+                            collectedResults,
+                            requestTitle: normalizedTitle,
+                            requestArtist: normalizedArtist,
+                            duration: duration,
+                            limit: limit
                         )
-                    )
-                }
-            }
-
-            var collected = Array(repeating: [LyricsSearchCandidate](), count: searchServices.count)
-            for await (index, candidates) in group {
-                collected[index] = candidates
-            }
-            return collected
-        }
-
-        for candidates in serviceResults {
-            for candidate in candidates {
-                let identifier = [
-                    candidate.service,
-                    LyricsTrackKey.normalize(candidate.artist),
-                    LyricsTrackKey.normalize(candidate.title),
-                ].joined(separator: "|")
-
-                guard seenIdentifiers.insert(identifier).inserted else {
-                    continue
+                        continuation.yield(rankedResults)
+                    }
                 }
 
-                results.append(candidate)
-                if results.count >= limit {
-                    break
-                }
+                continuation.finish()
             }
 
-            if results.count >= limit {
-                break
+            continuation.onTermination = { _ in
+                task.cancel()
             }
         }
-
-        return results
     }
 
 }
