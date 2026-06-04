@@ -3,6 +3,7 @@ import XCTest
 
 final class CodexSessionQuotaReaderTests: XCTestCase {
     private var tempHomeURL: URL!
+    private let recentSessionNow = Date(timeIntervalSince1970: 1_780_488_000)
 
     override func setUpWithError() throws {
         tempHomeURL = FileManager.default.temporaryDirectory
@@ -15,7 +16,7 @@ final class CodexSessionQuotaReaderTests: XCTestCase {
         tempHomeURL = nil
     }
 
-    func testLatestTokenCountTimestampWinsAcrossSessionFiles() throws {
+    func testLatestTokenCountTimestampWinsAcrossSessionFiles() async throws {
         try writeSessionLog(
             path: "2026/06/01/older.jsonl",
             lines: [
@@ -29,14 +30,19 @@ final class CodexSessionQuotaReaderTests: XCTestCase {
             ]
         )
 
-        let reader = CodexSessionQuotaReader(homeDirectoryURL: tempHomeURL)
-        let snapshot = try XCTUnwrap(reader.latestSnapshot(collectedAt: Date(timeIntervalSince1970: 0)))
+        let now = recentSessionNow
+        let reader = CodexSessionQuotaReader(
+            homeDirectoryURL: tempHomeURL,
+            nowProvider: { now }
+        )
+        let maybeSnapshot = await reader.latestSnapshot(collectedAt: Date(timeIntervalSince1970: 0))
+        let snapshot = try XCTUnwrap(maybeSnapshot)
 
         XCTAssertEqual(snapshot.window(.fiveHour)?.remainingPercent, 75)
         XCTAssertEqual(snapshot.window(.sevenDay)?.remainingPercent, 90)
     }
 
-    func testLatestTokenCountWithoutRateLimitsReturnsNil() throws {
+    func testLatestTokenCountWithoutRateLimitsReturnsNil() async throws {
         try writeSessionLog(
             path: "2026/06/02/latest.jsonl",
             lines: [
@@ -46,12 +52,46 @@ final class CodexSessionQuotaReaderTests: XCTestCase {
             ]
         )
 
-        let reader = CodexSessionQuotaReader(homeDirectoryURL: tempHomeURL)
+        let now = recentSessionNow
+        let reader = CodexSessionQuotaReader(
+            homeDirectoryURL: tempHomeURL,
+            nowProvider: { now }
+        )
 
-        XCTAssertNil(reader.latestSnapshot(collectedAt: Date(timeIntervalSince1970: 0)))
+        let snapshot = await reader.latestSnapshot(collectedAt: Date(timeIntervalSince1970: 0))
+        XCTAssertNil(snapshot)
     }
 
-    private func writeSessionLog(path: String, lines: [String]) throws {
+    func testPreferredChangedSessionFileIsUsedBeforeDirectoryScan() async throws {
+        try writeSessionLog(
+            path: "2026/06/03/newer.jsonl",
+            lines: [
+                tokenCountLine(timestamp: "2026-06-03T03:00:00.000Z", primaryUsed: 80, secondaryUsed: 20),
+            ]
+        )
+        let preferredURL = try writeSessionLog(
+            path: "2026/06/01/changed.jsonl",
+            lines: [
+                tokenCountLine(timestamp: "2026-06-01T03:00:00.000Z", primaryUsed: 35, secondaryUsed: 10),
+            ]
+        )
+
+        let now = recentSessionNow
+        let reader = CodexSessionQuotaReader(
+            homeDirectoryURL: tempHomeURL,
+            nowProvider: { now }
+        )
+        let maybeSnapshot = await reader.latestSnapshot(
+            collectedAt: Date(timeIntervalSince1970: 0),
+            preferredFileURL: preferredURL
+        )
+        let snapshot = try XCTUnwrap(maybeSnapshot)
+
+        XCTAssertEqual(snapshot.window(.fiveHour)?.remainingPercent, 65)
+    }
+
+    @discardableResult
+    private func writeSessionLog(path: String, lines: [String]) throws -> URL {
         let url = tempHomeURL
             .appendingPathComponent(".codex/sessions", isDirectory: true)
             .appendingPathComponent(path)
@@ -60,6 +100,7 @@ final class CodexSessionQuotaReaderTests: XCTestCase {
             withIntermediateDirectories: true
         )
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        return url
     }
 
     private func tokenCountLine(timestamp: String, primaryUsed: Int, secondaryUsed: Int) -> String {

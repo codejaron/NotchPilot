@@ -44,6 +44,8 @@ public final class CodexPlugin: AIPluginRendering {
     /// one), not on every nil → nil refresh.
     private var lastSeenSurfaceID: String?
     private var lastQuotaRefreshAt: Date?
+    private var quotaRefreshTask: Task<Void, Never>?
+    private var quotaRefreshGeneration: UInt64 = 0
 
     public convenience init(
         settingsStore: SettingsStore = .shared,
@@ -153,6 +155,7 @@ public final class CodexPlugin: AIPluginRendering {
         codexActionableSurface = nil
         usageQuotaSnapshot = nil
         lastQuotaRefreshAt = nil
+        cancelQuotaRefreshTask()
         lastSeenPhasesByThreadID.removeAll()
         lastSeenSurfaceID = nil
         bus = nil
@@ -597,15 +600,17 @@ public final class CodexPlugin: AIPluginRendering {
             quotaRefreshScheduler.deactivate()
             usageQuotaSnapshot = nil
             lastQuotaRefreshAt = nil
+            cancelQuotaRefreshTask()
         }
         syncSneakPeek()
         objectWillChange.send()
     }
 
-    private func refreshUsageQuotaSnapshot(force: Bool) {
+    private func refreshUsageQuotaSnapshot(force: Bool, preferredFileURL: URL? = nil) {
         guard isEnabled else {
             usageQuotaSnapshot = nil
             lastQuotaRefreshAt = nil
+            cancelQuotaRefreshTask()
             return
         }
 
@@ -617,13 +622,39 @@ public final class CodexPlugin: AIPluginRendering {
         }
 
         lastQuotaRefreshAt = now
-        usageQuotaSnapshot = quotaReader.latestSnapshot(collectedAt: now)
+        quotaRefreshGeneration &+= 1
+        let generation = quotaRefreshGeneration
+        let quotaReader = quotaReader
+        quotaRefreshTask?.cancel()
+        quotaRefreshTask = Task(priority: .utility) { [weak self] in
+            let snapshot = await quotaReader.latestSnapshot(
+                collectedAt: now,
+                preferredFileURL: preferredFileURL
+            )
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await MainActor.run {
+                guard let self,
+                      self.quotaRefreshGeneration == generation,
+                      self.isEnabled else {
+                    return
+                }
+
+                self.usageQuotaSnapshot = snapshot
+                self.quotaRefreshTask = nil
+            }
+        }
     }
 
     private func startQuotaRefreshScheduler() {
-        quotaRefreshScheduler.activate { [weak self] in
+        quotaRefreshScheduler.activate { [weak self] preferredFileURL in
             Task { @MainActor [weak self] in
-                self?.refreshUsageQuotaSnapshot(force: false)
+                self?.refreshUsageQuotaSnapshot(
+                    force: false,
+                    preferredFileURL: preferredFileURL
+                )
             }
         }
         syncQuotaRefreshFallbackTimer()
@@ -631,6 +662,12 @@ public final class CodexPlugin: AIPluginRendering {
 
     private func syncQuotaRefreshFallbackTimer() {
         quotaRefreshScheduler.setFallbackTimerEnabled(isEnabled && codexThreads.hasLiveExecution)
+    }
+
+    private func cancelQuotaRefreshTask() {
+        quotaRefreshGeneration &+= 1
+        quotaRefreshTask?.cancel()
+        quotaRefreshTask = nil
     }
 
     private func desiredSneakPeek(

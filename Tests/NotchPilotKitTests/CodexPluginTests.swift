@@ -154,9 +154,29 @@ final class CodexPluginTests: XCTestCase {
             plugin.activate(bus: bus)
         }
 
-        let snapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        await waitForQuotaRead(quotaReader, count: 1)
+        let snapshot = await waitForQuotaSnapshot(on: plugin) {
+            $0?.window(.fiveHour)?.remainingPercent == 75
+        }
         XCTAssertEqual(snapshot?.window(.fiveHour)?.remainingPercent, 75)
-        XCTAssertEqual(quotaReader.readCount, 1)
+        let readCount = await quotaReader.readCount
+        XCTAssertEqual(readCount, 1)
+    }
+
+    func testActivateDoesNotWaitForQuotaReaderToFinish() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaReader = SplitSuspendingCodexQuotaReader()
+        let plugin = await MainActor.run {
+            makeCodexPlugin(codexMonitor: codexMonitor, quotaReader: quotaReader)
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+        }
+
+        await waitForSuspendingQuotaReadStart(quotaReader)
+        await quotaReader.release()
     }
 
     func testThreadContextChangeRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
@@ -186,7 +206,7 @@ final class CodexPluginTests: XCTestCase {
         await MainActor.run {
             plugin.activate(bus: bus)
         }
-        let initialSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        let initialSnapshot = await waitForQuotaSnapshot(on: plugin) { $0 != nil }
         XCTAssertNotNil(initialSnapshot)
 
         now.value = Date(timeIntervalSince1970: 31)
@@ -202,9 +222,11 @@ final class CodexPluginTests: XCTestCase {
             )
         }
 
-        let refreshedSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        await waitForQuotaRead(quotaReader, count: 2)
+        let refreshedSnapshot = await waitForQuotaSnapshot(on: plugin) { $0 == nil }
         XCTAssertNil(refreshedSnapshot)
-        XCTAssertEqual(quotaReader.readCount, 2)
+        let readCount = await quotaReader.readCount
+        XCTAssertEqual(readCount, 2)
     }
 
     func testQuotaRefreshSchedulerRequestRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
@@ -244,14 +266,19 @@ final class CodexPluginTests: XCTestCase {
         await MainActor.run {
             plugin.activate(bus: bus)
         }
-        XCTAssertEqual(quotaReader.readCount, 1)
+        await waitForQuotaRead(quotaReader, count: 1)
+        let initialReadCount = await quotaReader.readCount
+        XCTAssertEqual(initialReadCount, 1)
 
         now.value = Date(timeIntervalSince1970: 31)
         quotaRefreshScheduler.emitRefreshRequest()
 
-        let refreshedSnapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+        let refreshedSnapshot = await waitForQuotaSnapshot(on: plugin) {
+            $0?.window(.fiveHour)?.remainingPercent == 90
+        }
         XCTAssertEqual(refreshedSnapshot?.window(.fiveHour)?.remainingPercent, 90)
-        XCTAssertEqual(quotaReader.readCount, 2)
+        let refreshedReadCount = await quotaReader.readCount
+        XCTAssertEqual(refreshedReadCount, 2)
     }
 
     func testQuotaFallbackTimerRunsOnlyWhileCodexThreadIsLive() async {
@@ -1011,7 +1038,29 @@ private final class MutableDateProvider: @unchecked Sendable {
     }
 }
 
-private final class SplitFakeCodexQuotaReader: @unchecked Sendable, CodexSessionQuotaReading {
+private actor SplitSuspendingCodexQuotaReader: CodexSessionQuotaReading {
+    private(set) var readStarted = false
+    private var isReleased = false
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func latestSnapshot(collectedAt: Date, preferredFileURL: URL?) async -> AIUsageQuotaSnapshot? {
+        readStarted = true
+        if isReleased == false {
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+        }
+        return nil
+    }
+
+    func release() {
+        isReleased = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor SplitFakeCodexQuotaReader: CodexSessionQuotaReading {
     private var snapshots: [AIUsageQuotaSnapshot?]
     private(set) var readCount = 0
 
@@ -1019,7 +1068,7 @@ private final class SplitFakeCodexQuotaReader: @unchecked Sendable, CodexSession
         self.snapshots = snapshots
     }
 
-    func latestSnapshot(collectedAt: Date) -> AIUsageQuotaSnapshot? {
+    func latestSnapshot(collectedAt: Date, preferredFileURL: URL?) async -> AIUsageQuotaSnapshot? {
         readCount += 1
         guard snapshots.isEmpty == false else {
             return nil
@@ -1038,12 +1087,12 @@ private final class SplitFakeSoundPlayer: SoundPlaying {
 }
 
 private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
-    private var onRefreshRequested: (@Sendable () -> Void)?
+    private var onRefreshRequested: (@Sendable (URL?) -> Void)?
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
     private(set) var fallbackTimerEnabledChanges: [Bool] = []
 
-    func activate(onRefreshRequested: @escaping @Sendable () -> Void) {
+    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void) {
         activateCount += 1
         self.onRefreshRequested = onRefreshRequested
     }
@@ -1061,9 +1110,58 @@ private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, Co
         setFallbackTimerEnabled(false)
     }
 
-    func emitRefreshRequest() {
-        onRefreshRequested?()
+    func emitRefreshRequest(preferredFileURL: URL? = nil) {
+        onRefreshRequested?(preferredFileURL)
     }
+}
+
+private func waitForQuotaRead(
+    _ reader: SplitFakeCodexQuotaReader,
+    count: Int,
+    timeout: TimeInterval = 1,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    while await reader.readCount < count, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    let readCount = await reader.readCount
+    XCTAssertGreaterThanOrEqual(readCount, count, file: file, line: line)
+}
+
+private func waitForSuspendingQuotaReadStart(
+    _ reader: SplitSuspendingCodexQuotaReader,
+    timeout: TimeInterval = 1,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    while await reader.readStarted == false, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    let readStarted = await reader.readStarted
+    XCTAssertTrue(readStarted, file: file, line: line)
+}
+
+private func waitForQuotaSnapshot(
+    on plugin: CodexPlugin,
+    timeout: TimeInterval = 1,
+    matching predicate: (AIUsageQuotaSnapshot?) -> Bool,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async -> AIUsageQuotaSnapshot? {
+    let deadline = Date().addingTimeInterval(timeout)
+    var snapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+    while predicate(snapshot) == false, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        snapshot = await MainActor.run { plugin.usageQuotaSnapshot }
+    }
+
+    XCTAssertTrue(predicate(snapshot), file: file, line: line)
+    return snapshot
 }
 
 @MainActor

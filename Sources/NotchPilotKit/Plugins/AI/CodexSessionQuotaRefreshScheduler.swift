@@ -2,7 +2,7 @@ import CoreServices
 import Foundation
 
 protocol CodexUsageQuotaRefreshScheduling: AnyObject {
-    func activate(onRefreshRequested: @escaping @Sendable () -> Void)
+    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void)
     func setFallbackTimerEnabled(_ isEnabled: Bool)
     func deactivate()
 }
@@ -24,7 +24,8 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
     private var debounceWorkItem: DispatchWorkItem?
     private var fallbackTimer: DispatchSourceTimer?
     private var isFallbackTimerEnabled = false
-    private var onRefreshRequested: (@Sendable () -> Void)?
+    private var pendingChangedFileURL: URL?
+    private var onRefreshRequested: (@Sendable (URL?) -> Void)?
 
     init(
         homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -61,7 +62,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         }
     }
 
-    func activate(onRefreshRequested: @escaping @Sendable () -> Void) {
+    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
             self.onRefreshRequested = onRefreshRequested
@@ -91,6 +92,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
             self.isFallbackTimerEnabled = false
             self.debounceWorkItem?.cancel()
             self.debounceWorkItem = nil
+            self.pendingChangedFileURL = nil
             self.stopFallbackTimer()
             self.stopFileEventStream()
         }
@@ -155,7 +157,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         )
         timer.setEventHandler { [weak self] in
             self?.startFileEventStreamIfNeeded()
-            self?.emitRefreshRequest()
+            self?.emitRefreshRequest(preferredFileURL: nil)
         }
         fallbackTimer = timer
         timer.resume()
@@ -166,10 +168,16 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         fallbackTimer = nil
     }
 
-    private func scheduleDebouncedRefresh() {
+    private func scheduleDebouncedRefresh(preferredFileURL: URL?) {
+        if let preferredFileURL {
+            pendingChangedFileURL = preferredFileURL
+        }
         debounceWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
-            self?.emitRefreshRequest()
+            guard let self else { return }
+            let preferredFileURL = self.pendingChangedFileURL
+            self.pendingChangedFileURL = nil
+            self.emitRefreshRequest(preferredFileURL: preferredFileURL)
         }
         debounceWorkItem = workItem
         queue.asyncAfter(
@@ -178,11 +186,11 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         )
     }
 
-    private func emitRefreshRequest() {
-        onRefreshRequested?()
+    private func emitRefreshRequest(preferredFileURL: URL?) {
+        onRefreshRequested?(preferredFileURL)
     }
 
-    private static let handleFileEvents: FSEventStreamCallback = { _, info, _, _, _, _ in
+    private static let handleFileEvents: FSEventStreamCallback = { _, info, _, eventPaths, _, _ in
         guard let info else {
             return
         }
@@ -190,6 +198,13 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         let scheduler = Unmanaged<CodexSessionQuotaRefreshScheduler>
             .fromOpaque(info)
             .takeUnretainedValue()
-        scheduler.scheduleDebouncedRefresh()
+        scheduler.scheduleDebouncedRefresh(preferredFileURL: changedSessionFileURL(from: eventPaths))
+    }
+
+    private static func changedSessionFileURL(from eventPaths: UnsafeMutableRawPointer) -> URL? {
+        let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] ?? []
+        return paths
+            .map { URL(fileURLWithPath: $0) }
+            .first { $0.pathExtension == "jsonl" }
     }
 }
