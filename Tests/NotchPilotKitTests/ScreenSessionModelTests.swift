@@ -178,7 +178,7 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertEqual(session.currentSneakPeek?.kind, .activity)
     }
 
-    func testWindowFrameUsesFixedExpandedContentSizeAndStaysPinnedToTopCenter() {
+    func testWindowFrameReservesTransparentShadowGuttersAndStaysPinnedToTopCenter() {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(
                 id: "primary",
@@ -190,8 +190,8 @@ final class ScreenSessionModelTests: XCTestCase {
 
         let frame = session.windowFrame
 
-        XCTAssertEqual(frame.width, 720, accuracy: 0.1)
-        XCTAssertEqual(frame.height, 240 + ScreenSessionModel.expandedShadowBottomInset, accuracy: 0.1)
+        XCTAssertEqual(frame.width, 776, accuracy: 0.1)
+        XCTAssertEqual(frame.height, 304, accuracy: 0.1)
         XCTAssertEqual(frame.midX, 1512 / 2, accuracy: 0.1)
         XCTAssertEqual(frame.maxY, 982, accuracy: 0.1)
 
@@ -208,6 +208,25 @@ final class ScreenSessionModelTests: XCTestCase {
 
         session.open(pluginID: "ai")
         XCTAssertEqual(session.windowFrame, frame)
+    }
+
+    func testOpenInteractionFrameIgnoresTransparentShadowGutters() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true,
+                closedNotchSize: CGSize(width: 236, height: 38)
+            )
+        )
+        session.open(pluginID: "ai")
+
+        let interactionFrame = session.interactionFrame(for: session.interactionSize)
+
+        XCTAssertEqual(interactionFrame.width, 720, accuracy: 0.1)
+        XCTAssertEqual(interactionFrame.height, 240, accuracy: 0.1)
+        XCTAssertEqual(interactionFrame.midX, session.windowFrame.midX, accuracy: 0.1)
+        XCTAssertEqual(interactionFrame.maxY, session.windowFrame.maxY, accuracy: 0.1)
     }
 
     func testManualOpenDoesNotCloseOnHoverExit() async {
