@@ -14,6 +14,26 @@ final class SharedNowPlayingControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testControllerStopsMonitorOnlyAfterAllStartRequestsStop() {
+        let monitor = TestSharedNowPlayingMonitor()
+        let controller = SharedNowPlayingController(monitor: monitor)
+
+        controller.start()
+        controller.start()
+
+        XCTAssertEqual(monitor.startCount, 1)
+
+        controller.stop()
+
+        XCTAssertEqual(monitor.stopCount, 0)
+
+        controller.stop()
+        controller.stop()
+
+        XCTAssertEqual(monitor.stopCount, 1)
+    }
+
+    @MainActor
     func testControllerDelegatesPlaybackCommands() {
         let monitor = TestSharedNowPlayingMonitor()
         let controller = SharedNowPlayingController(monitor: monitor)
@@ -53,6 +73,8 @@ final class SharedNowPlayingControllerTests: XCTestCase {
 private final class TestSharedNowPlayingMonitor: NowPlayingSessionMonitoring {
     var currentState: MediaPlaybackState = .idle
     var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
     private(set) var playCount = 0
     private(set) var pauseCount = 0
     private(set) var playPauseCount = 0
@@ -60,9 +82,13 @@ private final class TestSharedNowPlayingMonitor: NowPlayingSessionMonitoring {
     private(set) var previousTrackCount = 0
     private(set) var seekTimes: [Double] = []
 
-    func start() {}
+    func start() {
+        startCount += 1
+    }
 
-    func stop() {}
+    func stop() {
+        stopCount += 1
+    }
 
     func play() {
         playCount += 1

@@ -17,8 +17,11 @@ final class DesktopLyricsManager {
     private var windows: [String: DesktopLyricsWindow] = [:]
     private var playbackCancellable: AnyCancellable?
     private var presentationCancellable: AnyCancellable?
+    private var desktopLyricsEnabledCancellable: AnyCancellable?
     private var displayTimer: Timer?
     private var screenObserver: NSObjectProtocol?
+    private var isStarted = false
+    private var isNowPlayingMonitoringRequested = false
 
     init(
         nowPlayingController: SharedNowPlayingController,
@@ -44,8 +47,18 @@ final class DesktopLyricsManager {
     }
 
     func start() {
+        guard isStarted == false else {
+            syncNowPlayingMonitoring()
+            return
+        }
+        isStarted = true
         synchronizeScreens()
-        nowPlayingController.start()
+        desktopLyricsEnabledCancellable = settingsStore.$desktopLyricsEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                self?.syncNowPlayingMonitoring(desktopLyricsEnabled: isEnabled)
+            }
+        syncNowPlayingMonitoring()
         controller.handlePlaybackState(nowPlayingController.currentState)
 
         playbackCancellable = nowPlayingController.$currentState.sink { [weak self] state in
@@ -75,6 +88,12 @@ final class DesktopLyricsManager {
     }
 
     func stop() {
+        guard isStarted else {
+            return
+        }
+        isStarted = false
+        syncNowPlayingMonitoring()
+        desktopLyricsEnabledCancellable = nil
         displayTimer?.invalidate()
         displayTimer = nil
         playbackCancellable = nil
@@ -85,7 +104,22 @@ final class DesktopLyricsManager {
         }
         windows.values.forEach { $0.close() }
         windows.removeAll()
-        nowPlayingController.stop()
+    }
+
+    private func syncNowPlayingMonitoring(desktopLyricsEnabled: Bool? = nil) {
+        let shouldMonitor = isStarted && (desktopLyricsEnabled ?? settingsStore.desktopLyricsEnabled)
+        guard shouldMonitor != isNowPlayingMonitoringRequested else {
+            return
+        }
+
+        isNowPlayingMonitoringRequested = shouldMonitor
+        if shouldMonitor {
+            nowPlayingController.start()
+            controller.handlePlaybackState(nowPlayingController.currentState)
+        } else {
+            nowPlayingController.stop()
+            controller.handlePlaybackState(.idle)
+        }
     }
 
     private func synchronizeScreens() {

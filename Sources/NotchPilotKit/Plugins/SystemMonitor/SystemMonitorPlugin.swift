@@ -156,15 +156,19 @@ public final class SystemMonitorPlugin: NotchPlugin {
 
     func dashboardDidAppear() {
         dashboardMountCount += 1
+        restartScheduledRefresh()
     }
 
     func dashboardDidDisappear() {
+        let wasVisible = dashboardMountCount > 0
         dashboardMountCount = max(0, dashboardMountCount - 1)
+        if wasVisible, dashboardMountCount == 0 {
+            restartScheduledRefresh()
+        }
     }
 
     private func currentSamplingDemand() -> SystemMonitorSamplingDemand {
-        let needsDetailed = sneakPeekRequestID != nil || dashboardMountCount > 0
-        return needsDetailed ? .detailed : .basic
+        dashboardMountCount > 0 ? .detailed : .basic
     }
 
     public func activate(bus: EventBus) {
@@ -215,6 +219,13 @@ public final class SystemMonitorPlugin: NotchPlugin {
         refreshTask = Task { [weak self] in
             await self?.completeScheduledRefresh(generation: generation, demand: demand)
         }
+    }
+
+    private func restartScheduledRefresh() {
+        refreshGeneration &+= 1
+        refreshTask?.cancel()
+        refreshTask = nil
+        scheduleRefresh()
     }
 
     private func completeScheduledRefresh(generation: UInt64, demand: SystemMonitorSamplingDemand) async {

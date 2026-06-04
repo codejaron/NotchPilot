@@ -260,7 +260,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     }
 }
 
-public protocol CodexDesktopContextMonitoring: AnyObject {
+public protocol CodexDesktopContextMonitoring: AnyObject, Sendable {
     var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)? { get set }
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)? { get set }
 
@@ -271,7 +271,7 @@ public protocol CodexDesktopContextMonitoring: AnyObject {
     func focusThread(id: String) -> Bool
 }
 
-public protocol CodexDesktopActionableSurfaceMonitoring: AnyObject {
+public protocol CodexDesktopActionableSurfaceMonitoring: AnyObject, Sendable {
     var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)? { get set }
 
     @discardableResult

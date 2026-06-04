@@ -134,6 +134,40 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertEqual(plugin.snapshot, expectedSnapshot)
     }
 
+    func testSneakPreviewRefreshUsesBasicSamplingDemand() async {
+        let store = makeSettingsStore()
+        store.systemMonitorSneakPreviewEnabled = true
+        let sampler = DemandRecordingSystemMonitorSampler(snapshot: Self.calmSnapshot)
+        let plugin = SystemMonitorPlugin(
+            sampler: sampler,
+            settingsStore: store
+        )
+        let bus = EventBus()
+
+        plugin.activate(bus: bus)
+        await Task.yield()
+        await Task.yield()
+        sampler.reset()
+
+        await plugin.refresh()
+        plugin.deactivate()
+
+        XCTAssertFalse(sampler.demands.isEmpty)
+        XCTAssertTrue(sampler.demands.allSatisfy { $0 == .basic })
+    }
+
+    func testDashboardRefreshUsesDetailedSamplingDemand() async {
+        let sampler = DemandRecordingSystemMonitorSampler(snapshot: Self.calmSnapshot)
+        let plugin = SystemMonitorPlugin(sampler: sampler)
+
+        plugin.dashboardDidAppear()
+        await plugin.refresh()
+        plugin.dashboardDidDisappear()
+
+        XCTAssertFalse(sampler.demands.isEmpty)
+        XCTAssertTrue(sampler.demands.allSatisfy { $0 == .detailed })
+    }
+
     func testActivateDoesNotBlockMainActorWhenSamplerIsSlow() {
         let plugin = SystemMonitorPlugin(
             sampler: SystemMonitorSlowSampler(delay: 0.5, snapshot: .unavailable),
@@ -820,5 +854,38 @@ private final class MutableSnapshotSampler: SystemMonitorSampling, @unchecked Se
 
     func snapshot() -> SystemMonitorSnapshot {
         storedSnapshot
+    }
+}
+
+private final class DemandRecordingSystemMonitorSampler: SystemMonitorSampling, @unchecked Sendable {
+    private let storage = NSLock()
+    private let storedSnapshot: SystemMonitorSnapshot
+    private var recordedDemands: [SystemMonitorSamplingDemand] = []
+
+    init(snapshot: SystemMonitorSnapshot) {
+        self.storedSnapshot = snapshot
+    }
+
+    var demands: [SystemMonitorSamplingDemand] {
+        storage.lock()
+        defer { storage.unlock() }
+        return recordedDemands
+    }
+
+    func reset() {
+        storage.lock()
+        recordedDemands = []
+        storage.unlock()
+    }
+
+    func snapshot() -> SystemMonitorSnapshot {
+        snapshot(demand: .basic)
+    }
+
+    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
+        storage.lock()
+        recordedDemands.append(demand)
+        storage.unlock()
+        return storedSnapshot
     }
 }

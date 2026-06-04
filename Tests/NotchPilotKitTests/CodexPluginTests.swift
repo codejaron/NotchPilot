@@ -1021,12 +1021,47 @@ final class CodexPluginTests: XCTestCase {
             _ = plugin.performCodexAction(.primary, surfaceID: "surface-ipc-open")
         }
 
+        await waitForPerformedActions(on: codexMonitor, count: 1)
+
         let ipcPerformedActions = codexMonitor.performedActions
         let surface = await MainActor.run { plugin.codexActionableSurface }
 
         XCTAssertEqual(ipcPerformedActions.map(\.0), [.primary])
         XCTAssertEqual(ipcPerformedActions.map(\.1), ["surface-ipc-open"])
         XCTAssertNil(surface)
+    }
+
+    func testPerformingCodexActionDoesNotBlockMainActorWhenIPCWaits() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SlowCodexActionMonitor(delay: 0.35)
+        let plugin = await MainActor.run {
+            makeCodexPlugin(codexMonitor: codexMonitor)
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                surface: CodexActionableSurface(
+                    id: "surface-slow-ipc",
+                    summary: "Run command?",
+                    primaryButtonTitle: "Submit",
+                    cancelButtonTitle: "Skip"
+                )
+            )
+        }
+
+        let start = Date()
+        let accepted = await MainActor.run {
+            plugin.performCodexAction(.primary, surfaceID: "surface-slow-ipc")
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        let surface = await MainActor.run { plugin.codexActionableSurface }
+
+        XCTAssertTrue(accepted)
+        XCTAssertLessThan(elapsed, 0.15)
+        XCTAssertNil(surface)
+
+        await waitForPerformedActions(on: codexMonitor, count: 1)
     }
 }
 
@@ -1131,6 +1166,36 @@ private func waitForQuotaRead(
     XCTAssertGreaterThanOrEqual(readCount, count, file: file, line: line)
 }
 
+private func waitForPerformedActions(
+    on monitor: SplitFakeCodexContextMonitor,
+    count: Int,
+    timeout: TimeInterval = 1,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    while monitor.performedActions.count < count, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    XCTAssertGreaterThanOrEqual(monitor.performedActions.count, count, file: file, line: line)
+}
+
+private func waitForPerformedActions(
+    on monitor: SlowCodexActionMonitor,
+    count: Int,
+    timeout: TimeInterval = 1,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    while monitor.performedActions.count < count, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    XCTAssertGreaterThanOrEqual(monitor.performedActions.count, count, file: file, line: line)
+}
+
 private func waitForSuspendingQuotaReadStart(
     _ reader: SplitSuspendingCodexQuotaReader,
     timeout: TimeInterval = 1,
@@ -1162,6 +1227,62 @@ private func waitForQuotaSnapshot(
 
     XCTAssertTrue(predicate(snapshot), file: file, line: line)
     return snapshot
+}
+
+private final class SlowCodexActionMonitor: @unchecked Sendable, CodexDesktopContextMonitoring, CodexDesktopActionableSurfaceMonitoring {
+    var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
+    var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
+    var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
+
+    private let delay: TimeInterval
+    private let storage = NSLock()
+    private var currentSurface: CodexActionableSurface?
+    private var recordedPerformedActions: [(CodexSurfaceAction, String)] = []
+
+    init(delay: TimeInterval) {
+        self.delay = delay
+    }
+
+    var performedActions: [(CodexSurfaceAction, String)] {
+        storage.lock()
+        defer { storage.unlock() }
+        return recordedPerformedActions
+    }
+
+    func start() {}
+
+    func stop() {}
+
+    func focusThread(id: String) -> Bool {
+        true
+    }
+
+    func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
+        Thread.sleep(forTimeInterval: delay)
+        storage.lock()
+        defer { storage.unlock() }
+        guard currentSurface?.id == surfaceID else {
+            return false
+        }
+        recordedPerformedActions.append((action, surfaceID))
+        currentSurface = nil
+        return true
+    }
+
+    func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
+        true
+    }
+
+    func updateText(_ text: String, on surfaceID: String) -> Bool {
+        true
+    }
+
+    func emit(surface: CodexActionableSurface?) {
+        storage.lock()
+        currentSurface = surface
+        storage.unlock()
+        onSurfaceChanged?(surface)
+    }
 }
 
 @MainActor

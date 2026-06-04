@@ -9,6 +9,7 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
 
     private let monitor: any NowPlayingSessionMonitoring
     private var isStarted = false
+    private var startRequestCount = 0
 
     init(monitor: any NowPlayingSessionMonitoring = NowPlayingSessionMonitor()) {
         self.monitor = monitor
@@ -16,6 +17,7 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
     }
 
     func start() {
+        startRequestCount += 1
         guard isStarted == false else {
             handleMonitorStateChange(monitor.currentState)
             return
@@ -29,7 +31,11 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
     }
 
     func stop() {
-        guard isStarted else {
+        guard startRequestCount > 0 else {
+            return
+        }
+        startRequestCount -= 1
+        guard startRequestCount == 0, isStarted else {
             return
         }
         isStarted = false

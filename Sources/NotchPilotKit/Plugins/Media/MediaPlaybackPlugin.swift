@@ -24,6 +24,8 @@ public final class MediaPlaybackPlugin: NotchPlugin {
     private var sneakPeekRequestID: UUID?
     private var presentedAutoDismissAfter: TimeInterval?
     private var settingsCancellables: Set<AnyCancellable> = []
+    private var isActivated = false
+    private var isMonitoringRequested = false
 
     init(
         monitor: any NowPlayingSessionMonitoring = NowPlayingSessionMonitor(),
@@ -106,24 +108,37 @@ public final class MediaPlaybackPlugin: NotchPlugin {
     }
 
     public func activate(bus: EventBus) {
-        guard isEnabled else {
-            return
-        }
-
         self.bus = bus
-        monitor.onStateChange = { [weak self] state in
-            self?.handleMonitorStateChange(state)
-        }
-        monitor.start()
-        handleMonitorStateChange(monitor.currentState)
+        isActivated = true
+        syncPlaybackMonitoring()
     }
 
     public func deactivate() {
-        monitor.onStateChange = nil
-        monitor.stop()
+        isActivated = false
+        syncPlaybackMonitoring()
         dismissSneakPeek()
         bus = nil
         playbackState = .idle
+    }
+
+    private func syncPlaybackMonitoring() {
+        let shouldMonitor = isActivated && isEnabled
+        guard shouldMonitor != isMonitoringRequested else {
+            return
+        }
+
+        isMonitoringRequested = shouldMonitor
+        if shouldMonitor {
+            monitor.onStateChange = { [weak self] state in
+                self?.handleMonitorStateChange(state)
+            }
+            monitor.start()
+            handleMonitorStateChange(monitor.currentState)
+        } else {
+            monitor.onStateChange = nil
+            monitor.stop()
+            playbackState = .idle
+        }
     }
 
     private func handleMonitorStateChange(_ state: MediaPlaybackState) {
@@ -134,6 +149,7 @@ public final class MediaPlaybackPlugin: NotchPlugin {
 
     private func handlePluginEnabledChange(_ isEnabled: Bool) {
         self.isEnabled = isEnabled
+        syncPlaybackMonitoring()
         syncSneakPeek()
         objectWillChange.send()
     }

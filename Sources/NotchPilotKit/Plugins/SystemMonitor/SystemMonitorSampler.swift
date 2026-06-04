@@ -5,14 +5,25 @@ import IOKit.ps
 import SystemConfiguration
 
 struct SystemMonitorSamplingDemand: Sendable, Equatable {
+    let includesProcessDetails: Bool
     let includesPerProcessNetwork: Bool
 
-    init(includesPerProcessNetwork: Bool = false) {
+    init(
+        includesProcessDetails: Bool = false,
+        includesPerProcessNetwork: Bool = false
+    ) {
+        self.includesProcessDetails = includesProcessDetails
         self.includesPerProcessNetwork = includesPerProcessNetwork
     }
 
-    static let basic = SystemMonitorSamplingDemand(includesPerProcessNetwork: false)
-    static let detailed = SystemMonitorSamplingDemand(includesPerProcessNetwork: true)
+    static let basic = SystemMonitorSamplingDemand(
+        includesProcessDetails: false,
+        includesPerProcessNetwork: false
+    )
+    static let detailed = SystemMonitorSamplingDemand(
+        includesProcessDetails: true,
+        includesPerProcessNetwork: true
+    )
 }
 
 protocol SystemMonitorSampling: Sendable {
@@ -176,6 +187,66 @@ struct SystemMonitorNetworkProcessActivity: Equatable, Sendable {
 
     var totalBytesPerSecond: Double {
         downloadBytesPerSecond + uploadBytesPerSecond
+    }
+}
+
+struct SystemMonitorNetworkByteCounter: Equatable, Sendable {
+    let receivedBytes: UInt64
+    let sentBytes: UInt64
+    let date: Date
+}
+
+struct SystemMonitorNetworkByteRates: Equatable, Sendable {
+    let download: Double?
+    let upload: Double?
+
+    static let unavailable = SystemMonitorNetworkByteRates(download: nil, upload: nil)
+}
+
+struct SystemMonitorNetworkRateTracker: Sendable {
+    private var previousCounter: SystemMonitorNetworkByteCounter?
+    private var cachedRates = SystemMonitorNetworkByteRates.unavailable
+
+    mutating func rates(for currentCounter: SystemMonitorNetworkByteCounter?) -> SystemMonitorNetworkByteRates {
+        guard let currentCounter else {
+            previousCounter = nil
+            cachedRates = .unavailable
+            return .unavailable
+        }
+
+        guard let previousCounter else {
+            self.previousCounter = currentCounter
+            return cachedRates
+        }
+
+        guard currentCounter.receivedBytes >= previousCounter.receivedBytes,
+              currentCounter.sentBytes >= previousCounter.sentBytes
+        else {
+            self.previousCounter = currentCounter
+            cachedRates = .unavailable
+            return .unavailable
+        }
+
+        let interval = currentCounter.date.timeIntervalSince(previousCounter.date)
+        guard interval >= SystemMonitorSampleMath.minimumRateInterval else {
+            return cachedRates
+        }
+
+        let rates = SystemMonitorNetworkByteRates(
+            download: SystemMonitorSampleMath.bytesPerSecond(
+                previous: previousCounter.receivedBytes,
+                current: currentCounter.receivedBytes,
+                interval: interval
+            ),
+            upload: SystemMonitorSampleMath.bytesPerSecond(
+                previous: previousCounter.sentBytes,
+                current: currentCounter.sentBytes,
+                interval: interval
+            )
+        )
+        self.previousCounter = currentCounter
+        cachedRates = rates
+        return rates
     }
 }
 
@@ -375,12 +446,6 @@ enum SystemMonitorSampleMath {
 }
 
 final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Sendable {
-    private struct NetworkCounter {
-        let receivedBytes: UInt64
-        let sentBytes: UInt64
-        let date: Date
-    }
-
     private struct ProcessRusage {
         let cpuTimeNanoseconds: UInt64
         let physicalFootprintBytes: UInt64
@@ -390,7 +455,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     private var previousSystemCPUTicks: SystemMonitorCPUTicks?
     private var previousProcessCounters: [pid_t: SystemMonitorProcessCounter] = [:]
     private var previousProcessDate: Date?
-    private var previousNetworkCounter: NetworkCounter?
+    private var networkRateTracker = SystemMonitorNetworkRateTracker()
     private var previousNetworkProcessCounters: [String: SystemMonitorNetworkProcessCounter] = [:]
     private var previousNetworkProcessDate: Date?
     private var cachedNetworkProcessActivities: [SystemMonitorNetworkProcessActivity] = []
@@ -424,19 +489,28 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             rawPercent: memorystatusFreePercent()
         )
 
-        let processInterval = previousProcessDate.map { date.timeIntervalSince($0) }
-        let processCounters = processCounters()
-        let processActivities = SystemMonitorSampleMath.processActivities(
-            previous: previousProcessCounters,
-            current: processCounters,
-            interval: processInterval,
-            processorCount: ProcessInfo.processInfo.activeProcessorCount
-        )
-        let statsCPUTopItems = statsCPUTopItems()
-        previousProcessCounters = processCounters.reduce(into: [:]) { result, counter in
-            result[counter.pid] = counter
+        let processActivities: [SystemMonitorProcessActivity]
+        let statsTopItems: [SystemMonitorTopItem]
+        if demand.includesProcessDetails {
+            let processInterval = previousProcessDate.map { date.timeIntervalSince($0) }
+            let processCounters = processCounters()
+            processActivities = SystemMonitorSampleMath.processActivities(
+                previous: previousProcessCounters,
+                current: processCounters,
+                interval: processInterval,
+                processorCount: ProcessInfo.processInfo.activeProcessorCount
+            )
+            statsTopItems = statsCPUTopItems()
+            previousProcessCounters = processCounters.reduce(into: [:]) { result, counter in
+                result[counter.pid] = counter
+            }
+            previousProcessDate = date
+        } else {
+            processActivities = []
+            statsTopItems = []
+            previousProcessCounters.removeAll()
+            previousProcessDate = nil
         }
-        previousProcessDate = date
 
         let networkRates = networkByteRates()
         let networkProcessActivities = refreshNetworkProcessActivitiesIfNeeded(
@@ -466,7 +540,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
                 temperatureCelsius: temperatureCelsius,
                 diskFreeBytes: diskFreeBytes,
                 batteryPercent: batteryPercent,
-                statsCPUTopItems: statsCPUTopItems,
+                statsCPUTopItems: statsTopItems,
                 processActivities: processActivities,
                 networkProcessActivities: networkProcessActivities
             )
@@ -878,34 +952,11 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             .lastPathComponent
     }
 
-    private func networkByteRates() -> (download: Double?, upload: Double?) {
-        guard let currentCounter = networkCounter() else {
-            return (nil, nil)
-        }
-
-        defer {
-            previousNetworkCounter = currentCounter
-        }
-
-        let interval = previousNetworkCounter.map {
-            currentCounter.date.timeIntervalSince($0.date)
-        }
-
-        return (
-            SystemMonitorSampleMath.bytesPerSecond(
-                previous: previousNetworkCounter?.receivedBytes,
-                current: currentCounter.receivedBytes,
-                interval: interval
-            ),
-            SystemMonitorSampleMath.bytesPerSecond(
-                previous: previousNetworkCounter?.sentBytes,
-                current: currentCounter.sentBytes,
-                interval: interval
-            )
-        )
+    private func networkByteRates() -> SystemMonitorNetworkByteRates {
+        networkRateTracker.rates(for: networkCounter())
     }
 
-    private func networkCounter() -> NetworkCounter? {
+    private func networkCounter() -> SystemMonitorNetworkByteCounter? {
         let primaryInterfaceName = primaryNetworkInterfaceName()
         var interfaces: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&interfaces) == 0, let interfaces else {
@@ -941,7 +992,7 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             pointer = interface.ifa_next
         }
 
-        return NetworkCounter(receivedBytes: receivedBytes, sentBytes: sentBytes, date: Date())
+        return SystemMonitorNetworkByteCounter(receivedBytes: receivedBytes, sentBytes: sentBytes, date: Date())
     }
 
     private func primaryNetworkInterfaceName() -> String? {

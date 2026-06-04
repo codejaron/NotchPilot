@@ -135,6 +135,40 @@ final class SystemMonitorSamplerTests: XCTestCase {
         let networkBlock = snapshot.blocks.first { $0.kind == .network }
         let nonPlaceholderCount = networkBlock?.topItems.filter { $0.id.hasPrefix("network-placeholder-") == false }.count
         XCTAssertEqual(nonPlaceholderCount, 0)
+        XCTAssertEqual(snapshot.blocks.first { $0.kind == .cpu }?.topItems, [])
+        XCTAssertEqual(snapshot.blocks.first { $0.kind == .memory }?.topItems, [])
+    }
+
+    func testNetworkRateTrackerKeepsLastRateWhenSampleIntervalIsTooShort() {
+        var tracker = SystemMonitorNetworkRateTracker()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertEqual(
+            tracker.rates(for: SystemMonitorNetworkByteCounter(
+                receivedBytes: 1_000,
+                sentBytes: 500,
+                date: start
+            )),
+            SystemMonitorNetworkByteRates(download: nil, upload: nil)
+        )
+
+        XCTAssertEqual(
+            tracker.rates(for: SystemMonitorNetworkByteCounter(
+                receivedBytes: 1_300,
+                sentBytes: 650,
+                date: start.addingTimeInterval(1)
+            )),
+            SystemMonitorNetworkByteRates(download: 300, upload: 150)
+        )
+
+        XCTAssertEqual(
+            tracker.rates(for: SystemMonitorNetworkByteCounter(
+                receivedBytes: 1_330,
+                sentBytes: 660,
+                date: start.addingTimeInterval(1.01)
+            )),
+            SystemMonitorNetworkByteRates(download: 300, upload: 150)
+        )
     }
 
     func testCPUUsageUsesMachTickDeltas() {

@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import SwiftUI
 
 @MainActor
@@ -30,6 +31,7 @@ public final class CodexPlugin: AIPluginRendering {
     private let soundPlayer: any SoundPlaying
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
+    private let codexActionQueue = DispatchQueue(label: "NotchPilot.CodexPlugin.Actions", qos: .userInitiated)
 
     private weak var bus: EventBus?
     private var sneakPeekIDs: [String: UUID] = [:]
@@ -331,50 +333,64 @@ public final class CodexPlugin: AIPluginRendering {
 
     @discardableResult
     public func performCodexAction(_ action: CodexSurfaceAction, surfaceID: String) -> Bool {
-        guard isEnabled else {
+        guard isEnabled,
+              let currentSurface = rawCodexActionableSurface,
+              currentSurface.id == surfaceID
+        else {
             return false
         }
 
-        let performed = codexMonitor.perform(action: action, on: surfaceID)
-        if performed {
-            let previousSurfaceID = rawCodexActionableSurface?.id
-            rawCodexActionableSurface = nil
-            syncState()
-            if let previousSurfaceID {
-                dismissSneakPeek(for: previousSurfaceID)
-            }
+        rawCodexActionableSurface = nil
+        syncState()
+        dismissSneakPeek(for: currentSurface.id)
+
+        let monitor = codexMonitor
+        codexActionQueue.async {
+            _ = monitor.perform(action: action, on: surfaceID)
         }
-        return performed
+        return true
     }
 
     @discardableResult
     public func selectCodexOption(_ optionID: String, surfaceID: String) -> Bool {
-        guard isEnabled else {
+        guard isEnabled,
+              let currentSurface = rawCodexActionableSurface,
+              currentSurface.id == surfaceID,
+              currentSurface.options.contains(where: { $0.id == optionID })
+        else {
             return false
         }
 
-        let performed = codexMonitor.selectOption(optionID, on: surfaceID)
-        if performed {
-            optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
-                surface.selectingOption(optionID)
-            }
+        optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
+            surface.selectingOption(optionID)
         }
-        return performed
+
+        let monitor = codexMonitor
+        codexActionQueue.async {
+            _ = monitor.selectOption(optionID, on: surfaceID)
+        }
+        return true
     }
 
     @discardableResult
     public func updateCodexText(_ text: String, surfaceID: String) -> Bool {
-        guard isEnabled else {
+        guard isEnabled,
+              let currentSurface = rawCodexActionableSurface,
+              currentSurface.id == surfaceID,
+              currentSurface.textInput != nil
+        else {
             return false
         }
 
-        let performed = codexMonitor.updateText(text, on: surfaceID)
-        if performed {
-            optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
-                surface.updatingText(text)
-            }
+        optimisticallyUpdateCodexSurface(surfaceID: surfaceID) { surface in
+            surface.updatingText(text)
         }
-        return performed
+
+        let monitor = codexMonitor
+        codexActionQueue.async {
+            _ = monitor.updateText(text, on: surfaceID)
+        }
+        return true
     }
 
     func preferredCodexSession(for surface: CodexActionableSurface? = nil) -> AISession? {

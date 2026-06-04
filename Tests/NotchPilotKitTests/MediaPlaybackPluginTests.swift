@@ -257,6 +257,27 @@ final class MediaPlaybackPluginTests: XCTestCase {
     }
 
     @MainActor
+    func testDisablingMediaSettingWhileActiveReleasesPlaybackMonitoring() {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        let monitor = TestNowPlayingSessionMonitor()
+        let plugin = MediaPlaybackPlugin(monitor: monitor, settingsStore: store)
+
+        plugin.activate(bus: EventBus())
+
+        XCTAssertEqual(monitor.startCount, 1)
+
+        store.mediaPlaybackEnabled = false
+
+        XCTAssertEqual(monitor.stopCount, 1)
+        XCTAssertEqual(plugin.playbackState, .idle)
+
+        store.mediaPlaybackEnabled = true
+
+        XCTAssertEqual(monitor.startCount, 2)
+    }
+
+    @MainActor
     func testPrimaryPlaybackActionPausesWhenCurrentlyPlaying() {
         let monitor = TestNowPlayingSessionMonitor(initialState: Self.activeState(isPlaying: true))
         let plugin = MediaPlaybackPlugin(

@@ -15,54 +15,74 @@ final class SplitFakeCodexContextMonitor: @unchecked Sendable, CodexDesktopConte
     var onThreadContextChanged: (@Sendable (CodexThreadUpdate) -> Void)?
     var onConnectionStateChanged: (@Sendable (CodexDesktopConnectionState) -> Void)?
     var onSurfaceChanged: (@Sendable (CodexActionableSurface?) -> Void)?
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var performedActions: [(CodexSurfaceAction, String)] = []
-    private(set) var selectedOptions: [(String, String)] = []
-    private(set) var updatedTexts: [(String, String)] = []
-    private(set) var focusedThreadIDs: [String] = []
+    private let storage = NSLock()
+    private var storedStartCount = 0
+    private var storedStopCount = 0
+    private var storedPerformedActions: [(CodexSurfaceAction, String)] = []
+    private var storedSelectedOptions: [(String, String)] = []
+    private var storedUpdatedTexts: [(String, String)] = []
+    private var storedFocusedThreadIDs: [String] = []
     private var currentSurface: CodexActionableSurface?
 
+    var startCount: Int { withStorageLock { storedStartCount } }
+    var stopCount: Int { withStorageLock { storedStopCount } }
+    var performedActions: [(CodexSurfaceAction, String)] { withStorageLock { storedPerformedActions } }
+    var selectedOptions: [(String, String)] { withStorageLock { storedSelectedOptions } }
+    var updatedTexts: [(String, String)] { withStorageLock { storedUpdatedTexts } }
+    var focusedThreadIDs: [String] { withStorageLock { storedFocusedThreadIDs } }
+
     func start() {
-        startCount += 1
+        withStorageLock {
+            storedStartCount += 1
+        }
     }
 
     func stop() {
-        stopCount += 1
+        withStorageLock {
+            storedStopCount += 1
+        }
     }
 
     @discardableResult
     func focusThread(id: String) -> Bool {
-        focusedThreadIDs.append(id)
+        withStorageLock {
+            storedFocusedThreadIDs.append(id)
+        }
         return true
     }
 
     @discardableResult
     func perform(action: CodexSurfaceAction, on surfaceID: String) -> Bool {
-        guard currentSurface?.id == surfaceID else {
-            return false
+        withStorageLock {
+            guard currentSurface?.id == surfaceID else {
+                return false
+            }
+            storedPerformedActions.append((action, surfaceID))
+            currentSurface = nil
+            return true
         }
-        performedActions.append((action, surfaceID))
-        currentSurface = nil
-        return true
     }
 
     @discardableResult
     func selectOption(_ optionID: String, on surfaceID: String) -> Bool {
-        guard currentSurface?.id == surfaceID else {
-            return false
+        withStorageLock {
+            guard currentSurface?.id == surfaceID else {
+                return false
+            }
+            storedSelectedOptions.append((optionID, surfaceID))
+            return true
         }
-        selectedOptions.append((optionID, surfaceID))
-        return true
     }
 
     @discardableResult
     func updateText(_ text: String, on surfaceID: String) -> Bool {
-        guard currentSurface?.id == surfaceID else {
-            return false
+        withStorageLock {
+            guard currentSurface?.id == surfaceID else {
+                return false
+            }
+            storedUpdatedTexts.append((text, surfaceID))
+            return true
         }
-        updatedTexts.append((text, surfaceID))
-        return true
     }
 
     func emit(update: CodexThreadUpdate) {
@@ -81,7 +101,15 @@ final class SplitFakeCodexContextMonitor: @unchecked Sendable, CodexDesktopConte
     }
 
     func emit(surface: CodexActionableSurface?) {
-        currentSurface = surface
+        withStorageLock {
+            currentSurface = surface
+        }
         onSurfaceChanged?(surface)
+    }
+
+    private func withStorageLock<T>(_ body: () -> T) -> T {
+        storage.lock()
+        defer { storage.unlock() }
+        return body()
     }
 }
