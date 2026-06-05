@@ -1025,7 +1025,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertFalse(marksActivity)
     }
 
-    func testThreadStreamIgnoresGenericNameFieldWhenTitleIsMissing() throws {
+    func testThreadStreamUsesDefaultTitleWhenGenericNameLooksLikeIdentifier() throws {
         var reducer = CodexDesktopEventReducer()
 
         let outputs = try reducer.consume(
@@ -1057,7 +1057,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         }
 
         XCTAssertEqual(context.threadID, "conv-generic-name")
-        XCTAssertNil(context.title)
+        XCTAssertEqual(context.title, "Codex")
         XCTAssertFalse(marksActivity)
     }
 
@@ -1099,7 +1099,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertFalse(marksActivity)
     }
 
-    func testThreadStreamDoesNotUseLatestUserPromptAsFallbackTitle() throws {
+    func testThreadStreamUsesFirstUserPromptAsFallbackTitleWhenTitleIsMissing() throws {
         var reducer = CodexDesktopEventReducer()
 
         let outputs = try reducer.consume(
@@ -1124,7 +1124,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
                                                 "type": .string("userMessage"),
                                                 "content": .array([
                                                     .object([
-                                                        "text": .string("请实现 Codex 审批旁路接入"),
+                                                        "text": .string("请实现 Codex 审批旁路接入并兼容第三方 API 标题回退"),
                                                     ]),
                                                 ]),
                                             ]),
@@ -1145,7 +1145,250 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             return XCTFail("expected thread context output")
         }
 
-        XCTAssertNil(context.title)
+        XCTAssertEqual(context.title, "请实现 Codex 审批旁路接…")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamUsesRequestBodyAfterFileMentionPreambleForFallbackTitle() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-file-mention"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-file-mention"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-1"),
+                                        "status": .string("completed"),
+                                        "items": .array([
+                                            .object([
+                                                "type": .string("userMessage"),
+                                                "content": .array([
+                                                    .object([
+                                                        "text": .string("""
+                                                        # Files mentioned by the user:
+
+                                                        ## CleanShot.png: /tmp/CleanShot.png
+
+                                                        ## My request for Codex:
+                                                        而且如果再失败就fallback成之前的标题吧，这个是直接报错了吗
+                                                        """),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.title, "而且如果再失败就fallbac…")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamFallsBackToPreviousTitleWhenPromptFallbackIsNotUsable() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-previous-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-previous-title"),
+                                "title": .string("Previous Codex Title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-previous-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-previous-title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-2"),
+                                        "status": .string("completed"),
+                                        "items": .array([
+                                            .object([
+                                                "type": .string("userMessage"),
+                                                "content": .array([
+                                                    .object([
+                                                        "text": .string("""
+                                                        # Files mentioned by the user:
+
+                                                        ## CleanShot.png: /tmp/CleanShot.png
+                                                        """),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.title, "Previous Codex Title")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamUsesPreviousTitleBeforePromptForExistingConversation() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-existing-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-existing-title"),
+                                "title": .string("Original Thread Title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-existing-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-existing-title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "turnId": .string("turn-2"),
+                                        "status": .string("completed"),
+                                        "items": .array([
+                                            .object([
+                                                "type": .string("userMessage"),
+                                                "content": .array([
+                                                    .object([
+                                                        "text": .string("新的用户补充会覆盖标题吗"),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.title, "Original Thread Title")
+        XCTAssertFalse(marksActivity)
+    }
+
+    func testThreadStreamUsesDefaultTitleWhenNoTitleOrPromptIsAvailable() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-default-title"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-default-title"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .threadContextUpsert(context, marksActivity: marksActivity)? = outputs.last else {
+            return XCTFail("expected thread context output")
+        }
+
+        XCTAssertEqual(context.title, "Codex")
         XCTAssertFalse(marksActivity)
     }
 }

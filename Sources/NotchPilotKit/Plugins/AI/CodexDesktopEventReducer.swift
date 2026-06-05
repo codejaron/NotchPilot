@@ -6,6 +6,11 @@ public enum CodexDesktopReducerOutput: Equatable, Sendable {
 }
 
 public struct CodexDesktopEventReducer {
+    private static let fallbackTitleCharacterLimit = 15
+    private static let codexRequestMarker = "## My request for Codex:"
+    private static let filesMentionedPreamble = "# Files mentioned by the user:"
+    private static let defaultConversationTitle = "Codex"
+
     private static let titlePaths: [[String]] = [
         ["title"],
         ["metadata", "title"],
@@ -30,6 +35,7 @@ public struct CodexDesktopEventReducer {
     private var conversationStates: [String: JSONValue] = [:]
     private var conversationApprovalRequests: [String: CodexDesktopIPCRequestFrame] = [:]
     private var conversationOwnerClientIDs: [String: String] = [:]
+    private var lastKnownConversationTitles: [String: String] = [:]
 
     public init() {}
 
@@ -225,13 +231,13 @@ public struct CodexDesktopEventReducer {
         return outputs
     }
 
-    private func threadContext(
+    private mutating func threadContext(
         conversationID: String,
         state: [String: JSONValue]
     ) -> CodexThreadContext {
         CodexThreadContext(
             threadID: conversationID,
-            title: conversationTitle(from: state),
+            title: resolvedConversationTitle(conversationID: conversationID, state: state),
             activityLabel: conversationActivityLabel(from: state),
             phase: conversationPhase(from: state),
             inputTokenCount: contextInputTokenCount(from: state),
@@ -307,8 +313,91 @@ public struct CodexDesktopEventReducer {
         return AISessionLaunchContext(codexClientID: ownerClientID)
     }
 
-    private func conversationTitle(from state: [String: JSONValue]) -> String? {
+    private mutating func resolvedConversationTitle(
+        conversationID: String,
+        state: [String: JSONValue]
+    ) -> String? {
+        if let title = realConversationTitle(from: state) {
+            lastKnownConversationTitles[conversationID] = title
+            return title
+        }
+
+        if let title = lastKnownConversationTitles[conversationID] {
+            return title
+        }
+
+        if let title = promptConversationTitle(from: state) {
+            lastKnownConversationTitles[conversationID] = title
+            return title
+        }
+
+        return Self.defaultConversationTitle
+    }
+
+    private func realConversationTitle(from state: [String: JSONValue]) -> String? {
         firstString(in: state, paths: Self.titlePaths, normalize: normalizedThreadTitle)
+    }
+
+    private func promptConversationTitle(from state: [String: JSONValue]) -> String? {
+        firstUserPromptTitle(from: state)
+    }
+
+    private func firstUserPromptTitle(from state: [String: JSONValue]) -> String? {
+        guard let turns = state.arrayValue(at: ["turns"]) else {
+            return nil
+        }
+
+        for turn in turns.compactMap(\.objectValue) {
+            guard let items = turn.arrayValue(at: ["items"]) else {
+                continue
+            }
+
+            for item in items.compactMap(\.objectValue) where isUserMessageItem(item) {
+                if let title = normalizedPromptTitle(userPromptText(from: item)) {
+                    return title
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func isUserMessageItem(_ item: [String: JSONValue]) -> Bool {
+        item.stringValue(at: ["type"]) == "userMessage"
+            || item.stringValue(at: ["role"]) == "user"
+    }
+
+    private func userPromptText(from item: [String: JSONValue]) -> String? {
+        if let text = item.stringValue(at: ["text"]) {
+            return text
+        }
+
+        if let prompt = item.stringValue(at: ["prompt"]) {
+            return prompt
+        }
+
+        if let content = item.stringValue(at: ["content"]) {
+            return content
+        }
+
+        guard let content = item.arrayValue(at: ["content"]) else {
+            return nil
+        }
+
+        let parts = content.compactMap { value -> String? in
+            if let text = value.stringValue {
+                return text
+            }
+
+            guard let object = value.objectValue else {
+                return nil
+            }
+
+            return object.stringValue(at: ["text"])
+                ?? object.stringValue(at: ["content"])
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     private func approvalRequest(
@@ -392,7 +481,7 @@ public struct CodexDesktopEventReducer {
     }
 
     private func metadataTitle(from params: [String: JSONValue]) -> String? {
-        conversationTitle(from: params)
+        realConversationTitle(from: params)
     }
 
     private func firstString(
@@ -424,6 +513,42 @@ public struct CodexDesktopEventReducer {
               title.isEmpty == false,
               looksLikeUUID(title) == false
         else {
+            return nil
+        }
+
+        return title
+    }
+
+    private func normalizedPromptTitle(_ rawTitle: String?) -> String? {
+        let title = rawTitle
+            .flatMap(sanitizedPromptTitleText)?
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.isEmpty == false }
+            .joined(separator: " ")
+
+        guard let title,
+              title.isEmpty == false,
+              looksLikeUUID(title) == false
+        else {
+            return nil
+        }
+
+        guard title.count > Self.fallbackTitleCharacterLimit else {
+            return title
+        }
+
+        return String(title.prefix(Self.fallbackTitleCharacterLimit)) + "…"
+    }
+
+    private func sanitizedPromptTitleText(_ rawTitle: String) -> String? {
+        var title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let markerRange = title.range(of: Self.codexRequestMarker) {
+            title = String(title[markerRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard title.hasPrefix(Self.filesMentionedPreamble) == false else {
             return nil
         }
 
