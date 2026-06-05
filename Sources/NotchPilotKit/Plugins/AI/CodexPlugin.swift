@@ -435,7 +435,6 @@ public final class CodexPlugin: AIPluginRendering {
         codexThreads.apply(update)
         syncState()
         syncSneakPeek()
-        refreshUsageQuotaSnapshot(force: false)
 
         lastSeenPhasesByThreadID[threadID] = nextPhase
         if previousPhase != .completed, nextPhase == .completed {
@@ -477,7 +476,7 @@ public final class CodexPlugin: AIPluginRendering {
         codexThreads.prune(now: nowProvider())
         sessions = codexThreads.sessions()
         codexActionableSurface = mergedCodexSurface()
-        syncQuotaRefreshFallbackTimer()
+        syncQuotaRefreshPolling()
     }
 
     var approvalSneakNotificationsEnabled: Bool {
@@ -668,16 +667,16 @@ public final class CodexPlugin: AIPluginRendering {
         quotaRefreshScheduler.activate { [weak self] preferredFileURL in
             Task { @MainActor [weak self] in
                 self?.refreshUsageQuotaSnapshot(
-                    force: false,
+                    force: true,
                     preferredFileURL: preferredFileURL
                 )
             }
         }
-        syncQuotaRefreshFallbackTimer()
+        syncQuotaRefreshPolling()
     }
 
-    private func syncQuotaRefreshFallbackTimer() {
-        quotaRefreshScheduler.setFallbackTimerEnabled(isEnabled && codexThreads.hasLiveExecution)
+    private func syncQuotaRefreshPolling() {
+        quotaRefreshScheduler.setPollingEnabled(isEnabled && codexThreads.hasLiveExecution)
     }
 
     private func cancelQuotaRefreshTask() {

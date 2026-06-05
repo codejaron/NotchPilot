@@ -179,10 +179,11 @@ final class CodexPluginTests: XCTestCase {
         await quotaReader.release()
     }
 
-    func testThreadContextChangeRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
+    func testThreadContextChangeOnlyTogglesQuotaPollingWithoutReadingSnapshot() async {
         let now = MutableDateProvider(Date(timeIntervalSince1970: 0))
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
+        let quotaRefreshScheduler = SplitFakeCodexQuotaRefreshScheduler()
         let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
             AIUsageQuotaSnapshot(
                 host: .codex,
@@ -199,6 +200,7 @@ final class CodexPluginTests: XCTestCase {
             makeCodexPlugin(
                 codexMonitor: codexMonitor,
                 quotaReader: quotaReader,
+                quotaRefreshScheduler: quotaRefreshScheduler,
                 nowProvider: { now.value }
             )
         }
@@ -222,11 +224,10 @@ final class CodexPluginTests: XCTestCase {
             )
         }
 
-        await waitForQuotaRead(quotaReader, count: 2)
-        let refreshedSnapshot = await waitForQuotaSnapshot(on: plugin) { $0 == nil }
-        XCTAssertNil(refreshedSnapshot)
+        try? await Task.sleep(nanoseconds: 100_000_000)
         let readCount = await quotaReader.readCount
-        XCTAssertEqual(readCount, 2)
+        XCTAssertEqual(readCount, 1)
+        XCTAssertEqual(quotaRefreshScheduler.pollingEnabledChanges, [false, true])
     }
 
     func testQuotaRefreshSchedulerRequestRefreshesUsageQuotaSnapshotAfterThrottleWindow() async {
@@ -281,7 +282,7 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(refreshedReadCount, 2)
     }
 
-    func testQuotaFallbackTimerRunsOnlyWhileCodexThreadIsLive() async {
+    func testQuotaPollingRunsOnlyWhileCodexThreadIsLive() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let quotaRefreshScheduler = SplitFakeCodexQuotaRefreshScheduler()
@@ -295,7 +296,7 @@ final class CodexPluginTests: XCTestCase {
         await MainActor.run {
             plugin.activate(bus: bus)
         }
-        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false])
+        XCTAssertEqual(quotaRefreshScheduler.pollingEnabledChanges, [false])
 
         await MainActor.run {
             codexMonitor.emit(
@@ -308,7 +309,7 @@ final class CodexPluginTests: XCTestCase {
                 marksActivity: false
             )
         }
-        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false, true])
+        XCTAssertEqual(quotaRefreshScheduler.pollingEnabledChanges, [false, true])
 
         await MainActor.run {
             codexMonitor.emit(
@@ -320,7 +321,7 @@ final class CodexPluginTests: XCTestCase {
                 )
             )
         }
-        XCTAssertEqual(quotaRefreshScheduler.fallbackTimerEnabledChanges, [false, true, false])
+        XCTAssertEqual(quotaRefreshScheduler.pollingEnabledChanges, [false, true, false])
     }
 
     func testActiveThreadEmitsSneakPeekWithoutActionableSurface() async {
@@ -1125,24 +1126,24 @@ private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, Co
     private var onRefreshRequested: (@Sendable (URL?) -> Void)?
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
-    private(set) var fallbackTimerEnabledChanges: [Bool] = []
+    private(set) var pollingEnabledChanges: [Bool] = []
 
     func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void) {
         activateCount += 1
         self.onRefreshRequested = onRefreshRequested
     }
 
-    func setFallbackTimerEnabled(_ isEnabled: Bool) {
-        guard fallbackTimerEnabledChanges.last != isEnabled else {
+    func setPollingEnabled(_ isEnabled: Bool) {
+        guard pollingEnabledChanges.last != isEnabled else {
             return
         }
-        fallbackTimerEnabledChanges.append(isEnabled)
+        pollingEnabledChanges.append(isEnabled)
     }
 
     func deactivate() {
         deactivateCount += 1
         onRefreshRequested = nil
-        setFallbackTimerEnabled(false)
+        setPollingEnabled(false)
     }
 
     func emitRefreshRequest(preferredFileURL: URL? = nil) {

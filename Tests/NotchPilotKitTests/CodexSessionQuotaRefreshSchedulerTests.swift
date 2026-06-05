@@ -1,17 +1,20 @@
-import CoreServices
 import XCTest
 @testable import NotchPilotKit
 
 final class CodexSessionQuotaRefreshSchedulerTests: XCTestCase {
-    func testCFEventPathsSelectsFirstJSONLPath() {
-        let eventPaths = [
-            "/Users/test/.codex/sessions/readme.txt",
-            "/Users/test/.codex/sessions/2026/session.jsonl",
-            "/Users/test/.codex/sessions/other.jsonl",
-        ] as CFArray
+    func testPollingRefreshesImmediatelyWhenEnabled() async {
+        let scheduler = CodexSessionQuotaRefreshScheduler(
+            pollingRefreshInterval: 0.2
+        )
+        let refreshRequested = expectation(description: "polling requested refresh immediately")
 
-        let fileURL = CodexSessionQuotaRefreshScheduler.changedSessionFileURL(fromCFEventPaths: eventPaths)
+        scheduler.activate { preferredFileURL in
+            XCTAssertNil(preferredFileURL)
+            refreshRequested.fulfill()
+        }
+        scheduler.setPollingEnabled(true)
 
-        XCTAssertEqual(fileURL?.path, "/Users/test/.codex/sessions/2026/session.jsonl")
+        await fulfillment(of: [refreshRequested], timeout: 0.05)
+        scheduler.deactivate()
     }
 }
