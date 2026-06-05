@@ -39,6 +39,8 @@ jobs:
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
             -derivedDataPath "$DERIVED_DATA" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES"
 
@@ -51,6 +53,8 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
             -derivedDataPath "$DERIVED_DATA" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
             CODE_SIGNING_ALLOWED=NO \
