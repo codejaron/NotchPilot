@@ -127,6 +127,74 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(playedCategories, [.inputRequired])
     }
 
+    func testCompletedCodexSnapshotDoesNotPlayTaskCompleteSound() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let soundPlayer = await MainActor.run { SplitFakeSoundPlayer() }
+        let plugin = await MainActor.run {
+            makeCodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaReader: SplitFakeCodexQuotaReader(snapshots: [nil]),
+                quotaRefreshScheduler: SplitFakeCodexQuotaRefreshScheduler(),
+                soundPlayer: soundPlayer
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-old-completed",
+                    title: "Old Completed",
+                    activityLabel: "Completed",
+                    phase: .completed
+                ),
+                marksActivity: false
+            )
+        }
+
+        let playedCategories = await MainActor.run { soundPlayer.playedCategories }
+        XCTAssertEqual(playedCategories, [])
+    }
+
+    func testLiveCodexCompletionPlaysTaskCompleteSound() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let soundPlayer = await MainActor.run { SplitFakeSoundPlayer() }
+        let plugin = await MainActor.run {
+            makeCodexPlugin(
+                codexMonitor: codexMonitor,
+                quotaReader: SplitFakeCodexQuotaReader(snapshots: [nil]),
+                quotaRefreshScheduler: SplitFakeCodexQuotaRefreshScheduler(),
+                soundPlayer: soundPlayer
+            )
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-live-completed",
+                    title: "Live Completed",
+                    activityLabel: "Working",
+                    phase: .working
+                ),
+                marksActivity: false
+            )
+            codexMonitor.emit(
+                context: CodexThreadContext(
+                    threadID: "codex-live-completed",
+                    title: "Live Completed",
+                    activityLabel: "Completed",
+                    phase: .completed
+                )
+            )
+        }
+
+        let playedCategories = await MainActor.run { soundPlayer.playedCategories }
+        XCTAssertEqual(playedCategories, [.taskComplete])
+    }
+
     func testActivateReadsUsageQuotaSnapshotFromAccountUsage() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()

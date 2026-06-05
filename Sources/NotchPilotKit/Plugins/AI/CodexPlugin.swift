@@ -38,8 +38,8 @@ public final class CodexPlugin: AIPluginRendering {
     private var codexThreads: CodexThreadRegistry
     private var rawCodexActionableSurface: CodexActionableSurface?
     private var settingsCancellables: Set<AnyCancellable> = []
-    /// Tracks per-thread phase so we only fire `task.complete` on the
-    /// edge of a transition into `.completed` (not every refresh).
+    /// Tracks per-thread phase so we only fire `task.complete` on live
+    /// transitions into `.completed` (not historical snapshots or refreshes).
     private var lastSeenPhasesByThreadID: [String: CodexThreadPhase] = [:]
     /// Tracks the last actionable surface id so we only fire
     /// `input.required` when a new surface appears (or replaces a different
@@ -437,7 +437,7 @@ public final class CodexPlugin: AIPluginRendering {
         syncSneakPeek()
 
         lastSeenPhasesByThreadID[threadID] = nextPhase
-        if previousPhase != .completed, nextPhase == .completed {
+        if update.marksActivity, previousPhase != .completed, nextPhase == .completed {
             soundPlayer.play(.taskComplete)
         }
     }

@@ -58,9 +58,93 @@ final class DesktopLyricsManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testStartInstallsMouseMonitorSoHoverCanHideLyricsBeforeNextLineTick() {
+        let store = makeSettingsStore()
+        store.desktopLyricsEnabled = true
+        let mouseMonitor = TestDesktopLyricsMouseMonitor()
+        let controller = SharedNowPlayingController(monitor: TestDesktopLyricsNowPlayingMonitor())
+        let manager = makeManager(
+            nowPlayingController: controller,
+            settingsStore: store,
+            mouseMonitor: mouseMonitor
+        )
+
+        manager.start()
+
+        XCTAssertEqual(mouseMonitor.startCallCount, 1)
+        XCTAssertNotNil(mouseMonitor.onMouseActivity)
+
+        manager.stop()
+    }
+
+    @MainActor
+    func testStartDoesNotInstallMouseMonitorWhenDesktopLyricsAreDisabled() {
+        let store = makeSettingsStore()
+        store.desktopLyricsEnabled = false
+        let mouseMonitor = TestDesktopLyricsMouseMonitor()
+        let controller = SharedNowPlayingController(monitor: TestDesktopLyricsNowPlayingMonitor())
+        let manager = makeManager(
+            nowPlayingController: controller,
+            settingsStore: store,
+            mouseMonitor: mouseMonitor
+        )
+
+        manager.start()
+        manager.stop()
+
+        XCTAssertEqual(mouseMonitor.startCallCount, 0)
+        XCTAssertEqual(mouseMonitor.stopCallCount, 0)
+    }
+
+    @MainActor
+    func testDesktopLyricsSettingStartsAndStopsMouseMonitorDemand() {
+        let store = makeSettingsStore()
+        store.desktopLyricsEnabled = false
+        let mouseMonitor = TestDesktopLyricsMouseMonitor()
+        let controller = SharedNowPlayingController(monitor: TestDesktopLyricsNowPlayingMonitor())
+        let manager = makeManager(
+            nowPlayingController: controller,
+            settingsStore: store,
+            mouseMonitor: mouseMonitor
+        )
+
+        manager.start()
+
+        XCTAssertEqual(mouseMonitor.startCallCount, 0)
+
+        store.desktopLyricsEnabled = true
+
+        XCTAssertEqual(mouseMonitor.startCallCount, 1)
+
+        store.desktopLyricsEnabled = false
+        manager.stop()
+
+        XCTAssertEqual(mouseMonitor.stopCallCount, 1)
+    }
+
+    @MainActor
+    func testStopRemovesMouseMonitor() {
+        let store = makeSettingsStore()
+        store.desktopLyricsEnabled = true
+        let mouseMonitor = TestDesktopLyricsMouseMonitor()
+        let controller = SharedNowPlayingController(monitor: TestDesktopLyricsNowPlayingMonitor())
+        let manager = makeManager(
+            nowPlayingController: controller,
+            settingsStore: store,
+            mouseMonitor: mouseMonitor
+        )
+
+        manager.start()
+        manager.stop()
+
+        XCTAssertEqual(mouseMonitor.stopCallCount, 1)
+    }
+
+    @MainActor
     private func makeManager(
         nowPlayingController: SharedNowPlayingController,
-        settingsStore: SettingsStore
+        settingsStore: SettingsStore,
+        mouseMonitor: DesktopLyricsMouseMonitoring = TestDesktopLyricsMouseMonitor()
     ) -> DesktopLyricsManager {
         let cache = TestDesktopLyricsManagerCache()
         return DesktopLyricsManager(
@@ -73,6 +157,7 @@ final class DesktopLyricsManagerTests: XCTestCase {
             searchProvider: TestDesktopLyricsManagerSearchProvider(),
             cache: cache,
             ignoredTrackStore: TestDesktopLyricsManagerIgnoredStore(),
+            mouseMonitor: mouseMonitor,
             fileManager: .default
         )
     }
@@ -160,4 +245,21 @@ private final class TestDesktopLyricsManagerIgnoredStore: LyricsTrackIgnoring {
     func insert(_ key: LyricsTrackKey) {}
 
     func remove(_ key: LyricsTrackKey) {}
+}
+
+@MainActor
+private final class TestDesktopLyricsMouseMonitor: DesktopLyricsMouseMonitoring {
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var onMouseActivity: (@MainActor () -> Void)?
+
+    func start(onMouseActivity: @escaping @MainActor () -> Void) {
+        startCallCount += 1
+        self.onMouseActivity = onMouseActivity
+    }
+
+    func stop() {
+        stopCallCount += 1
+        onMouseActivity = nil
+    }
 }

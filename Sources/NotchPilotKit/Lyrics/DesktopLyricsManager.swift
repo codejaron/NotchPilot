@@ -4,6 +4,63 @@ import Foundation
 import SwiftUI
 
 @MainActor
+protocol DesktopLyricsMouseMonitoring: AnyObject {
+    func start(onMouseActivity: @escaping @MainActor () -> Void)
+    func stop()
+}
+
+@MainActor
+final class DesktopLyricsMouseMonitor: DesktopLyricsMouseMonitoring {
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
+    private var onMouseActivity: (@MainActor () -> Void)?
+
+    func start(onMouseActivity: @escaping @MainActor () -> Void) {
+        self.onMouseActivity = onMouseActivity
+
+        guard localMouseMonitor == nil, globalMouseMonitor == nil else {
+            return
+        }
+
+        let eventMask: NSEvent.EventTypeMask = [
+            .mouseMoved,
+            .leftMouseDragged,
+            .rightMouseDragged,
+            .otherMouseDragged,
+            .scrollWheel,
+            .swipe,
+        ]
+
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.onMouseActivity?()
+            }
+            return event
+        }
+
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.onMouseActivity?()
+            }
+        }
+    }
+
+    func stop() {
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
+        }
+
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
+
+        onMouseActivity = nil
+    }
+}
+
+@MainActor
 final class DesktopLyricsManager {
     private let nowPlayingController: SharedNowPlayingController
     private let settingsStore: SettingsStore
@@ -11,6 +68,7 @@ final class DesktopLyricsManager {
     private let searchProvider: LyricsSearching
     private let fileManager: FileManager
     private let lyricsSearchWindowController: LyricsSearchWindowController
+    private let mouseMonitor: DesktopLyricsMouseMonitoring
 
     private static let lineRefreshTolerance: TimeInterval = 0.02
 
@@ -22,6 +80,7 @@ final class DesktopLyricsManager {
     private var screenObserver: NSObjectProtocol?
     private var isStarted = false
     private var isNowPlayingMonitoringRequested = false
+    private var isMouseMonitoringRequested = false
 
     init(
         nowPlayingController: SharedNowPlayingController,
@@ -30,6 +89,7 @@ final class DesktopLyricsManager {
         searchProvider: LyricsSearching,
         cache: LyricsCaching,
         ignoredTrackStore: LyricsTrackIgnoring,
+        mouseMonitor: DesktopLyricsMouseMonitoring = DesktopLyricsMouseMonitor(),
         fileManager: FileManager = .default,
         lyricsSearchWindowController: LyricsSearchWindowController = .init()
     ) {
@@ -47,11 +107,13 @@ final class DesktopLyricsManager {
         )
         self.fileManager = fileManager
         self.lyricsSearchWindowController = lyricsSearchWindowController
+        self.mouseMonitor = mouseMonitor
     }
 
     func start() {
         guard isStarted == false else {
             syncNowPlayingMonitoring()
+            syncMouseMonitoring()
             return
         }
         isStarted = true
@@ -60,8 +122,11 @@ final class DesktopLyricsManager {
             .removeDuplicates()
             .sink { [weak self] isEnabled in
                 self?.syncNowPlayingMonitoring(desktopLyricsEnabled: isEnabled)
+                self?.syncMouseMonitoring(desktopLyricsEnabled: isEnabled)
+                self?.refreshWindows()
             }
         syncNowPlayingMonitoring()
+        syncMouseMonitoring()
         controller.handlePlaybackState(nowPlayingController.currentState)
 
         playbackCancellable = nowPlayingController.$currentState.sink { [weak self] state in
@@ -99,6 +164,7 @@ final class DesktopLyricsManager {
         desktopLyricsEnabledCancellable = nil
         lineRefreshTimer?.invalidate()
         lineRefreshTimer = nil
+        syncMouseMonitoring()
         playbackCancellable = nil
         presentationCancellable = nil
         if let screenObserver {
@@ -122,6 +188,25 @@ final class DesktopLyricsManager {
         } else {
             nowPlayingController.stop()
             controller.handlePlaybackState(.idle)
+        }
+    }
+
+    private func syncMouseMonitoring(desktopLyricsEnabled: Bool? = nil) {
+        let shouldMonitor = isStarted && (desktopLyricsEnabled ?? settingsStore.desktopLyricsEnabled)
+        guard shouldMonitor != isMouseMonitoringRequested else {
+            return
+        }
+
+        isMouseMonitoringRequested = shouldMonitor
+        if shouldMonitor {
+            mouseMonitor.start { [weak self] in
+                guard let self, self.isStarted else {
+                    return
+                }
+                self.refreshWindows()
+            }
+        } else {
+            mouseMonitor.stop()
         }
     }
 
