@@ -20,8 +20,8 @@ public final class ScreenSessionModel: ObservableObject {
     static let openAnimation: Animation = .interactiveSpring(duration: 0.46, extraBounce: 0.20, blendDuration: 0.125)
     static let closeAnimation: Animation = .interactiveSpring(duration: 0.42, extraBounce: 0.12, blendDuration: 0.125)
     static let sneakAnimation: Animation = .interactiveSpring(duration: 0.42, extraBounce: 0.14, blendDuration: 0.125)
-    public static let expandedShadowHorizontalInset: CGFloat = 28
-    public static let expandedShadowBottomInset: CGFloat = 64
+    public static let expandedShadowHorizontalInset: CGFloat = NotchChromeShadow.requiredHorizontalInset
+    public static let expandedShadowBottomInset: CGFloat = NotchChromeShadow.requiredBottomInset
 
     @Published public private(set) var descriptor: ScreenDescriptor
     @Published public private(set) var notchState: NotchState = .idleClosed

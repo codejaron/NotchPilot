@@ -35,32 +35,69 @@ public struct NotchContentView: View {
         ZStack(alignment: .top) {
             Color.clear
 
-            ZStack(alignment: .topLeading) {
-                background
+            ZStack(alignment: .top) {
+                chromeShadow(displaySize: displaySize)
 
-                if session.notchState == .open {
-                    expandedBody(plugins: plugins, context: context)
-                        .transition(Self.expandedContentTransition)
-                } else if session.notchState == .previewClosed,
-                          let previewPlugin {
-                    previewClosedBody(previewPlugin: previewPlugin, context: context)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                } else {
-                    idleBody
-                        .transition(.opacity)
-                }
+                chromeSurface(
+                    displaySize: displaySize,
+                    plugins: plugins,
+                    context: context,
+                    previewPlugin: previewPlugin
+                )
             }
-            .frame(width: displaySize.width, height: displaySize.height)
-            .clipShape(currentNotchShape, style: NotchRenderingStyle.edgeFillStyle)
-            .compositingGroup()
-            .shadow(color: .black.opacity(isOpen ? 0.34 : 0), radius: isOpen ? 8 : 0, y: isOpen ? 5 : 0)
-            .shadow(color: .black.opacity(isOpen ? 0.46 : 0), radius: isOpen ? 13 : 0, y: isOpen ? 9 : 0)
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
         }
         .frame(width: session.windowSize.width, height: session.windowSize.height, alignment: .top)
         .animation(ScreenSessionModel.sneakAnimation, value: previewPlugin?.id)
         .sensoryFeedback(.alignment, trigger: session.hoverFeedbackTrigger)
+    }
+
+    private func chromeShadow(displaySize: CGSize) -> some View {
+        currentNotchShape
+            .fill(Color.black, style: NotchRenderingStyle.edgeFillStyle)
+            .frame(width: displaySize.width, height: displaySize.height)
+            .opacity(isOpen ? 1 : 0)
+            .shadow(
+                color: .black.opacity(isOpen ? NotchChromeShadow.ambientLayer.opacity : 0),
+                radius: isOpen ? NotchChromeShadow.ambientLayer.radius : 0,
+                x: NotchChromeShadow.ambientLayer.x,
+                y: isOpen ? NotchChromeShadow.ambientLayer.y : 0
+            )
+            .shadow(
+                color: .black.opacity(isOpen ? NotchChromeShadow.depthLayer.opacity : 0),
+                radius: isOpen ? NotchChromeShadow.depthLayer.radius : 0,
+                x: NotchChromeShadow.depthLayer.x,
+                y: isOpen ? NotchChromeShadow.depthLayer.y : 0
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private func chromeSurface(
+        displaySize: CGSize,
+        plugins: [any NotchPlugin],
+        context: NotchContext,
+        previewPlugin: (any NotchPlugin)?
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            background
+
+            if session.notchState == .open {
+                expandedBody(plugins: plugins, context: context)
+                    .transition(Self.expandedContentTransition)
+            } else if session.notchState == .previewClosed,
+                      let previewPlugin {
+                previewClosedBody(previewPlugin: previewPlugin, context: context)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                idleBody
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: displaySize.width, height: displaySize.height)
+        .clipShape(currentNotchShape, style: NotchRenderingStyle.edgeFillStyle)
+        .compositingGroup()
     }
 
     @ViewBuilder
