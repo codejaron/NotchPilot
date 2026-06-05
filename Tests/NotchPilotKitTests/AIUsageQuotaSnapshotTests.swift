@@ -7,7 +7,7 @@ final class AIUsageQuotaSnapshotTests: XCTestCase {
             snapshots: [
                 AIUsageQuotaSnapshot(
                     host: .codex,
-                    source: .codexSessionLog,
+                    source: .codexAccountUsage,
                     collectedAt: Date(timeIntervalSince1970: 0),
                     windows: [
                         AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 47, resetsAt: nil, windowMinutes: 300),
@@ -92,41 +92,38 @@ final class AIUsageQuotaSnapshotTests: XCTestCase {
         )
     }
 
-    func testCodexSessionLogParsesPrimaryAndSecondaryLimits() throws {
+    func testCodexAccountUsageParsesPrimaryAndSecondaryWindows() throws {
         let snapshot = try XCTUnwrap(
-            AIUsageQuotaSnapshot.codexSessionLog(
+            AIUsageQuotaSnapshot.codexAccountUsage(
                 rawJSON: """
                 {
-                  "timestamp": "2026-06-01T03:27:10.944Z",
-                  "type": "event_msg",
-                  "payload": {
-                    "type": "token_count",
-                    "info": {
-                      "model_context_window": 258400
+                  "plan_type": "plus",
+                  "rate_limit": {
+                    "primary_window": {
+                      "used_percent": 43,
+                      "limit_window_seconds": 18000,
+                      "reset_at": 1780302427
+                    },
+                    "secondary_window": {
+                      "used_percent": 57,
+                      "limit_window_seconds": 604800,
+                      "reset_after_seconds": 3600
                     }
-                  },
-                  "rate_limits": {
-                    "primary": {
-                      "used_percent": 20,
-                      "window_minutes": 300,
-                      "resets_at": 1780302427
-                    },
-                    "secondary": {
-                      "used_percent": 40,
-                      "window_minutes": 10080,
-                      "resets_at": 1780889227
-                    },
-                    "plan_type": "plus"
                   }
                 }
                 """,
-                collectedAt: Date(timeIntervalSince1970: 0)
+                collectedAt: Date(timeIntervalSince1970: 1780298827)
             )
         )
 
         XCTAssertEqual(snapshot.host, .codex)
+        XCTAssertEqual(snapshot.source, .codexAccountUsage)
         XCTAssertEqual(snapshot.planType, "plus")
-        XCTAssertEqual(snapshot.window(.fiveHour)?.remainingPercent, 80)
-        XCTAssertEqual(snapshot.window(.sevenDay)?.remainingPercent, 60)
+        XCTAssertEqual(snapshot.window(.fiveHour)?.remainingPercent, 57)
+        XCTAssertEqual(snapshot.window(.fiveHour)?.windowMinutes, 300)
+        XCTAssertEqual(snapshot.window(.fiveHour)?.resetsAt, Date(timeIntervalSince1970: 1780302427))
+        XCTAssertEqual(snapshot.window(.sevenDay)?.remainingPercent, 43)
+        XCTAssertEqual(snapshot.window(.sevenDay)?.windowMinutes, 10_080)
+        XCTAssertEqual(snapshot.window(.sevenDay)?.resetsAt, Date(timeIntervalSince1970: 1780302427))
     }
 }

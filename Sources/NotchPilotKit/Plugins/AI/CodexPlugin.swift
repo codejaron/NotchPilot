@@ -26,7 +26,7 @@ public final class CodexPlugin: AIPluginRendering {
 
     private let settingsStore: SettingsStore
     private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
-    private let quotaReader: any CodexSessionQuotaReading
+    private let quotaReader: any CodexUsageQuotaReading
     private let quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling
     private let soundPlayer: any SoundPlaying
     private let nowProvider: @Sendable () -> Date
@@ -58,8 +58,8 @@ public final class CodexPlugin: AIPluginRendering {
         self.init(
             settingsStore: settingsStore,
             codexMonitor: codexMonitor,
-            quotaReader: CodexSessionQuotaReader(),
-            quotaRefreshScheduler: CodexSessionQuotaRefreshScheduler(),
+            quotaReader: CodexAccountUsageQuotaReader(),
+            quotaRefreshScheduler: CodexUsageQuotaRefreshScheduler(),
             soundPlayer: SoundManager.shared,
             sessionFocuser: sessionFocuser,
             nowProvider: nowProvider
@@ -69,8 +69,8 @@ public final class CodexPlugin: AIPluginRendering {
     init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
-        quotaReader: any CodexSessionQuotaReading = CodexSessionQuotaReader(),
-        quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = CodexSessionQuotaRefreshScheduler(),
+        quotaReader: any CodexUsageQuotaReading = CodexAccountUsageQuotaReader(),
+        quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = CodexUsageQuotaRefreshScheduler(),
         soundPlayer: any SoundPlaying = SoundManager.shared,
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
@@ -621,7 +621,7 @@ public final class CodexPlugin: AIPluginRendering {
         objectWillChange.send()
     }
 
-    private func refreshUsageQuotaSnapshot(force: Bool, preferredFileURL: URL? = nil) {
+    private func refreshUsageQuotaSnapshot(force: Bool) {
         guard isEnabled else {
             usageQuotaSnapshot = nil
             lastQuotaRefreshAt = nil
@@ -642,10 +642,7 @@ public final class CodexPlugin: AIPluginRendering {
         let quotaReader = quotaReader
         quotaRefreshTask?.cancel()
         quotaRefreshTask = Task(priority: .utility) { [weak self] in
-            let snapshot = await quotaReader.latestSnapshot(
-                collectedAt: now,
-                preferredFileURL: preferredFileURL
-            )
+            let snapshot = await quotaReader.latestSnapshot(collectedAt: now)
             guard Task.isCancelled == false else {
                 return
             }
@@ -664,12 +661,9 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func startQuotaRefreshScheduler() {
-        quotaRefreshScheduler.activate { [weak self] preferredFileURL in
+        quotaRefreshScheduler.activate { [weak self] in
             Task { @MainActor [weak self] in
-                self?.refreshUsageQuotaSnapshot(
-                    force: true,
-                    preferredFileURL: preferredFileURL
-                )
+                self?.refreshUsageQuotaSnapshot(force: true)
             }
         }
         syncQuotaRefreshPolling()

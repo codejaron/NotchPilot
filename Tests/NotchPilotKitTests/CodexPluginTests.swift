@@ -127,13 +127,13 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertEqual(playedCategories, [.inputRequired])
     }
 
-    func testActivateReadsUsageQuotaSnapshotFromSessionLog() async {
+    func testActivateReadsUsageQuotaSnapshotFromAccountUsage() async {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
         let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
             AIUsageQuotaSnapshot(
                 host: .codex,
-                source: .codexSessionLog,
+                source: .codexAccountUsage,
                 collectedAt: Date(timeIntervalSince1970: 0),
                 windows: [
                     AIUsageQuotaWindow(
@@ -187,7 +187,7 @@ final class CodexPluginTests: XCTestCase {
         let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
             AIUsageQuotaSnapshot(
                 host: .codex,
-                source: .codexSessionLog,
+                source: .codexAccountUsage,
                 collectedAt: Date(timeIntervalSince1970: 0),
                 windows: [
                     AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 25, resetsAt: nil, windowMinutes: 300),
@@ -238,7 +238,7 @@ final class CodexPluginTests: XCTestCase {
         let quotaReader = SplitFakeCodexQuotaReader(snapshots: [
             AIUsageQuotaSnapshot(
                 host: .codex,
-                source: .codexSessionLog,
+                source: .codexAccountUsage,
                 collectedAt: Date(timeIntervalSince1970: 0),
                 windows: [
                     AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 25, resetsAt: nil, windowMinutes: 300),
@@ -247,7 +247,7 @@ final class CodexPluginTests: XCTestCase {
             ),
             AIUsageQuotaSnapshot(
                 host: .codex,
-                source: .codexSessionLog,
+                source: .codexAccountUsage,
                 collectedAt: Date(timeIntervalSince1970: 31),
                 windows: [
                     AIUsageQuotaWindow(kind: .fiveHour, usedPercent: 10, resetsAt: nil, windowMinutes: 300),
@@ -1074,12 +1074,12 @@ private final class MutableDateProvider: @unchecked Sendable {
     }
 }
 
-private actor SplitSuspendingCodexQuotaReader: CodexSessionQuotaReading {
+private actor SplitSuspendingCodexQuotaReader: CodexUsageQuotaReading {
     private(set) var readStarted = false
     private var isReleased = false
     private var releaseContinuation: CheckedContinuation<Void, Never>?
 
-    func latestSnapshot(collectedAt: Date, preferredFileURL: URL?) async -> AIUsageQuotaSnapshot? {
+    func latestSnapshot(collectedAt: Date) async -> AIUsageQuotaSnapshot? {
         readStarted = true
         if isReleased == false {
             await withCheckedContinuation { continuation in
@@ -1096,7 +1096,7 @@ private actor SplitSuspendingCodexQuotaReader: CodexSessionQuotaReading {
     }
 }
 
-private actor SplitFakeCodexQuotaReader: CodexSessionQuotaReading {
+private actor SplitFakeCodexQuotaReader: CodexUsageQuotaReading {
     private var snapshots: [AIUsageQuotaSnapshot?]
     private(set) var readCount = 0
 
@@ -1104,7 +1104,7 @@ private actor SplitFakeCodexQuotaReader: CodexSessionQuotaReading {
         self.snapshots = snapshots
     }
 
-    func latestSnapshot(collectedAt: Date, preferredFileURL: URL?) async -> AIUsageQuotaSnapshot? {
+    func latestSnapshot(collectedAt: Date) async -> AIUsageQuotaSnapshot? {
         readCount += 1
         guard snapshots.isEmpty == false else {
             return nil
@@ -1123,12 +1123,12 @@ private final class SplitFakeSoundPlayer: SoundPlaying {
 }
 
 private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
-    private var onRefreshRequested: (@Sendable (URL?) -> Void)?
+    private var onRefreshRequested: (@Sendable () -> Void)?
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
     private(set) var pollingEnabledChanges: [Bool] = []
 
-    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void) {
+    func activate(onRefreshRequested: @escaping @Sendable () -> Void) {
         activateCount += 1
         self.onRefreshRequested = onRefreshRequested
     }
@@ -1146,8 +1146,8 @@ private final class SplitFakeCodexQuotaRefreshScheduler: @unchecked Sendable, Co
         setPollingEnabled(false)
     }
 
-    func emitRefreshRequest(preferredFileURL: URL? = nil) {
-        onRefreshRequested?(preferredFileURL)
+    func emitRefreshRequest() {
+        onRefreshRequested?()
     }
 }
 
@@ -1305,7 +1305,7 @@ private func makeSettingsStore(
 private func makeCodexPlugin(
     settingsStore: SettingsStore = .shared,
     codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring,
-    quotaReader: any CodexSessionQuotaReading = SplitFakeCodexQuotaReader(snapshots: [nil]),
+    quotaReader: any CodexUsageQuotaReading = SplitFakeCodexQuotaReader(snapshots: [nil]),
     quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = SplitFakeCodexQuotaRefreshScheduler(),
     soundPlayer: any SoundPlaying = SplitFakeSoundPlayer(),
     sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),

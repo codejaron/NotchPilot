@@ -2,7 +2,7 @@ import Foundation
 
 enum AIUsageQuotaSource: String, Equatable, Sendable {
     case claudeStatusLine
-    case codexSessionLog
+    case codexAccountUsage
 }
 
 enum AIUsageQuotaWindowKind: String, Equatable, Sendable, Identifiable {
@@ -179,42 +179,24 @@ extension AIUsageQuotaSnapshot {
         )
     }
 
-    static func isCodexTokenCount(rawJSON: String) -> Bool {
-        guard let root = jsonObject(rawJSON: rawJSON) else {
-            return false
-        }
-
-        let payload = root["payload"] as? [String: Any] ?? root
-        return string(from: payload["type"]) == "token_count"
-    }
-
-    static func codexTokenCountTimestamp(rawJSON: String) -> Date? {
-        guard let root = jsonObject(rawJSON: rawJSON) else {
-            return nil
-        }
-
-        return date(from: root["timestamp"])
-    }
-
-    static func codexSessionLog(rawJSON: String, collectedAt: Date) -> AIUsageQuotaSnapshot? {
-        guard let root = jsonObject(rawJSON: rawJSON) else {
-            return nil
-        }
-
-        let payload = root["payload"] as? [String: Any] ?? root
-        guard string(from: payload["type"]) == "token_count" else {
-            return nil
-        }
-
-        let rateLimits = (root["rate_limits"] as? [String: Any])
-            ?? (payload["rate_limits"] as? [String: Any])
-        guard let rateLimits else {
+    static func codexAccountUsage(rawJSON: String, collectedAt: Date) -> AIUsageQuotaSnapshot? {
+        guard let root = jsonObject(rawJSON: rawJSON),
+              let rateLimit = root["rate_limit"] as? [String: Any]
+        else {
             return nil
         }
 
         let windows = [
-            codexWindow(kind: .fiveHour, fallbackWindowMinutes: 300, value: rateLimits["primary"]),
-            codexWindow(kind: .sevenDay, fallbackWindowMinutes: 10_080, value: rateLimits["secondary"]),
+            codexAccountWindow(
+                kind: .fiveHour,
+                value: rateLimit["primary_window"] ?? rateLimit["primaryWindow"],
+                collectedAt: collectedAt
+            ),
+            codexAccountWindow(
+                kind: .sevenDay,
+                value: rateLimit["secondary_window"] ?? rateLimit["secondaryWindow"],
+                collectedAt: collectedAt
+            ),
         ].compactMap { $0 }
 
         guard windows.isEmpty == false else {
@@ -223,10 +205,10 @@ extension AIUsageQuotaSnapshot {
 
         return AIUsageQuotaSnapshot(
             host: .codex,
-            source: .codexSessionLog,
+            source: .codexAccountUsage,
             collectedAt: collectedAt,
             windows: windows,
-            planType: string(from: rateLimits["plan_type"] ?? rateLimits["planType"])
+            planType: string(from: root["plan_type"] ?? root["planType"])
         )
     }
 
@@ -253,22 +235,31 @@ extension AIUsageQuotaSnapshot {
         )
     }
 
-    private static func codexWindow(
+    private static func codexAccountWindow(
         kind: AIUsageQuotaWindowKind,
-        fallbackWindowMinutes: Int,
-        value: Any?
+        value: Any?,
+        collectedAt: Date
     ) -> AIUsageQuotaWindow? {
         guard let object = value as? [String: Any],
-              let usedPercent = double(from: object["used_percent"] ?? object["usedPercentage"] ?? object["used_percentage"])
+              let usedPercent = double(from: object["used_percent"] ?? object["usedPercent"] ?? object["used_percentage"])
         else {
             return nil
         }
 
+        let windowSeconds = double(from: object["limit_window_seconds"] ?? object["limitWindowSeconds"])
+        let windowMinutes = integer(from: object["window_minutes"] ?? object["windowMinutes"])
+            ?? windowSeconds.map { Int(($0 / 60).rounded()) }
+
+        let resetsAt = date(from: object["reset_at"] ?? object["resetAt"] ?? object["resets_at"] ?? object["resetsAt"])
+            ?? double(from: object["reset_after_seconds"] ?? object["resetAfterSeconds"]).map {
+                collectedAt.addingTimeInterval($0)
+            }
+
         return AIUsageQuotaWindow(
             kind: kind,
             usedPercent: max(0, min(100, usedPercent)),
-            resetsAt: date(from: object["resets_at"] ?? object["resetsAt"]),
-            windowMinutes: integer(from: object["window_minutes"] ?? object["windowMinutes"]) ?? fallbackWindowMinutes
+            resetsAt: resetsAt,
+            windowMinutes: windowMinutes
         )
     }
 

@@ -1,24 +1,24 @@
 import Foundation
 
 protocol CodexUsageQuotaRefreshScheduling: AnyObject {
-    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void)
+    func activate(onRefreshRequested: @escaping @Sendable () -> Void)
     func setPollingEnabled(_ isEnabled: Bool)
     func deactivate()
 }
 
-final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
+final class CodexUsageQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQuotaRefreshScheduling {
     private static let pollingRefreshInterval: TimeInterval = 30
 
-    private let queue = DispatchQueue(label: "NotchPilot.CodexSessionQuotaRefreshScheduler", qos: .utility)
+    private let queue = DispatchQueue(label: "NotchPilot.CodexUsageQuotaRefreshScheduler", qos: .utility)
     private let queueKey = DispatchSpecificKey<Void>()
     private let pollingRefreshInterval: TimeInterval
 
     private var pollingTimer: DispatchSourceTimer?
     private var isPollingEnabled = false
-    private var onRefreshRequested: (@Sendable (URL?) -> Void)?
+    private var onRefreshRequested: (@Sendable () -> Void)?
 
     init(
-        pollingRefreshInterval: TimeInterval = CodexSessionQuotaRefreshScheduler.pollingRefreshInterval
+        pollingRefreshInterval: TimeInterval = CodexUsageQuotaRefreshScheduler.pollingRefreshInterval
     ) {
         self.pollingRefreshInterval = pollingRefreshInterval
         queue.setSpecific(key: queueKey, value: ())
@@ -36,7 +36,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         }
     }
 
-    func activate(onRefreshRequested: @escaping @Sendable (URL?) -> Void) {
+    func activate(onRefreshRequested: @escaping @Sendable () -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
             self.onRefreshRequested = onRefreshRequested
@@ -81,7 +81,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
             repeating: pollingRefreshInterval
         )
         timer.setEventHandler { [weak self] in
-            self?.emitRefreshRequest(preferredFileURL: nil)
+            self?.emitRefreshRequest()
         }
         pollingTimer = timer
         timer.resume()
@@ -92,7 +92,7 @@ final class CodexSessionQuotaRefreshScheduler: @unchecked Sendable, CodexUsageQu
         pollingTimer = nil
     }
 
-    private func emitRefreshRequest(preferredFileURL: URL?) {
-        onRefreshRequested?(preferredFileURL)
+    private func emitRefreshRequest() {
+        onRefreshRequested?()
     }
 }

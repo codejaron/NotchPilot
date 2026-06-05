@@ -1,15 +1,14 @@
 import XCTest
 @testable import NotchPilotKit
 
-final class CodexSessionQuotaRefreshSchedulerTests: XCTestCase {
+final class CodexUsageQuotaRefreshSchedulerTests: XCTestCase {
     func testPollingRefreshesImmediatelyWhenEnabled() async {
-        let scheduler = CodexSessionQuotaRefreshScheduler(
+        let scheduler = CodexUsageQuotaRefreshScheduler(
             pollingRefreshInterval: 0.2
         )
         let refreshRequested = expectation(description: "polling requested refresh immediately")
 
-        scheduler.activate { preferredFileURL in
-            XCTAssertNil(preferredFileURL)
+        scheduler.activate {
             refreshRequested.fulfill()
         }
         scheduler.setPollingEnabled(true)
