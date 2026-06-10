@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 private enum MediaRemoteAdapterCommand: Int {
@@ -74,6 +75,92 @@ private final class SystemMediaRemoteCommandController: MediaRemoteCommandContro
     }
 }
 
+protocol MediaStreamProcessHandling: AnyObject, Sendable {
+    var isRunning: Bool { get }
+    var processIdentifier: pid_t { get }
+
+    func terminate()
+    func waitUntilExit()
+}
+
+final class MediaStreamProcessHandle: MediaStreamProcessHandling, @unchecked Sendable {
+    private let process: Process
+
+    init(_ process: Process) {
+        self.process = process
+    }
+
+    var isRunning: Bool {
+        process.isRunning
+    }
+
+    var processIdentifier: pid_t {
+        process.processIdentifier
+    }
+
+    func terminate() {
+        process.terminate()
+    }
+
+    func waitUntilExit() {
+        process.waitUntilExit()
+    }
+}
+
+struct MediaStreamProcessReaper: Sendable {
+    typealias KillProcess = @Sendable (_ pid: pid_t, _ signal: Int32) -> Int32
+    typealias Sleep = @Sendable (_ interval: TimeInterval) -> Void
+    typealias Log = @Sendable (_ message: String) -> Void
+
+    private let timeout: TimeInterval
+    private let pollInterval: TimeInterval
+    private let queue: DispatchQueue
+    private let killProcess: KillProcess
+    private let sleep: Sleep
+    private let log: Log
+
+    init(
+        timeout: TimeInterval = 2,
+        pollInterval: TimeInterval = 0.05,
+        queue: DispatchQueue = DispatchQueue(label: "NotchPilot.MediaStreamProcessReaper", qos: .utility),
+        killProcess: @escaping KillProcess = { Darwin.kill($0, $1) },
+        sleep: @escaping Sleep = { Thread.sleep(forTimeInterval: $0) },
+        log: @escaping Log = { NSLog("%@", $0) }
+    ) {
+        self.timeout = timeout
+        self.pollInterval = pollInterval
+        self.queue = queue
+        self.killProcess = killProcess
+        self.sleep = sleep
+        self.log = log
+    }
+
+    func reap(_ process: any MediaStreamProcessHandling) {
+        if process.isRunning {
+            process.terminate()
+        }
+
+        queue.async { [timeout, pollInterval, killProcess, sleep, log] in
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning, Date() < deadline {
+                sleep(pollInterval)
+            }
+
+            if process.isRunning {
+                let pid = process.processIdentifier
+                let result = killProcess(pid, SIGKILL)
+                if result == 0 {
+                    log("NotchPilot force killed unresponsive media stream process pid \(pid)")
+                } else {
+                    log("NotchPilot failed to force kill media stream process pid \(pid): errno \(errno)")
+                }
+            }
+
+            process.waitUntilExit()
+        }
+    }
+}
+
 @MainActor
 protocol NowPlayingSessionMonitoring: AnyObject {
     var currentState: MediaPlaybackState { get }
@@ -97,12 +184,17 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     private let commandController: (any MediaRemoteCommandControlling)? = SystemMediaRemoteCommandController()
     private let playbackTimeProvider: any PlaybackTimeProviding
-    private var streamProcess: Process?
+    private let streamProcessReaper: MediaStreamProcessReaper
+    private var streamProcess: (any MediaStreamProcessHandling)?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
 
-    init(playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider()) {
+    init(
+        playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider(),
+        streamProcessReaper: MediaStreamProcessReaper = MediaStreamProcessReaper()
+    ) {
         self.playbackTimeProvider = playbackTimeProvider
+        self.streamProcessReaper = streamProcessReaper
     }
 
     func start() {
@@ -125,7 +217,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
         do {
             try process.run()
-            self.streamProcess = process
+            self.streamProcess = MediaStreamProcessHandle(process)
             self.pipeHandler = pipeHandler
             self.streamTask = Task { [weak self] in
                 await self?.consumeStream(with: pipeHandler)
@@ -139,14 +231,14 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         streamTask?.cancel()
         streamTask = nil
 
+        let pipeHandler = pipeHandler
+        self.pipeHandler = nil
         Task {
             await pipeHandler?.close()
         }
-        pipeHandler = nil
 
-        if let streamProcess, streamProcess.isRunning {
-            streamProcess.terminate()
-            streamProcess.waitUntilExit()
+        if let streamProcess {
+            streamProcessReaper.reap(streamProcess)
         }
         self.streamProcess = nil
     }
