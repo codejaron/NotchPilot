@@ -118,10 +118,15 @@ final class MediaPlaybackModelsTests: XCTestCase {
 
     func testAppleScriptPlaybackTimeProviderReadsSpotifyPlayerPosition() {
         var receivedScripts: [String] = []
-        let provider = AppleScriptPlaybackTimeProvider { script in
-            receivedScripts.append(script)
-            return 42.5
-        }
+        let provider = AppleScriptPlaybackTimeProvider(
+            scriptRunner: { script in
+                receivedScripts.append(script)
+                return 42.5
+            },
+            isApplicationRunning: { bundleIdentifier in
+                bundleIdentifier == "com.spotify.client"
+            }
+        )
 
         let playbackTime = provider.currentPlaybackTime(
             for: .fromBundleIdentifier("com.spotify.client")
@@ -129,8 +134,27 @@ final class MediaPlaybackModelsTests: XCTestCase {
 
         XCTAssertEqual(playbackTime, 42.5)
         XCTAssertEqual(receivedScripts.count, 1)
-        XCTAssertTrue(receivedScripts[0].contains("com.spotify.client"))
+        XCTAssertTrue(receivedScripts[0].contains("tell application \"Spotify\""))
+        XCTAssertFalse(receivedScripts[0].contains("application id"))
         XCTAssertTrue(receivedScripts[0].contains("player position"))
+    }
+
+    func testAppleScriptPlaybackTimeProviderDoesNotRunScriptWhenPlayerIsNotRunning() {
+        var didRunScript = false
+        let provider = AppleScriptPlaybackTimeProvider(
+            scriptRunner: { _ in
+                didRunScript = true
+                return 12
+            },
+            isApplicationRunning: { _ in false }
+        )
+
+        XCTAssertNil(
+            provider.currentPlaybackTime(
+                for: .fromBundleIdentifier("com.spotify.client")
+            )
+        )
+        XCTAssertFalse(didRunScript)
     }
 
     func testAppleScriptPlaybackTimeProviderIgnoresUnsupportedPlayers() {

@@ -184,16 +184,21 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     private let commandController: (any MediaRemoteCommandControlling)? = SystemMediaRemoteCommandController()
     private let playbackTimeProvider: any PlaybackTimeProviding
+    private let spotifyPlaybackProvider: any SpotifyPlaybackSnapshotProviding
     private let streamProcessReaper: MediaStreamProcessReaper
     private var streamProcess: (any MediaStreamProcessHandling)?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
+    private var playbackStateSelector = MediaPlaybackStateSelector()
+    private var spotifyNotificationObserver: NSObjectProtocol?
 
     init(
         playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider(),
+        spotifyPlaybackProvider: any SpotifyPlaybackSnapshotProviding = AppleScriptSpotifyPlaybackSnapshotProvider(),
         streamProcessReaper: MediaStreamProcessReaper = MediaStreamProcessReaper()
     ) {
         self.playbackTimeProvider = playbackTimeProvider
+        self.spotifyPlaybackProvider = spotifyPlaybackProvider
         self.streamProcessReaper = streamProcessReaper
     }
 
@@ -219,6 +224,8 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             try process.run()
             self.streamProcess = MediaStreamProcessHandle(process)
             self.pipeHandler = pipeHandler
+            startSpotifyPlaybackObservation()
+            refreshSpotifyPlaybackSnapshot()
             self.streamTask = Task { [weak self] in
                 await self?.consumeStream(with: pipeHandler)
             }
@@ -228,6 +235,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     }
 
     func stop() {
+        stopSpotifyPlaybackObservation()
         streamTask?.cancel()
         streamTask = nil
 
@@ -241,6 +249,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             streamProcessReaper.reap(streamProcess)
         }
         self.streamProcess = nil
+        playbackStateSelector.reset()
     }
 
     func play() {
@@ -319,7 +328,61 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     }
 
     private func handleAdapterUpdate(_ update: AdapterUpdate) {
-        updateState(update.payload.normalizedState)
+        let state = playbackStateSelector.acceptSystem(update.payload.normalizedState)
+        updateState(state)
+    }
+
+    private func startSpotifyPlaybackObservation() {
+        guard spotifyNotificationObserver == nil else {
+            return
+        }
+
+        spotifyNotificationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: SpotifyPlaybackNotice.name,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let userInfo = notification.userInfo,
+                  let payload = SpotifyPlaybackNotice.payload(from: userInfo) else {
+                return
+            }
+
+            Task { @MainActor [weak self, payload] in
+                self?.handleSpotifyPlaybackPayload(payload)
+            }
+        }
+    }
+
+    private func stopSpotifyPlaybackObservation() {
+        if let spotifyNotificationObserver {
+            DistributedNotificationCenter.default().removeObserver(spotifyNotificationObserver)
+            self.spotifyNotificationObserver = nil
+        }
+    }
+
+    private func refreshSpotifyPlaybackSnapshot() {
+        guard let snapshot = spotifyPlaybackProvider.currentSpotifyPlaybackSnapshot(at: Date()) else {
+            return
+        }
+
+        let state = MediaPlaybackState.active(snapshot)
+        updateState(playbackStateSelector.acceptSpotify(state))
+    }
+
+    private func handleSpotifyPlaybackPayload(_ payload: SpotifyPlaybackNotice.Payload) {
+        guard streamProcess != nil else {
+            return
+        }
+
+        guard let state = SpotifyPlaybackNotice.state(
+                from: payload,
+                fallback: playbackStateSelector.spotifySnapshot,
+                at: Date()
+        ) else {
+            return
+        }
+
+        updateState(playbackStateSelector.acceptSpotify(state))
     }
 
     private func requestStateRefresh(using resource: MediaRemoteAdapterResource, after delay: TimeInterval) {
@@ -404,7 +467,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     @MainActor
     private func applyRefreshedState(_ state: MediaPlaybackState) {
-        updateState(state)
+        updateState(playbackStateSelector.acceptSystem(state))
     }
 
     private static func fetchCurrentState(using resource: MediaRemoteAdapterResource) async -> MediaPlaybackState? {
