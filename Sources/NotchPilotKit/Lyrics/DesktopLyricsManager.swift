@@ -66,6 +66,7 @@ final class DesktopLyricsManager {
     private let settingsStore: SettingsStore
     private let controller: DesktopLyricsController
     private let searchProvider: LyricsSearching
+    private let cache: LyricsCaching
     private let fileManager: FileManager
     private let lyricsSearchWindowController: LyricsSearchWindowController
     private let mouseMonitor: DesktopLyricsMouseMonitoring
@@ -81,6 +82,7 @@ final class DesktopLyricsManager {
     private var isStarted = false
     private var isNowPlayingMonitoringRequested = false
     private var isMouseMonitoringRequested = false
+    private var lastActiveScreenID: String?
 
     init(
         nowPlayingController: SharedNowPlayingController,
@@ -96,6 +98,7 @@ final class DesktopLyricsManager {
         self.nowPlayingController = nowPlayingController
         self.settingsStore = settingsStore
         self.searchProvider = searchProvider
+        self.cache = cache
         self.controller = DesktopLyricsController(
             settingsStore: settingsStore,
             provider: provider,
@@ -229,8 +232,12 @@ final class DesktopLyricsManager {
         let mouseLocation = NSEvent.mouseLocation
         let activeScreenID = ActiveDesktopLyricsScreenResolver.resolve(
             mouseLocation: mouseLocation,
-            descriptors: NSScreen.screens.compactMap(screenDescriptor(for:))
+            descriptors: NSScreen.screens.compactMap(screenDescriptor(for:)),
+            fallbackID: lastActiveScreenID
         )
+        if let activeScreenID {
+            lastActiveScreenID = activeScreenID
+        }
 
         for screen in NSScreen.screens {
             guard let screenID = screenID(for: screen),
@@ -246,15 +253,10 @@ final class DesktopLyricsManager {
             if shouldShow {
                 let fontSize = CGFloat(settingsStore.desktopLyricsFontSize)
                 let highlightColor = Color(hex: settingsStore.desktopLyricsHighlightColorHex) ?? .green
-                let windowFrame = DesktopLyricsWindowLayout.frame(
-                    in: screen.visibleFrame,
-                    fontSize: fontSize
-                )
-                let isMouseHovering = windowFrame.contains(mouseLocation)
                 window.update(
                     presentation: controller.presentation,
                     visibleFrame: screen.visibleFrame,
-                    isMouseHovering: isMouseHovering,
+                    mouseLocation: mouseLocation,
                     highlightColor: highlightColor,
                     fontSize: fontSize
                 )
@@ -320,7 +322,7 @@ final class DesktopLyricsManager {
     }
 
     var canRevealCurrentLyricsInFinder: Bool {
-        controller.currentLyricsFileURL != nil
+        true
     }
 
     var canAdjustLyricsOffset: Bool {
@@ -365,14 +367,20 @@ final class DesktopLyricsManager {
     }
 
     func revealCurrentLyricsInFinder() {
-        guard let url = controller.currentLyricsFileURL else {
+        let url = controller.currentLyricsFileURL ?? cache.directoryURL
+
+        if url.hasDirectoryPath {
+            try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(url)
             return
         }
 
         if fileManager.fileExists(atPath: url.path) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } else {
-            NSWorkspace.shared.open(url.deletingLastPathComponent())
+            let directoryURL = url.deletingLastPathComponent()
+            try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(directoryURL)
         }
     }
 }

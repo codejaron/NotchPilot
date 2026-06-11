@@ -25,6 +25,8 @@ protocol LyricsSearching: AnyObject {
 }
 
 protocol LyricsCaching: AnyObject {
+    var directoryURL: URL { get }
+
     func loadLyrics(for key: LyricsTrackKey) -> TimedLyrics?
     func saveLyrics(_ lyrics: TimedLyrics, for key: LyricsTrackKey) throws
     func fileURL(for key: LyricsTrackKey) -> URL
@@ -78,7 +80,7 @@ extension LyricsSearching {
 }
 
 final class LyricsCache: LyricsCaching {
-    private let directoryURL: URL
+    let directoryURL: URL
     private let fileManager: FileManager
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -143,6 +145,11 @@ final class CachedLyricsProvider: LyricsProviding {
     }
 
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics? {
+        let key = LyricsTrackKey(snapshot: snapshot)
+        if let cached = cache.loadLyrics(for: key) {
+            return cached
+        }
+
         for await lyrics in lyricUpdates(for: snapshot) {
             return lyrics
         }
@@ -153,28 +160,63 @@ final class CachedLyricsProvider: LyricsProviding {
     func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics> {
         let key = LyricsTrackKey(snapshot: snapshot)
 
-        if let cached = cache.loadLyrics(for: key) {
-            return AsyncStream { continuation in
-                continuation.yield(cached)
-                continuation.finish()
-            }
-        }
-
         return AsyncStream { continuation in
+            let cached = cache.loadLyrics(for: key)
             let task = Task { @MainActor in
+                var bestPreference: LyricsCandidatePreference?
+                if let cached {
+                    bestPreference = Self.preference(for: cached, snapshot: snapshot)
+                    continuation.yield(cached)
+                }
+
                 for await remote in remoteProvider.lyricUpdates(for: snapshot) {
                     guard Task.isCancelled == false else {
                         break
                     }
+
+                    let remotePreference = Self.preference(for: remote, snapshot: snapshot)
+                    if let bestPreference,
+                       LyricsCandidatePreference.prefers(bestPreference, over: remotePreference) {
+                        continue
+                    }
+
+                    bestPreference = remotePreference
                     try? cache.saveLyrics(remote, for: key)
                     continuation.yield(remote)
                 }
+
                 continuation.finish()
             }
 
             continuation.onTermination = { _ in
                 task.cancel()
             }
+        }
+    }
+
+    private static func preference(
+        for lyrics: TimedLyrics,
+        snapshot: MediaPlaybackSnapshot
+    ) -> LyricsCandidatePreference {
+        LyricsCandidatePreference.make(
+            lyrics: lyrics,
+            baseQuality: inferredQuality(for: lyrics),
+            requestTitle: snapshot.title,
+            requestArtist: snapshot.artist,
+            duration: snapshot.duration
+        )
+    }
+
+    private static func inferredQuality(for lyrics: TimedLyrics) -> Double {
+        if lyrics.hasInlineTags {
+            return 0.9
+        }
+
+        switch lyrics.service.lowercased() {
+        case "qqmusic", "kugou", "netease", "musixmatch":
+            return 0.74
+        default:
+            return 0.62
         }
     }
 }
@@ -225,6 +267,12 @@ private final class ConcurrentLyricsProvider: LyricsService.LyricsProvider {
 final class LyricsKitProvider: LyricsProviding, LyricsSearching {
     private let provider: LyricsService.LyricsProvider
     private let searchServices: [any LyricsSearchServicing]
+    private static let immediateSelectionScore = 0.75
+
+    private struct SelectedLyricsUpdate {
+        let lyrics: TimedLyrics
+        let preference: LyricsCandidatePreference
+    }
 
     init(
         provider: LyricsService.LyricsProvider? = nil,
@@ -244,6 +292,148 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
     }
 
     func lyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<TimedLyrics> {
+        let title = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let artist = snapshot.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard title.isEmpty == false || artist.isEmpty == false else {
+            return AsyncStream { continuation in
+                continuation.finish()
+            }
+        }
+
+        return AsyncStream { continuation in
+            let task = Task { @MainActor in
+                var bestPreference: LyricsCandidatePreference?
+                var deferredUpdate: SelectedLyricsUpdate?
+                var didYieldLyrics = false
+
+                for await update in directLyricUpdates(for: snapshot) {
+                    guard Task.isCancelled == false else {
+                        break
+                    }
+
+                    if update.preference.score < Self.immediateSelectionScore {
+                        if let current = deferredUpdate,
+                           LyricsCandidatePreference.prefers(current.preference, over: update.preference) {
+                            continue
+                        }
+                        deferredUpdate = update
+                        continue
+                    }
+
+                    bestPreference = update.preference
+                    didYieldLyrics = true
+                    continuation.yield(update.lyrics)
+                }
+
+                let bestAvailablePreference = bestPreference ?? deferredUpdate?.preference
+                let shouldSearchCandidates = bestAvailablePreference.map { preference in
+                    preference.score < Self.immediateSelectionScore
+                } ?? true
+
+                if Task.isCancelled == false,
+                   searchServices.isEmpty == false,
+                   shouldSearchCandidates {
+                    for await update in candidateLyricUpdates(
+                        title: title,
+                        artist: artist,
+                        duration: snapshot.duration,
+                        limit: 8,
+                        initialPreference: bestAvailablePreference
+                    ) {
+                        guard Task.isCancelled == false else {
+                            break
+                        }
+                        bestPreference = update.preference
+                        didYieldLyrics = true
+                        continuation.yield(update.lyrics)
+                    }
+                }
+
+                if didYieldLyrics == false, let deferredUpdate {
+                    continuation.yield(deferredUpdate.lyrics)
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func candidateLyricUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int,
+        initialPreference: LyricsCandidatePreference?
+    ) -> AsyncStream<SelectedLyricsUpdate> {
+        AsyncStream { continuation in
+            let task = Task { @MainActor in
+                var bestPreference = initialPreference
+                var loadedCandidateIDs: Set<String> = []
+
+                for await candidates in searchLyricsUpdates(
+                    title: title,
+                    artist: artist,
+                    duration: duration,
+                    limit: limit
+                ) {
+                    guard Task.isCancelled == false else {
+                        break
+                    }
+
+                    var batchSelection: SelectedLyricsUpdate?
+
+                    for candidate in candidates where loadedCandidateIDs.contains(candidate.id) == false {
+                        loadedCandidateIDs.insert(candidate.id)
+
+                        guard let timedLyrics = try? await candidate.loadLyrics() else {
+                            continue
+                        }
+
+                        let loadedPreference = LyricsCandidatePreference.make(
+                            lyrics: timedLyrics,
+                            baseQuality: candidate.quality,
+                            requestTitle: title,
+                            requestArtist: artist,
+                            duration: duration
+                        )
+
+                        if let batchSelection = batchSelection,
+                           LyricsCandidatePreference.prefers(batchSelection.preference, over: loadedPreference) {
+                            continue
+                        }
+
+                        if let bestPreference,
+                           LyricsCandidatePreference.prefers(bestPreference, over: loadedPreference) {
+                            continue
+                        }
+
+                        batchSelection = SelectedLyricsUpdate(
+                            lyrics: timedLyrics,
+                            preference: loadedPreference
+                        )
+                    }
+
+                    if let batchSelection {
+                        bestPreference = batchSelection.preference
+                        continuation.yield(batchSelection)
+                    }
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func directLyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<SelectedLyricsUpdate> {
         guard let request = Self.makeRequest(for: snapshot) else {
             return AsyncStream { continuation in
                 continuation.finish()
@@ -252,9 +442,10 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
 
         return AsyncStream { continuation in
             let task = Task { @MainActor in
-                var best: Lyrics?
+                let requestedMetadata = Self.metadata(for: request)
+                var bestPreference: LyricsCandidatePreference?
                 var windowStart: Date?
-                let priorityWindow: TimeInterval = 3
+                let priorityWindow: TimeInterval = 5
 
                 do {
                     for try await lyric in provider.lyrics(for: request) {
@@ -267,22 +458,43 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
                             break
                         }
 
-                        if let current = best, !Self.hasHigherPriority(lyric, over: current) {
-                            continue
-                        }
-
+                        let rawMetadata = Self.metadata(for: lyric)
                         guard let timedLyrics = TimedLyrics(
                             lyricsKitLyrics: lyric,
-                            service: lyric.metadata.service ?? "LyricsKit"
+                            service: lyric.metadata.service ?? "LyricsKit",
+                            fallbackTitle: requestedMetadata.title,
+                            fallbackArtist: requestedMetadata.artist
                         ) else {
                             continue
                         }
 
-                        best = lyric
+                        let preference = LyricsCandidatePreference.make(
+                            title: rawMetadata.title,
+                            artist: rawMetadata.artist,
+                            service: timedLyrics.service,
+                            baseQuality: lyric.quality,
+                            candidateDuration: timedLyrics.duration,
+                            hasInlineTags: timedLyrics.hasInlineTags,
+                            requestTitle: requestedMetadata.title,
+                            requestArtist: requestedMetadata.artist,
+                            duration: snapshot.duration
+                        )
+
+                        if let currentPreference = bestPreference,
+                           LyricsCandidatePreference.prefers(currentPreference, over: preference) {
+                            continue
+                        }
+
+                        bestPreference = preference
                         if windowStart == nil {
                             windowStart = Date()
                         }
-                        continuation.yield(timedLyrics)
+                        continuation.yield(
+                            SelectedLyricsUpdate(
+                                lyrics: timedLyrics,
+                                preference: preference
+                            )
+                        )
                     }
                 } catch {}
 
@@ -295,19 +507,33 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
     }
 
-    private static func hasHigherPriority(_ new: Lyrics, over existing: Lyrics) -> Bool {
-        return new.quality > existing.quality
+    private static func metadata(for lyrics: Lyrics) -> (title: String, artist: String) {
+        (
+            lyrics.idTags[.title]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            lyrics.idTags[.artist]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        )
     }
 
     private static func makeRequest(for snapshot: MediaPlaybackSnapshot) -> LyricsSearchRequest? {
         let title = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let artist = snapshot.artist.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, !artist.isEmpty else { return nil }
+        guard title.isEmpty == false || artist.isEmpty == false else { return nil }
         return LyricsSearchRequest(
-            searchTerm: .info(title: title, artist: artist),
+            searchTerm: artist.isEmpty
+                ? .keyword(title)
+                : .info(title: title, artist: artist),
             duration: snapshot.duration ?? 0,
             limit: 5
         )
+    }
+
+    private static func metadata(for request: LyricsSearchRequest) -> (title: String, artist: String) {
+        switch request.searchTerm {
+        case let .info(title, artist):
+            return (title, artist)
+        case let .keyword(keyword):
+            return (keyword, "")
+        }
     }
 
     func searchLyrics(

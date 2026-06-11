@@ -39,8 +39,8 @@ struct LyricsTrackKey: Sendable {
         "\(artist)|\(title)"
     }
 
-    var hasPrimaryMetadata: Bool {
-        title.isEmpty == false && artist.isEmpty == false
+    var hasSearchableMetadata: Bool {
+        title.isEmpty == false
     }
 
     static func normalize(_ value: String) -> String {
@@ -149,7 +149,7 @@ enum DesktopLyricsPlaybackFilter {
 
     static func isEligible(_ snapshot: MediaPlaybackSnapshot) -> Bool {
         let trackKey = LyricsTrackKey(snapshot: snapshot)
-        guard trackKey.hasPrimaryMetadata,
+        guard trackKey.hasSearchableMetadata,
               let bundleIdentifier = LyricsTrackKey.normalizeBundleIdentifier(snapshot.source.bundleIdentifier) else {
             return false
         }
@@ -233,7 +233,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             ? fallbackArtist.trimmingCharacters(in: .whitespacesAndNewlines)
             : rawArtist
 
-        guard title.isEmpty == false, artist.isEmpty == false else {
+        guard title.isEmpty == false else {
             return nil
         }
 
@@ -269,6 +269,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         let next: TimedLyricLine?
         let lineTimeOffset: TimeInterval
         let lineDuration: TimeInterval
+        let currentLineStartsIn: TimeInterval
     }
 
     func linePair(at time: TimeInterval) -> LinePair? {
@@ -276,26 +277,38 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             return nil
         }
 
-        let currentIndex = lines.lastIndex(where: { $0.timestamp <= time }) ?? 0
+        guard let currentIndex = lines.lastIndex(where: { $0.timestamp <= time }) else {
+            let currentLine = lines[0]
+            let nextLine = lines.dropFirst().first
+            return LinePair(
+                current: currentLine,
+                next: nextLine,
+                lineTimeOffset: 0,
+                lineDuration: duration(for: currentLine, nextLine: nextLine),
+                currentLineStartsIn: max(0, currentLine.timestamp - time)
+            )
+        }
         let currentLine = lines[currentIndex]
         let nextLine = lines[(currentIndex + 1)...].first
 
         let lineTimeOffset = max(0, time - currentLine.timestamp)
-        let lineDuration: TimeInterval
-        if let nextLine {
-            lineDuration = nextLine.timestamp - currentLine.timestamp
-        } else if let trackDuration = duration {
-            lineDuration = max(0, trackDuration - currentLine.timestamp)
-        } else {
-            lineDuration = 10.0
-        }
-
         return LinePair(
             current: currentLine,
             next: nextLine,
             lineTimeOffset: lineTimeOffset,
-            lineDuration: lineDuration
+            lineDuration: duration(for: currentLine, nextLine: nextLine),
+            currentLineStartsIn: 0
         )
+    }
+
+    private func duration(for currentLine: TimedLyricLine, nextLine: TimedLyricLine?) -> TimeInterval {
+        if let nextLine {
+            return nextLine.timestamp - currentLine.timestamp
+        } else if let trackDuration = duration {
+            return max(0, trackDuration - currentLine.timestamp)
+        } else {
+            return 10.0
+        }
     }
 }
 
@@ -351,7 +364,12 @@ enum DesktopLyricsPresentationResolver {
             return .hidden
         }
 
-        let lineStartDate = date.addingTimeInterval(-pair.lineTimeOffset)
+        let lineStartDate: Date
+        if pair.currentLineStartsIn > 0 {
+            lineStartDate = date.addingTimeInterval(pair.currentLineStartsIn / max(0.001, snapshot.playbackRate))
+        } else {
+            lineStartDate = date.addingTimeInterval(-pair.lineTimeOffset)
+        }
         let nextLineStartDate: Date?
         if let nextLine = pair.next, snapshot.playbackRate > 0 {
             let secondsUntilNextLine = max(0, nextLine.timestamp - adjustedTime) / snapshot.playbackRate
@@ -381,18 +399,15 @@ enum DesktopLyricsKaraokeMath {
     ) -> Double {
         guard characterCount > 0 else { return 1.0 }
 
-        if let tags = inlineTags, tags.count >= 2 {
-            return interpolateCharacterProgress(
-                tags: tags,
-                timeOffset: lineTimeOffset,
-                totalCharacters: characterCount
-            )
+        guard let tags = inlineTags, tags.count >= 2 else {
+            return 0
         }
 
-        guard lineDuration > 0 else { return 1.0 }
-        let charBasedDuration = Double(characterCount) * 0.3
-        let effectiveDuration = max(1.0, min(charBasedDuration, lineDuration))
-        return min(1.0, max(0.0, lineTimeOffset / effectiveDuration))
+        return interpolateCharacterProgress(
+            tags: tags,
+            timeOffset: lineTimeOffset,
+            totalCharacters: characterCount
+        )
     }
 
     private static func interpolateCharacterProgress(

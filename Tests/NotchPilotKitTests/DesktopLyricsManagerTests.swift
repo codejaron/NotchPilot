@@ -141,6 +141,15 @@ final class DesktopLyricsManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testCanRevealLyricsCacheInFinderWithoutCurrentTrack() {
+        let store = makeSettingsStore()
+        let controller = SharedNowPlayingController(monitor: TestDesktopLyricsNowPlayingMonitor())
+        let manager = makeManager(nowPlayingController: controller, settingsStore: store)
+
+        XCTAssertTrue(manager.canRevealCurrentLyricsInFinder)
+    }
+
+    @MainActor
     private func makeManager(
         nowPlayingController: SharedNowPlayingController,
         settingsStore: SettingsStore,
@@ -224,6 +233,8 @@ private final class TestDesktopLyricsManagerSearchProvider: LyricsSearching {
 }
 
 private final class TestDesktopLyricsManagerCache: LyricsCaching {
+    let directoryURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
+
     func loadLyrics(for key: LyricsTrackKey) -> TimedLyrics? {
         nil
     }

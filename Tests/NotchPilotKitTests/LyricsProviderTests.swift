@@ -1,4 +1,5 @@
 import LyricsKit
+@preconcurrency import LyricsService
 import XCTest
 @testable import NotchPilotKit
 
@@ -25,6 +26,80 @@ final class LyricsProviderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(timedLyrics.duration), 200, accuracy: 0.01)
         XCTAssertEqual(timedLyrics.service, "QQMusic")
         XCTAssertEqual(timedLyrics.lines.map(\.text), ["line 1", "line 2"])
+    }
+
+    func testTimedLyricsKeepsTimedMetadataAndCreditLines() throws {
+        let lyrics = Lyrics(
+            lines: [
+                LyricsLine(content: "Artist - Song", position: 0),
+                LyricsLine(content: "作词：Someone", position: 0),
+                LyricsLine(content: "词：Someone", position: 1),
+                LyricsLine(content: "曲：Someone", position: 2),
+                LyricsLine(content: "Lyrics: bad.example.com", position: 3),
+                LyricsLine(content: "real line", position: 4),
+                LyricsLine(content: "www.bad-lyrics.example", position: 5),
+                LyricsLine(content: ".", position: 6),
+            ],
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+
+        let timedLyrics = try XCTUnwrap(TimedLyrics(lyricsKitLyrics: lyrics, service: "QQMusic"))
+
+        XCTAssertEqual(
+            timedLyrics.lines.map(\.text),
+            [
+                "Artist - Song",
+                "作词：Someone",
+                "词：Someone",
+                "曲：Someone",
+                "Lyrics: bad.example.com",
+                "real line",
+                "www.bad-lyrics.example",
+                ".",
+            ]
+        )
+    }
+
+    func testTimedLyricsRejectsLyricsWithOnlyEmptyLines() {
+        let lyrics = Lyrics(
+            lines: [
+                LyricsLine(content: "", position: 0),
+                LyricsLine(content: "   ", position: 1),
+            ],
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+
+        XCTAssertNil(TimedLyrics(lyricsKitLyrics: lyrics, service: "QQMusic"))
+    }
+
+    func testTimedLyricsInitializesWhenArtistMetadataIsMissing() throws {
+        let lyrics = Lyrics(
+            lines: [
+                LyricsLine(content: "line", position: 1),
+            ],
+            idTags: [
+                .title: "Song",
+            ]
+        )
+
+        let timedLyrics = try XCTUnwrap(
+            TimedLyrics(
+                lyricsKitLyrics: lyrics,
+                service: "LRCLIB",
+                fallbackTitle: "Song",
+                fallbackArtist: ""
+            )
+        )
+
+        XCTAssertEqual(timedLyrics.title, "Song")
+        XCTAssertEqual(timedLyrics.artist, "")
+        XCTAssertEqual(timedLyrics.lines.map(\.text), ["line"])
     }
 
     func testTimedLyricsAppliesLyricsKitOffsetWhenResolvingPresentation() throws {
@@ -168,6 +243,152 @@ final class LyricsProviderTests: XCTestCase {
     }
 
     @MainActor
+    func testLyricsKitProviderAutomaticUpdatesFallBackToManualSearchPathWhenArtistIsMissing() async {
+        let remoteLyrics = TimedLyrics(
+            title: "Song",
+            artist: "",
+            album: "",
+            duration: 200,
+            service: "Kugou",
+            lines: [TimedLyricLine(timestamp: 0, text: "line")]
+        )
+        let candidate = LyricsSearchCandidate(
+            id: "kugou||song",
+            title: "Song",
+            artist: "",
+            service: "Kugou",
+            quality: 0.8,
+            duration: 200,
+            loadLyrics: { remoteLyrics }
+        )
+        let service = TestLyricsSearchService(results: [candidate])
+        let rawProvider = EmptyLyricsServiceProvider()
+        let provider = LyricsKitProvider(
+            provider: rawProvider,
+            searchServices: [service]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(artist: "")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [remoteLyrics])
+        XCTAssertEqual(service.requests.count, 1)
+        XCTAssertEqual(rawProvider.requests.count, 1)
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticUpdatesUseProviderStreamWhenArtistIsMissing() async throws {
+        let lyrics = Lyrics(
+            lines: [LyricsLine(content: "line", position: 0)],
+            idTags: [.title: "Song"]
+        )
+        let rawProvider = StaticLyricsServiceProvider(lyrics: [lyrics])
+        let service = TestLyricsSearchService(results: [])
+        let provider = LyricsKitProvider(
+            provider: rawProvider,
+            searchServices: [service]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(artist: "")) {
+            updates.append(lyrics)
+        }
+
+        let update = try XCTUnwrap(updates.first)
+        XCTAssertEqual(update.title, "Song")
+        XCTAssertEqual(update.artist, "")
+        XCTAssertEqual(update.lines.map(\.text), ["line"])
+        XCTAssertEqual(service.requests.count, 0)
+        XCTAssertEqual(rawProvider.requests.count, 1)
+        XCTAssertEqual(rawProvider.requests.first?.searchTerm, .keyword("Song"))
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticUpdatesUseSearchFallbackForWeakDirectLyrics() async {
+        let wrongLyrics = Lyrics(
+            lines: [LyricsLine(content: "wrong line", position: 0)],
+            idTags: [
+                .title: "Qing Tian",
+                .artist: "Mayday",
+            ]
+        )
+        let fallbackLyrics = TimedLyrics(
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            album: "",
+            duration: 200,
+            service: "Kugou",
+            lines: [TimedLyricLine(timestamp: 0, text: "right line")]
+        )
+        let candidate = LyricsSearchCandidate(
+            id: "kugou|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "Kugou",
+            quality: 0.8,
+            duration: 200,
+            loadLyrics: { fallbackLyrics }
+        )
+        let rawProvider = StaticLyricsServiceProvider(lyrics: [wrongLyrics])
+        let service = TestLyricsSearchService(results: [candidate])
+        let provider = LyricsKitProvider(
+            provider: rawProvider,
+            searchServices: [service]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(title: "Lan Ting Xu", artist: "Jay Chou")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [fallbackLyrics])
+        XCTAssertEqual(rawProvider.requests.count, 1)
+        XCTAssertEqual(service.requests.count, 1)
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticUpdatesUseSearchFallbackForDirectLyricsWithoutOriginalMetadata() async {
+        let weakDirectLyrics = Lyrics(
+            lines: [LyricsLine(content: "wrong line", position: 0)],
+            idTags: [:]
+        )
+        let fallbackLyrics = TimedLyrics(
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            album: "",
+            duration: 200,
+            service: "Kugou",
+            lines: [TimedLyricLine(timestamp: 0, text: "right line")]
+        )
+        let candidate = LyricsSearchCandidate(
+            id: "kugou|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "Kugou",
+            quality: 0.8,
+            duration: 200,
+            loadLyrics: { fallbackLyrics }
+        )
+        let rawProvider = StaticLyricsServiceProvider(lyrics: [weakDirectLyrics])
+        let service = TestLyricsSearchService(results: [candidate])
+        let provider = LyricsKitProvider(
+            provider: rawProvider,
+            searchServices: [service]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(title: "Lan Ting Xu", artist: "Jay Chou")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [fallbackLyrics])
+        XCTAssertEqual(rawProvider.requests.count, 1)
+        XCTAssertEqual(service.requests.count, 1)
+    }
+
+    @MainActor
     func testLyricsKitProviderSearchDeduplicatesWithinSameService() async {
         let duplicateA = LyricsSearchCandidate(
             id: "qq|artist|song|1",
@@ -254,6 +475,337 @@ final class LyricsProviderTests: XCTestCase {
         XCTAssertEqual(results, [closerDuration, fartherDuration, weakerMatch, lowerQuality])
     }
 
+    @MainActor
+    func testLyricsKitProviderSearchKeepsWeakMetadataResultBehindMetadataMatch() async {
+        let wrongSong = LyricsSearchCandidate(
+            id: "qq|artist|wrong|song",
+            title: "Totally Different",
+            artist: "Other Artist",
+            service: "QQMusic",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "QQMusic") }
+        )
+        let matchedSong = LyricsSearchCandidate(
+            id: "netease|artist|song",
+            title: "Song",
+            artist: "Artist",
+            service: "NetEase",
+            quality: 0.55,
+            duration: 201,
+            loadLyrics: { Self.makeLyrics(service: "NetEase") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [wrongSong, matchedSong]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "Song",
+            artist: "Artist",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results.first, matchedSong)
+        XCTAssertTrue(results.contains(wrongSong))
+        XCTAssertGreaterThan(
+            try XCTUnwrap(results.firstIndex(of: wrongSong)),
+            try XCTUnwrap(results.firstIndex(of: matchedSong))
+        )
+    }
+
+    @MainActor
+    func testLyricsKitProviderSearchRanksUnwantedAlternateVersionCandidatesLower() async {
+        let karaokeLyrics = LyricsSearchCandidate(
+            id: "qq|artist|song|karaoke",
+            title: "Song (Instrumental)",
+            artist: "Artist",
+            service: "QQMusic",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "QQMusic") }
+        )
+        let normalLyrics = LyricsSearchCandidate(
+            id: "netease|artist|song",
+            title: "Song",
+            artist: "Artist",
+            service: "NetEase",
+            quality: 0.55,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "NetEase") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [karaokeLyrics, normalLyrics]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "Song",
+            artist: "Artist",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results, [normalLyrics, karaokeLyrics])
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticCandidateLoadSkipsMismatchedLoadedLyrics() async {
+        let loadedWrongLyrics = TimedLyrics(
+            title: "Qing Tian",
+            artist: "Mayday",
+            album: "",
+            duration: 200,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "wrong line")]
+        )
+        let loadedRightLyrics = TimedLyrics(
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            album: "",
+            duration: 200,
+            service: "NetEase",
+            lines: [TimedLyricLine(timestamp: 0, text: "right line")]
+        )
+        let misleadingCandidate = LyricsSearchCandidate(
+            id: "qq|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "QQMusic",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { loadedWrongLyrics }
+        )
+        let goodCandidate = LyricsSearchCandidate(
+            id: "netease|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "NetEase",
+            quality: 0.8,
+            duration: 200,
+            loadLyrics: { loadedRightLyrics }
+        )
+        let provider = LyricsKitProvider(
+            provider: EmptyLyricsServiceProvider(),
+            searchServices: [
+                TestLyricsSearchService(results: [misleadingCandidate, goodCandidate]),
+            ]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(title: "Lan Ting Xu", artist: "Jay Chou")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [loadedRightLyrics])
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticCandidateLoadDoesNotDropOnlyMismatchedLoadedLyrics() async {
+        let loadedWrongLyrics = TimedLyrics(
+            title: "Qing Tian",
+            artist: "Mayday",
+            album: "",
+            duration: 200,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "wrong line")]
+        )
+        let onlyCandidate = LyricsSearchCandidate(
+            id: "qq|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "QQMusic",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { loadedWrongLyrics }
+        )
+        let provider = LyricsKitProvider(
+            provider: EmptyLyricsServiceProvider(),
+            searchServices: [
+                TestLyricsSearchService(results: [onlyCandidate]),
+            ]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(title: "Lan Ting Xu", artist: "Jay Chou")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [loadedWrongLyrics])
+    }
+
+    @MainActor
+    func testLyricsKitProviderAutomaticCandidateLoadShowsBestLoadedLyricsFromSameBatch() async {
+        let weakLoadedLyrics = TimedLyrics(
+            title: "Lan Ting Xu",
+            artist: "",
+            album: "",
+            duration: 200,
+            service: "QQMusic",
+            lines: [TimedLyricLine(timestamp: 0, text: "weak line")]
+        )
+        let betterLoadedLyrics = TimedLyrics(
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            album: "",
+            duration: 200,
+            service: "Kugou",
+            lines: [
+                TimedLyricLine(
+                    timestamp: 0,
+                    text: "better line",
+                    inlineTags: [
+                        .init(index: 0, timeOffset: 0),
+                        .init(index: 6, timeOffset: 1),
+                    ]
+                ),
+            ]
+        )
+        let firstCandidate = LyricsSearchCandidate(
+            id: "qq|jay|lantingxu",
+            title: "Lan Ting Xu",
+            artist: "Jay Chou",
+            service: "QQMusic",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { weakLoadedLyrics }
+        )
+        let betterCandidate = LyricsSearchCandidate(
+            id: "kugou|jay|lantingxu",
+            title: "Lan Ting",
+            artist: "",
+            service: "Kugou",
+            quality: 0.1,
+            duration: 200,
+            loadLyrics: { betterLoadedLyrics }
+        )
+        let provider = LyricsKitProvider(
+            provider: EmptyLyricsServiceProvider(),
+            searchServices: [
+                TestLyricsSearchService(results: [firstCandidate, betterCandidate]),
+            ]
+        )
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot(title: "Lan Ting Xu", artist: "Jay Chou")) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [betterLoadedLyrics])
+    }
+
+    @MainActor
+    func testLyricsKitProviderSearchPrefersInlineTimingWhenMetadataIsComparable() async {
+        let plainLyrics = LyricsSearchCandidate(
+            id: "lrclib|artist|song|plain",
+            title: "Song",
+            artist: "Artist",
+            service: "LRCLIB",
+            quality: 0.98,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "LRCLIB") }
+        )
+        let timedLyrics = LyricsSearchCandidate(
+            id: "qq|artist|song|timed",
+            title: "Song",
+            artist: "Artist",
+            service: "QQMusic",
+            quality: 0.94,
+            duration: 200,
+            hasInlineTags: true,
+            loadLyrics: { Self.makeLyrics(service: "QQMusic") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [plainLyrics, timedLyrics]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "Song",
+            artist: "Artist",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results.first, timedLyrics)
+    }
+
+    @MainActor
+    func testLyricsKitProviderSearchKeepsHigherQualityMatchAbovePreferredSource() async {
+        let lrclibLyrics = LyricsSearchCandidate(
+            id: "lrclib|jay|lantingxu",
+            title: "蘭亭序",
+            artist: "周杰伦",
+            service: "LRCLIB",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "LRCLIB") }
+        )
+        let kugouLyrics = LyricsSearchCandidate(
+            id: "kugou|jay|lantingxu",
+            title: "兰亭序",
+            artist: "周杰伦",
+            service: "Kugou",
+            quality: 0.72,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "Kugou") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [lrclibLyrics, kugouLyrics]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "蘭亭序",
+            artist: "周杰伦",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results.first, lrclibLyrics)
+    }
+
+    @MainActor
+    func testLyricsKitProviderSearchDoesNotLetSourcePriorityLiftWrongSong() async {
+        let wrongPreferredLyrics = LyricsSearchCandidate(
+            id: "kugou|wrong",
+            title: "晴天",
+            artist: "周杰伦",
+            service: "Kugou",
+            quality: 1.0,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "Kugou") }
+        )
+        let matchedLyrics = LyricsSearchCandidate(
+            id: "lrclib|matched",
+            title: "蘭亭序",
+            artist: "周杰伦",
+            service: "LRCLIB",
+            quality: 0.55,
+            duration: 200,
+            loadLyrics: { Self.makeLyrics(service: "LRCLIB") }
+        )
+        let provider = LyricsKitProvider(
+            searchServices: [
+                TestLyricsSearchService(results: [wrongPreferredLyrics, matchedLyrics]),
+            ]
+        )
+
+        let results = await provider.searchLyrics(
+            title: "蘭亭序",
+            artist: "周杰伦",
+            duration: 200,
+            limit: 10
+        )
+
+        XCTAssertEqual(results.first, matchedLyrics)
+    }
+
     func testLyricsCachePersistsLyricsUsingTrackKeyFileName() throws {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -314,6 +866,47 @@ final class LyricsProviderTests: XCTestCase {
 
         XCTAssertEqual(remote.requestedSnapshots.count, 0)
         XCTAssertNil(cache.savedLyrics)
+    }
+
+    @MainActor
+    func testCachedLyricsProviderReplacesWeakCachedLyricsWithBetterRemoteUpdate() async {
+        let cachedLyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "LRCLIB",
+            lines: [TimedLyricLine(timestamp: 0, text: "cached plain")]
+        )
+        let remoteLyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "QQMusic",
+            lines: [
+                TimedLyricLine(
+                    timestamp: 0,
+                    text: "remote timed",
+                    inlineTags: [
+                        .init(index: 0, timeOffset: 0),
+                        .init(index: 6, timeOffset: 1),
+                    ]
+                ),
+            ]
+        )
+        let cache = TestLyricsCache(loadedLyrics: cachedLyrics)
+        let remote = TestLyricsProvider(result: remoteLyrics)
+        let provider = CachedLyricsProvider(cache: cache, remoteProvider: remote)
+        var updates: [TimedLyrics] = []
+
+        for await lyrics in provider.lyricUpdates(for: Self.snapshot()) {
+            updates.append(lyrics)
+        }
+
+        XCTAssertEqual(updates, [cachedLyrics, remoteLyrics])
+        XCTAssertEqual(remote.requestedSnapshots.count, 1)
+        XCTAssertEqual(cache.savedLyrics, remoteLyrics)
     }
 
     @MainActor
@@ -493,11 +1086,14 @@ final class LyricsProviderTests: XCTestCase {
         XCTAssertTrue(DesktopLyricsPlaybackFilter.isEligible(snapshot))
     }
 
-    private static func snapshot() -> MediaPlaybackSnapshot {
+    private static func snapshot(
+        title: String = "Song",
+        artist: String = "Artist"
+    ) -> MediaPlaybackSnapshot {
         MediaPlaybackSnapshot(
             source: .fromBundleIdentifier("com.spotify.client"),
-            title: "Song",
-            artist: "Artist",
+            title: title,
+            artist: artist,
             album: "Album",
             artworkData: nil,
             currentTime: 12,
@@ -520,7 +1116,42 @@ final class LyricsProviderTests: XCTestCase {
     }
 }
 
+private final class EmptyLyricsServiceProvider: LyricsService.LyricsProvider, @unchecked Sendable {
+    private(set) var requests: [LyricsSearchRequest] = []
+
+    func lyrics(for request: LyricsSearchRequest) -> AsyncThrowingStream<Lyrics, Error> {
+        requests.append(request)
+        return AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+private final class StaticLyricsServiceProvider: LyricsService.LyricsProvider, @unchecked Sendable {
+    private(set) var requests: [LyricsSearchRequest] = []
+    private let lyrics: [Lyrics]
+
+    init(lyrics: [Lyrics]) {
+        self.lyrics = lyrics
+    }
+
+    func lyrics(for request: LyricsSearchRequest) -> AsyncThrowingStream<Lyrics, Error> {
+        requests.append(request)
+        let lyrics = lyrics
+        return AsyncThrowingStream { continuation in
+            for lyric in lyrics {
+                lyric.metadata.request = request
+                lyric.metadata.service = "LRCLIB"
+                continuation.yield(lyric)
+            }
+            continuation.finish()
+        }
+    }
+}
+
 private final class TestLyricsCache: LyricsCaching {
+    let directoryURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
+
     var loadedLyrics: TimedLyrics?
     private(set) var savedLyrics: TimedLyrics?
     private(set) var saveCallCount: Int = 0

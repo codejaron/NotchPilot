@@ -47,17 +47,58 @@ final class DesktopLyricsControllerTests: XCTestCase {
             settingsStore: store,
             provider: provider,
             cache: cache,
-            ignoredTrackStore: ignoredTrackStore
+            ignoredTrackStore: ignoredTrackStore,
+            playbackTimeProvider: { _ in 16 }
         )
 
         controller.handlePlaybackState(Self.snapshot(currentTime: 16, isPlaying: true))
         await Self.waitForStreamingProviderRequest(provider)
-        provider.yield(lyrics)
+        await provider.yield(lyrics)
         await Self.flushMainActorTasks()
 
         XCTAssertEqual(provider.requestedSnapshots.count, 1)
         XCTAssertTrue(controller.presentation.isVisible)
         XCTAssertEqual(controller.presentation.currentLine, "line 2")
+    }
+
+    @MainActor
+    func testControllerSearchesLyricsWhenArtistMetadataIsMissing() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [TimedLyricLine(timestamp: 0, text: "line")]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore
+        )
+
+        controller.handlePlaybackState(
+            Self.snapshot(
+                bundleIdentifier: "com.spotify.client",
+                title: "Song",
+                artist: "",
+                currentTime: 1,
+                isPlaying: true
+            )
+        )
+        await Self.waitForStreamingProviderRequest(provider)
+        await provider.yield(lyrics)
+        await Self.waitForCurrentLine("line", controller: controller)
+
+        XCTAssertEqual(provider.requestedSnapshots.count, 1)
+        XCTAssertEqual(controller.presentation.currentLine, "line")
     }
 
     @MainActor
@@ -94,12 +135,12 @@ final class DesktopLyricsControllerTests: XCTestCase {
         controller.handlePlaybackState(Self.snapshot(currentTime: 5, isPlaying: true))
         await Self.waitForStreamingProviderRequest(provider)
 
-        provider.yield(firstLyrics)
+        await provider.yield(firstLyrics)
         await Self.flushMainActorTasks()
 
         XCTAssertEqual(controller.presentation.currentLine, "first usable")
 
-        provider.yield(replacementLyrics)
+        await provider.yield(replacementLyrics)
         await Self.flushMainActorTasks()
 
         XCTAssertEqual(controller.presentation.currentLine, "better replacement")
@@ -135,10 +176,216 @@ final class DesktopLyricsControllerTests: XCTestCase {
 
         controller.handlePlaybackState(Self.snapshot(currentTime: 5, isPlaying: true))
         await Self.waitForStreamingProviderRequest(provider)
-        provider.yield(lyrics)
-        await Self.flushMainActorTasks()
+        await provider.yield(lyrics)
+        await Self.waitForCurrentLine("line 2", controller: controller)
 
         XCTAssertEqual(controller.presentation.currentLine, "line 2")
+    }
+
+    @MainActor
+    func testControllerShowsFirstLineBeforeFirstTimestampAfterLyricsLoad() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0.05, text: "first line"),
+                TimedLyricLine(timestamp: 1, text: "second line"),
+            ]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore
+        )
+
+        controller.handlePlaybackState(Self.snapshot(currentTime: 0, isPlaying: true))
+        await Self.waitForStreamingProviderRequest(provider)
+        await provider.yield(lyrics)
+        await Self.flushMainActorTasks()
+
+        XCTAssertTrue(controller.presentation.isVisible)
+        XCTAssertEqual(controller.presentation.currentLine, "first line")
+
+        try? await Task.sleep(for: .milliseconds(120))
+        await Self.flushMainActorTasks()
+
+        XCTAssertEqual(controller.presentation.currentLine, "first line")
+    }
+
+    @MainActor
+    func testControllerUsesDirectPlaybackTimeWhenSnapshotBrieflyReportsZero() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "intro"),
+                TimedLyricLine(timestamp: 20, text: "verse"),
+                TimedLyricLine(timestamp: 40, text: "chorus"),
+            ]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore,
+            playbackTimeProvider: { _ in 43 }
+        )
+        let startDate = Date()
+
+        controller.handlePlaybackState(
+            .active(
+                Self.activeSnapshot(
+                    currentTime: 42,
+                    isPlaying: true,
+                    lastUpdated: startDate
+                )
+            )
+        )
+        await Self.waitForStreamingProviderRequest(provider)
+        await provider.yield(lyrics)
+        await Self.waitForCurrentLine("chorus", controller: controller)
+
+        XCTAssertEqual(controller.presentation.currentLine, "chorus")
+
+        controller.handlePlaybackState(
+            .active(
+                Self.activeSnapshot(
+                    currentTime: 0,
+                    isPlaying: true,
+                    lastUpdated: startDate.addingTimeInterval(1)
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.presentation.currentLine, "chorus")
+        XCTAssertEqual(provider.requestedSnapshots.count, 1)
+    }
+
+    @MainActor
+    func testControllerIgnoresTransientZeroDirectPlaybackTimeForSameTrack() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        var directTimes: [TimeInterval?] = [43, 0]
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "intro"),
+                TimedLyricLine(timestamp: 20, text: "verse"),
+                TimedLyricLine(timestamp: 40, text: "chorus"),
+            ]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore,
+            playbackTimeProvider: { _ in directTimes.removeFirst() }
+        )
+        let startDate = Date()
+
+        controller.handlePlaybackState(
+            .active(
+                Self.activeSnapshot(
+                    currentTime: 42,
+                    isPlaying: true,
+                    lastUpdated: startDate
+                )
+            )
+        )
+        await Self.waitForStreamingProviderRequest(provider)
+        await provider.yield(lyrics)
+        await Self.waitForCurrentLine("chorus", controller: controller)
+
+        XCTAssertEqual(controller.presentation.currentLine, "chorus")
+
+        controller.handlePlaybackState(
+            .active(
+                Self.activeSnapshot(
+                    currentTime: 0,
+                    isPlaying: true,
+                    lastUpdated: startDate.addingTimeInterval(1)
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.presentation.currentLine, "chorus")
+    }
+
+    @MainActor
+    func testControllerProjectsRecentDirectPlaybackTimeWhenDirectReadTemporarilyFails() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        var directTimes: [TimeInterval?] = [30, nil]
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [
+                TimedLyricLine(timestamp: 0, text: "intro"),
+                TimedLyricLine(timestamp: 30, text: "verse"),
+                TimedLyricLine(timestamp: 60, text: "chorus"),
+            ]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore,
+            playbackTimeProvider: { _ in directTimes.removeFirst() }
+        )
+        let startDate = Date()
+
+        controller.handlePlaybackState(
+            .active(
+                Self.activeSnapshot(
+                    currentTime: 0,
+                    isPlaying: true,
+                    lastUpdated: startDate
+                )
+            )
+        )
+        await Self.waitForStreamingProviderRequest(provider)
+        await provider.yield(lyrics)
+        await Self.waitForCurrentLine("verse", controller: controller)
+
+        XCTAssertEqual(controller.presentation.currentLine, "verse")
+
+        controller.refreshPresentation(at: Date().addingTimeInterval(2))
+
+        XCTAssertEqual(controller.presentation.currentLine, "verse")
     }
 
     @MainActor
@@ -201,7 +448,7 @@ final class DesktopLyricsControllerTests: XCTestCase {
 
         controller.handlePlaybackState(Self.snapshot(currentTime: 16, isPlaying: true))
         await Self.waitForStreamingProviderRequest(provider)
-        provider.yield(lyrics)
+        await provider.yield(lyrics)
         await Self.flushMainActorTasks()
         XCTAssertTrue(controller.presentation.isVisible)
 
@@ -386,7 +633,7 @@ final class DesktopLyricsControllerTests: XCTestCase {
 
         controller.handlePlaybackState(.active(bindingSnapshot))
         await Self.waitForStreamingProviderRequest(provider)
-        provider.yield(originalLyrics)
+        await provider.yield(originalLyrics)
         await Self.flushMainActorTasks()
         controller.previewLyricsOverride(previewLyrics, for: bindingSnapshot)
 
@@ -406,11 +653,24 @@ final class DesktopLyricsControllerTests: XCTestCase {
     }
 
     @MainActor
+    private static func waitForCurrentLine(
+        _ line: String?,
+        controller: DesktopLyricsController
+    ) async {
+        for _ in 0 ..< 100 {
+            if controller.presentation.currentLine == line {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
+    @MainActor
     private static func waitForStreamingProviderRequest(
         _ provider: StreamingDesktopLyricsControllerTestProvider
     ) async {
         for _ in 0 ..< 20 {
-            if provider.requestedSnapshots.isEmpty == false {
+            if provider.requestedSnapshots.isEmpty == false, provider.isReady {
                 return
             }
             await Task.yield()
@@ -453,7 +713,8 @@ final class DesktopLyricsControllerTests: XCTestCase {
         title: String = "Song",
         artist: String = "Artist",
         currentTime: TimeInterval,
-        isPlaying: Bool
+        isPlaying: Bool,
+        lastUpdated: Date = Date()
     ) -> MediaPlaybackSnapshot {
         MediaPlaybackSnapshot(
             source: .fromBundleIdentifier(bundleIdentifier),
@@ -465,7 +726,7 @@ final class DesktopLyricsControllerTests: XCTestCase {
             duration: 200,
             playbackRate: 1,
             isPlaying: isPlaying,
-            lastUpdated: Date()
+            lastUpdated: lastUpdated
         )
     }
 }
@@ -505,6 +766,7 @@ private final class DesktopLyricsControllerTestProvider: LyricsProviding {
 @MainActor
 private final class StreamingDesktopLyricsControllerTestProvider: LyricsProviding {
     private var continuation: AsyncStream<TimedLyrics>.Continuation?
+    private(set) var isReady = false
     private(set) var requestedSnapshots: [MediaPlaybackSnapshot] = []
 
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics? {
@@ -518,11 +780,18 @@ private final class StreamingDesktopLyricsControllerTestProvider: LyricsProvidin
         requestedSnapshots.append(snapshot)
         return AsyncStream { continuation in
             self.continuation = continuation
+            self.isReady = true
         }
     }
 
-    func yield(_ lyrics: TimedLyrics) {
-        continuation?.yield(lyrics)
+    func yield(_ lyrics: TimedLyrics) async {
+        for _ in 0 ..< 100 {
+            if let continuation {
+                continuation.yield(lyrics)
+                return
+            }
+            await Task.yield()
+        }
     }
 }
 
@@ -547,6 +816,8 @@ private final class TestIgnoredLyricsStore: LyricsTrackIgnoring {
 }
 
 private final class TestControllerLyricsCache: LyricsCaching {
+    let directoryURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
+
     private(set) var removedKeys: [LyricsTrackKey] = []
     private(set) var savedEntries: [(key: LyricsTrackKey, lyrics: TimedLyrics)] = []
 

@@ -5,6 +5,7 @@ import SwiftUI
 
 enum DesktopLyricsWindowLayout {
     static let maxCardWidth: CGFloat = 720
+    static let minCardWidth: CGFloat = 200
     static let cardHeight: CGFloat = 88
     static let horizontalPadding: CGFloat = 22
     static let bottomInset: CGFloat = 28
@@ -25,11 +26,59 @@ enum DesktopLyricsWindowLayout {
             height: height
         )
     }
+
+    static func frame(
+        in visibleFrame: CGRect,
+        presentation: DesktopLyricsPresentation,
+        fontSize: CGFloat
+    ) -> CGRect {
+        frame(
+            in: visibleFrame,
+            cardWidth: cardWidth(for: presentation, fontSize: fontSize),
+            fontSize: fontSize
+        )
+    }
+
+    static func cardWidth(for presentation: DesktopLyricsPresentation, fontSize: CGFloat) -> CGFloat {
+        let currentWidth = textWidth(
+            presentation.currentLine ?? "",
+            fontSize: fontSize,
+            weight: .semibold
+        )
+        let nextWidth = textWidth(
+            presentation.nextLine ?? "",
+            fontSize: round(fontSize * 0.72),
+            weight: .medium
+        )
+        let measuredWidth = max(currentWidth, nextWidth) + (horizontalPadding * 2)
+        return min(maxCardWidth, max(minCardWidth, ceil(measuredWidth)))
+    }
+
+    private static func textWidth(_ text: String, fontSize: CGFloat, weight: NSFont.Weight) -> CGFloat {
+        guard text.isEmpty == false else { return 0 }
+        let baseFont = NSFont.systemFont(ofSize: fontSize, weight: weight)
+        let font = baseFont.fontDescriptor.withDesign(.rounded)
+            .flatMap { NSFont(descriptor: $0, size: fontSize) } ?? baseFont
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
 }
 
 enum ActiveDesktopLyricsScreenResolver {
-    static func resolve(mouseLocation: CGPoint, descriptors: [ScreenDescriptor]) -> String? {
-        descriptors.first(where: { $0.frame.contains(mouseLocation) })?.id
+    static func resolve(
+        mouseLocation: CGPoint,
+        descriptors: [ScreenDescriptor],
+        fallbackID: String? = nil
+    ) -> String? {
+        if let exact = descriptors.first(where: { $0.frame.contains(mouseLocation) }) {
+            return exact.id
+        }
+
+        guard let fallbackID,
+              descriptors.contains(where: { $0.id == fallbackID }) else {
+            return nil
+        }
+        return fallbackID
     }
 }
 
@@ -45,6 +94,20 @@ struct DesktopLyricsViewState: Equatable {
         highlightColor: .green,
         fontSize: 28
     )
+}
+
+enum DesktopLyricsCurrentLineHighlightMode: Equatable {
+    case fullLine
+    case timedProgress
+
+    static func resolve(lineState: DesktopLyricsLineState?) -> DesktopLyricsCurrentLineHighlightMode {
+        guard let lineState,
+              lineState.currentLine.isEmpty == false,
+              (lineState.inlineTags?.count ?? 0) >= 2 else {
+            return .fullLine
+        }
+        return .timedProgress
+    }
 }
 
 @MainActor
@@ -93,14 +156,22 @@ struct DesktopLyricsView: View {
     private func karaokeCurrentLine(state: DesktopLyricsViewState) -> some View {
         let text = state.presentation.currentLine ?? ""
         let fontSize = state.fontSize
+        let highlightMode = DesktopLyricsCurrentLineHighlightMode.resolve(
+            lineState: state.presentation.lineState
+        )
 
         Text(text)
             .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-            .foregroundStyle(NotchPilotTheme.islandTextSecondary)
+            .foregroundStyle(
+                highlightMode == .fullLine
+                    ? state.highlightColor
+                    : NotchPilotTheme.islandTextSecondary
+            )
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .overlay {
-                if let lineState = state.presentation.lineState, lineState.currentLine.isEmpty == false {
+                if let lineState = state.presentation.lineState,
+                   highlightMode == .timedProgress {
                     karaokeHighlightOverlay(lineState: lineState, fontSize: fontSize, color: state.highlightColor)
                 }
             }
@@ -252,26 +323,38 @@ final class DesktopLyricsWindow: NSPanel {
         false
     }
 
+    func containsMouseLocation(_ mouseLocation: CGPoint) -> Bool {
+        guard let contentView else {
+            return frame.contains(mouseLocation)
+        }
+
+        let windowPoint = convertFromScreen(NSRect(origin: mouseLocation, size: .zero)).origin
+        let contentPoint = contentView.convert(windowPoint, from: nil)
+        return contentView.bounds.contains(contentPoint)
+    }
+
     func update(
         presentation: DesktopLyricsPresentation,
         visibleFrame: CGRect,
-        isMouseHovering: Bool,
+        mouseLocation: CGPoint,
         highlightColor: Color,
         fontSize: CGFloat
     ) {
+        setFrame(
+            DesktopLyricsWindowLayout.frame(
+                in: visibleFrame,
+                presentation: presentation,
+                fontSize: fontSize
+            ),
+            display: false
+        )
+
         let nextState = DesktopLyricsViewState(
             presentation: presentation,
-            isMouseHovering: isMouseHovering,
+            isMouseHovering: containsMouseLocation(mouseLocation),
             highlightColor: highlightColor,
             fontSize: fontSize
         )
         model.update(nextState)
-
-        let intrinsicSize = hostingView.intrinsicContentSize
-        let cardWidth = max(200, intrinsicSize.width)
-        setFrame(
-            DesktopLyricsWindowLayout.frame(in: visibleFrame, cardWidth: cardWidth, fontSize: fontSize),
-            display: false
-        )
     }
 }
