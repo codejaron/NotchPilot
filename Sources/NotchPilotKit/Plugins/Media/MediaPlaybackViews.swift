@@ -82,6 +82,35 @@ enum MediaPlaybackProgressChrome {
     }
 }
 
+struct MediaPlaybackProgressPendingSeek: Equatable {
+    let time: Double
+    let issuedAt: Date
+}
+
+enum MediaPlaybackProgressPresentation {
+    static let refreshInterval: TimeInterval = 1.0 / 15.0
+
+    static func displayedCurrentTime(
+        for snapshot: MediaPlaybackSnapshot,
+        editingTime: Double?,
+        pendingSeek: MediaPlaybackProgressPendingSeek?,
+        at date: Date
+    ) -> Double {
+        if let editingTime {
+            return editingTime
+        }
+
+        if let pendingSeek {
+            let elapsedSinceSeek = snapshot.isPlaying ? date.timeIntervalSince(pendingSeek.issuedAt) * snapshot.playbackRate : 0
+            let projectedTime = pendingSeek.time + elapsedSinceSeek
+            let upperBound = snapshot.duration ?? projectedTime
+            return min(max(0, projectedTime), max(upperBound, 0))
+        }
+
+        return snapshot.estimatedCurrentTime(at: date)
+    }
+}
+
 enum MediaPlaybackCompactPreviewLayout {
     static let edgePadding: CGFloat = 12
     static let cameraEdgeSpacing: CGFloat = 6
@@ -423,11 +452,6 @@ struct MediaPlaybackCompactPreviewView: View {
 }
 
 struct MediaPlaybackExpandedView: View {
-    private struct PendingSeek {
-        let time: Double
-        let issuedAt: Date
-    }
-
     let state: MediaPlaybackState
     let accentColor: Color
     let onPrevious: () -> Void
@@ -437,7 +461,7 @@ struct MediaPlaybackExpandedView: View {
 
     @ObservedObject private var store = SettingsStore.shared
     @State private var editingTime: Double?
-    @State private var pendingSeek: PendingSeek?
+    @State private var pendingSeek: MediaPlaybackProgressPendingSeek?
 
     var body: some View {
         switch state {
@@ -447,7 +471,9 @@ struct MediaPlaybackExpandedView: View {
 
                 VStack(alignment: .leading, spacing: MediaPlaybackExpandedLayout.sectionSpacing) {
                     metadataSection(snapshot)
-                    progressSection(snapshot)
+                    TimelineView(.periodic(from: .now, by: MediaPlaybackProgressPresentation.refreshInterval)) { timeline in
+                        progressSection(snapshot, at: timeline.date)
+                    }
                     controlsRow(snapshot)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -561,8 +587,8 @@ struct MediaPlaybackExpandedView: View {
         }
     }
 
-    private func progressSection(_ snapshot: MediaPlaybackSnapshot) -> some View {
-        let displayedCurrentTime = resolvedCurrentTime(for: snapshot)
+    private func progressSection(_ snapshot: MediaPlaybackSnapshot, at date: Date) -> some View {
+        let displayedCurrentTime = resolvedCurrentTime(for: snapshot, at: date)
         let duration = snapshot.duration ?? 0
         let upperBound = max(snapshot.duration ?? max(displayedCurrentTime, 1), 1)
 
@@ -576,8 +602,9 @@ struct MediaPlaybackExpandedView: View {
                     if isEditing {
                         editingTime = editingTime ?? displayedCurrentTime
                     } else {
-                        let resolvedTime = editingTime ?? resolvedCurrentTime(for: snapshot)
-                        pendingSeek = PendingSeek(time: resolvedTime, issuedAt: Date())
+                        let issuedAt = Date()
+                        let resolvedTime = editingTime ?? resolvedCurrentTime(for: snapshot, at: issuedAt)
+                        pendingSeek = MediaPlaybackProgressPendingSeek(time: resolvedTime, issuedAt: issuedAt)
                         onSeek(resolvedTime)
                         editingTime = nil
                     }
@@ -646,18 +673,12 @@ struct MediaPlaybackExpandedView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
-    private func resolvedCurrentTime(for snapshot: MediaPlaybackSnapshot) -> Double {
-        if let editingTime {
-            return editingTime
-        }
-
-        if let pendingSeek {
-            let elapsedSinceSeek = snapshot.isPlaying ? Date().timeIntervalSince(pendingSeek.issuedAt) * snapshot.playbackRate : 0
-            let projectedTime = pendingSeek.time + elapsedSinceSeek
-            let upperBound = snapshot.duration ?? projectedTime
-            return min(max(0, projectedTime), max(upperBound, 0))
-        }
-
-        return snapshot.estimatedCurrentTime()
+    private func resolvedCurrentTime(for snapshot: MediaPlaybackSnapshot, at date: Date) -> Double {
+        MediaPlaybackProgressPresentation.displayedCurrentTime(
+            for: snapshot,
+            editingTime: editingTime,
+            pendingSeek: pendingSeek,
+            at: date
+        )
     }
 }

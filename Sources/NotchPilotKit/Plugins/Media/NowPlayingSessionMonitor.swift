@@ -75,6 +75,77 @@ private final class SystemMediaRemoteCommandController: MediaRemoteCommandContro
     }
 }
 
+private final class SystemMediaPlaybackPlayer: MediaPlaybackCommandPerforming {
+    typealias ResourceProvider = () -> MediaRemoteAdapterResource?
+    typealias ProcessLauncher = (_ executableURL: URL, _ arguments: [String]) -> Void
+
+    private let commandController: (any MediaRemoteCommandControlling)?
+    private let resourceProvider: ResourceProvider
+    private let processLauncher: ProcessLauncher
+
+    init(
+        commandController: (any MediaRemoteCommandControlling)?,
+        resourceProvider: @escaping ResourceProvider,
+        processLauncher: @escaping ProcessLauncher
+    ) {
+        self.commandController = commandController
+        self.resourceProvider = resourceProvider
+        self.processLauncher = processLauncher
+    }
+
+    func perform(_ command: MediaPlaybackCommand) -> Bool {
+        guard let resource = resourceProvider() else {
+            return false
+        }
+
+        if let commandController {
+            switch command {
+            case .play:
+                commandController.play()
+            case .pause:
+                commandController.pause()
+            case .togglePlayPause:
+                commandController.togglePlayPause()
+            case .nextTrack:
+                commandController.nextTrack()
+            case .previousTrack:
+                commandController.previousTrack()
+            case let .seek(time):
+                commandController.seek(to: time)
+            }
+            return true
+        }
+
+        switch command {
+        case .play:
+            send(.play, using: resource)
+        case .pause:
+            send(.pause, using: resource)
+        case .togglePlayPause:
+            send(.togglePlayPause, using: resource)
+        case .nextTrack:
+            send(.nextTrack, using: resource)
+        case .previousTrack:
+            send(.previousTrack, using: resource)
+        case let .seek(time):
+            let microseconds = max(0, Int(time * 1_000_000))
+            processLauncher(
+                URL(fileURLWithPath: "/usr/bin/perl"),
+                [resource.scriptURL.path, resource.frameworkURL.path, "seek", "\(microseconds)"]
+            )
+        }
+
+        return true
+    }
+
+    private func send(_ command: MediaRemoteAdapterCommand, using resource: MediaRemoteAdapterResource) {
+        processLauncher(
+            URL(fileURLWithPath: "/usr/bin/perl"),
+            [resource.scriptURL.path, resource.frameworkURL.path, "send", "\(command.rawValue)"]
+        )
+    }
+}
+
 protocol MediaStreamProcessHandling: AnyObject, Sendable {
     var isRunning: Bool { get }
     var processIdentifier: pid_t { get }
@@ -184,31 +255,48 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     private let commandController: (any MediaRemoteCommandControlling)? = SystemMediaRemoteCommandController()
     private let playbackTimeProvider: any PlaybackTimeProviding
-    private let spotifyPlaybackProvider: any SpotifyPlaybackSnapshotProviding
+    private let spotifyPlayer: any SpotifyPlaybackPlayerOperating
     private let streamProcessReaper: MediaStreamProcessReaper
     private var streamProcess: (any MediaStreamProcessHandling)?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
-    private var playbackStateSelector = MediaPlaybackStateSelector()
+    private var playbackStateSelector = MediaPlaybackPlayerSelector(players: [.spotify, .system])
+    private var spotifyTrackGate = SpotifyPlaybackTrackGate()
     private var spotifyNotificationObserver: NSObjectProtocol?
+    private var isMonitoring = false
+    private lazy var systemPlayer = SystemMediaPlaybackPlayer(
+        commandController: commandController,
+        resourceProvider: { [weak self] in
+            self?.mediaRemoteAdapterResource
+        },
+        processLauncher: { [weak self] executableURL, arguments in
+            self?.launchDetachedProcess(executableURL: executableURL, arguments: arguments)
+        }
+    )
 
     init(
         playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider(),
-        spotifyPlaybackProvider: any SpotifyPlaybackSnapshotProviding = AppleScriptSpotifyPlaybackSnapshotProvider(),
+        spotifyPlayer: any SpotifyPlaybackPlayerOperating = AppleScriptSpotifyPlaybackPlayer(),
         streamProcessReaper: MediaStreamProcessReaper = MediaStreamProcessReaper()
     ) {
         self.playbackTimeProvider = playbackTimeProvider
-        self.spotifyPlaybackProvider = spotifyPlaybackProvider
+        self.spotifyPlayer = spotifyPlayer
         self.streamProcessReaper = streamProcessReaper
     }
 
     func start() {
-        guard streamProcess == nil else {
+        guard isMonitoring == false else {
             return
         }
 
+        isMonitoring = true
+        startSpotifyPlaybackObservation()
+        Task { [weak self] in
+            await self?.refreshSpotifyPlaybackSnapshot()
+        }
+
         guard let resource = mediaRemoteAdapterResource else {
-            updateState(.unavailable)
+            updateState(playbackStateSelector.update(.unavailable, for: .system))
             return
         }
 
@@ -224,17 +312,16 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             try process.run()
             self.streamProcess = MediaStreamProcessHandle(process)
             self.pipeHandler = pipeHandler
-            startSpotifyPlaybackObservation()
-            refreshSpotifyPlaybackSnapshot()
             self.streamTask = Task { [weak self] in
                 await self?.consumeStream(with: pipeHandler)
             }
         } catch {
-            updateState(.unavailable)
+            updateState(playbackStateSelector.update(.unavailable, for: .system))
         }
     }
 
     func stop() {
+        isMonitoring = false
         stopSpotifyPlaybackObservation()
         streamTask?.cancel()
         streamTask = nil
@@ -249,69 +336,58 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             streamProcessReaper.reap(streamProcess)
         }
         self.streamProcess = nil
+        spotifyTrackGate.reset()
         playbackStateSelector.reset()
     }
 
     func play() {
         performCommand(
-            directCommand: { $0.play() },
-            fallbackCommand: .play,
+            .play,
             refreshDelays: [0.15, 0.6]
         )
     }
 
     func pause() {
         performCommand(
-            directCommand: { $0.pause() },
-            fallbackCommand: .pause,
+            .pause,
             refreshDelays: [0.15, 0.6]
         )
     }
 
     func playPause() {
         performCommand(
-            directCommand: { $0.togglePlayPause() },
-            fallbackCommand: .togglePlayPause,
+            .togglePlayPause,
             refreshDelays: [0.15, 0.6]
         )
     }
 
     func nextTrack() {
         performCommand(
-            directCommand: { $0.nextTrack() },
-            fallbackCommand: .nextTrack,
+            .nextTrack,
             refreshDelays: [0.2, 0.7]
         )
     }
 
     func previousTrack() {
         performCommand(
-            directCommand: { $0.previousTrack() },
-            fallbackCommand: .previousTrack,
+            .previousTrack,
             refreshDelays: [0.2, 0.7]
         )
     }
 
     func seek(to time: Double) {
-        guard let resource = mediaRemoteAdapterResource else {
-            return
-        }
-
-        if let commandController {
-            commandController.seek(to: time)
-        } else {
-            let microseconds = max(0, Int(time * 1_000_000))
-            launchDetachedProcess(
-                executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
-                arguments: [resource.scriptURL.path, resource.frameworkURL.path, "seek", "\(microseconds)"]
-            )
-        }
-        requestStateRefresh(using: resource, after: 0.15)
-        requestStateRefresh(using: resource, after: 0.6)
+        performCommand(
+            .seek(time),
+            refreshDelays: [0.15, 0.6]
+        )
     }
 
     func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
-        playbackTimeProvider.currentPlaybackTime(for: source)
+        if Self.isSpotifySource(source) {
+            return spotifyPlayer.currentPlaybackTime()
+        }
+
+        return playbackTimeProvider.currentPlaybackTime(for: source)
     }
 
     func updateState(_ state: MediaPlaybackState) {
@@ -328,7 +404,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     }
 
     private func handleAdapterUpdate(_ update: AdapterUpdate) {
-        let state = playbackStateSelector.acceptSystem(update.payload.normalizedState)
+        let state = playbackStateSelector.update(update.payload.normalizedState, for: .system)
         updateState(state)
     }
 
@@ -348,7 +424,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             }
 
             Task { @MainActor [weak self, payload] in
-                self?.handleSpotifyPlaybackPayload(payload)
+                await self?.handleSpotifyPlaybackPayload(payload)
             }
         }
     }
@@ -360,29 +436,44 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         }
     }
 
-    private func refreshSpotifyPlaybackSnapshot() {
-        guard let snapshot = spotifyPlaybackProvider.currentSpotifyPlaybackSnapshot(at: Date()) else {
-            return
+    @discardableResult
+    private func refreshSpotifyPlaybackSnapshot() async -> Bool {
+        let date = Date()
+        guard let snapshot = await spotifyPlayer.currentSpotifyPlaybackSnapshot(at: date) else {
+            return false
         }
 
         let state = MediaPlaybackState.active(snapshot)
-        updateState(playbackStateSelector.acceptSpotify(state))
+        updateState(playbackStateSelector.update(state, for: .spotify, at: date))
+        return true
     }
 
-    private func handleSpotifyPlaybackPayload(_ payload: SpotifyPlaybackNotice.Payload) {
-        guard streamProcess != nil else {
+    private func handleSpotifyPlaybackPayload(_ payload: SpotifyPlaybackNotice.Payload) async {
+        guard isMonitoring else {
             return
         }
 
-        guard let state = SpotifyPlaybackNotice.state(
+        await applySpotifyPlaybackPayload(payload)
+    }
+
+    func applySpotifyPlaybackPayload(_ payload: SpotifyPlaybackNotice.Payload) async {
+        let date = Date()
+        if spotifyTrackGate.shouldRefreshCompleteSnapshot(for: payload.trackID),
+           await refreshSpotifyPlaybackSnapshot() {
+            spotifyTrackGate.accept(payload.trackID)
+            return
+        }
+
+        guard let state = await SpotifyPlaybackNotice.state(
                 from: payload,
-                fallback: playbackStateSelector.spotifySnapshot,
-                at: Date()
+                fallback: playbackStateSelector.snapshot(for: .spotify, at: date),
+                at: date
         ) else {
             return
         }
 
-        updateState(playbackStateSelector.acceptSpotify(state))
+        spotifyTrackGate.accept(payload.trackID)
+        updateState(playbackStateSelector.update(state, for: .spotify, at: date))
     }
 
     private func requestStateRefresh(using resource: MediaRemoteAdapterResource, after delay: TimeInterval) {
@@ -398,34 +489,44 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         }
     }
 
-    private func send(command: MediaRemoteAdapterCommand) {
-        guard let resource = mediaRemoteAdapterResource else {
-            return
-        }
-
-        launchDetachedProcess(
-            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
-            arguments: [resource.scriptURL.path, resource.frameworkURL.path, "send", "\(command.rawValue)"]
-        )
-    }
-
     private func performCommand(
-        directCommand: ((any MediaRemoteCommandControlling) -> Void)?,
-        fallbackCommand: MediaRemoteAdapterCommand,
+        _ command: MediaPlaybackCommand,
         refreshDelays: [TimeInterval]
     ) {
-        guard let resource = mediaRemoteAdapterResource else {
-            return
-        }
+        let router = MediaPlaybackPlayerCommandRouter(
+            commandPerformers: [
+                .spotify: spotifyPlayer,
+                .system: systemPlayer,
+            ],
+            fallbackPlayer: .system
+        )
 
-        if let commandController, let directCommand {
-            directCommand(commandController)
-        } else {
-            send(command: fallbackCommand)
+        guard let player = router.perform(command, selectedPlayer: playbackStateSelector.currentPlayer) else {
+            return
         }
 
         for delay in refreshDelays {
+            requestStateRefresh(for: player, after: delay)
+        }
+    }
+
+    private func requestStateRefresh(for player: MediaPlaybackPlayerID, after delay: TimeInterval) {
+        switch player {
+        case .spotify:
+            requestSpotifyPlaybackSnapshot(after: delay)
+        case .system:
+            guard let resource = mediaRemoteAdapterResource else {
+                return
+            }
             requestStateRefresh(using: resource, after: delay)
+        }
+    }
+
+    private func requestSpotifyPlaybackSnapshot(after delay: TimeInterval) {
+        Task.detached(priority: .utility) { [weak self] in
+            let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            await self?.refreshSpotifyPlaybackSnapshot()
         }
     }
 
@@ -448,6 +549,14 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         return MediaRemoteAdapterResource(scriptURL: scriptURL, frameworkURL: frameworkURL)
     }
 
+    private static func isSpotifySource(_ source: MediaPlaybackSource) -> Bool {
+        source.bundleIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .contains("spotify") == true ||
+            source.displayName.lowercased().contains("spotify")
+    }
+
     private func launchDetachedProcess(executableURL: URL, arguments: [String]) {
         Task.detached(priority: .utility) {
             let process = Process()
@@ -467,7 +576,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     @MainActor
     private func applyRefreshedState(_ state: MediaPlaybackState) {
-        updateState(playbackStateSelector.acceptSystem(state))
+        updateState(playbackStateSelector.update(state, for: .system))
     }
 
     private static func fetchCurrentState(using resource: MediaRemoteAdapterResource) async -> MediaPlaybackState? {

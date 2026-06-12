@@ -22,6 +22,37 @@ final class MediaPlaybackLayoutTests: XCTestCase {
         )
     }
 
+    func testExpandedMediaProgressHasLiveRefreshCadence() {
+        XCTAssertGreaterThan(MediaPlaybackProgressPresentation.refreshInterval, 0)
+        XCTAssertLessThanOrEqual(MediaPlaybackProgressPresentation.refreshInterval, 0.25)
+    }
+
+    func testExpandedMediaProgressPresentationProjectsPlayingSnapshotAtTimelineDate() {
+        let snapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Track",
+            artist: "Artist",
+            album: "Album",
+            artworkData: nil,
+            currentTime: 10,
+            duration: 200,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: Date(timeIntervalSince1970: 100)
+        )
+
+        XCTAssertEqual(
+            MediaPlaybackProgressPresentation.displayedCurrentTime(
+                for: snapshot,
+                editingTime: nil,
+                pendingSeek: nil,
+                at: Date(timeIntervalSince1970: 103)
+            ),
+            13,
+            accuracy: 0.01
+        )
+    }
+
     func testCompactMediaPreviewKeepsContentOutsideCameraClearance() {
         let compactWidth: CGFloat = 185
         let preferredWidth = MediaPlaybackCompactPreviewLayout.preferredWidth(forCompactWidth: compactWidth)
