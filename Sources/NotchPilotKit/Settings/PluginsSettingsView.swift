@@ -398,6 +398,7 @@ struct DevinPluginSettingsView: View {
 
 struct CodexPluginSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var connectionStore = CodexDesktopConnectionStore.shared
 
     var body: some View {
         SettingsPage(title: "Codex") {
@@ -417,28 +418,29 @@ struct CodexPluginSettingsView: View {
                 )
             }
 
-            if let message = store.codexDesktopConnection.message, message.isEmpty == false {
+            if let message = connectionStore.connection.message, message.isEmpty == false {
                 SettingsInlineMessage(
                     text: message,
-                    color: store.codexDesktopConnection.status == .error ? .red : .secondary
+                    color: connectionStore.connection.status == .error ? .red : .secondary
                 )
             }
         }
         .onAppear {
             store.synchronizeInstallationState()
+            connectionStore.synchronizeInstallationState(isDetected: store.codexDetected)
         }
     }
 
     private var codexStatusText: CodexSettingsStatusText {
         CodexSettingsStatusText(
             detected: store.codexDetected,
-            connection: store.codexDesktopConnection,
+            connection: connectionStore.connection,
             language: store.interfaceLanguage
         )
     }
 
     private var codexStatusColor: Color {
-        store.codexDesktopConnection.status == .error ? .red : .secondary
+        connectionStore.connection.status == .error ? .red : .secondary
     }
 }
 

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class NowPlayingSessionMonitorRoutingTests: XCTestCase {
-    func testReadsSpotifyPlaybackTimeFromSpotifyPlayer() {
+    func testReadsSpotifyPlaybackTimeFromSpotifyPlayer() async {
         let spotifyPlayer = TestSpotifyPlaybackPlayer(playbackTime: 44.5)
         let playbackTimeProvider = RecordingPlaybackTimeProvider(playbackTime: 12)
         let monitor = NowPlayingSessionMonitor(
@@ -11,14 +11,14 @@ final class NowPlayingSessionMonitorRoutingTests: XCTestCase {
             spotifyPlayer: spotifyPlayer
         )
 
-        let playbackTime = monitor.currentPlaybackTime(for: .fromBundleIdentifier("com.spotify.client"))
+        let playbackTime = await monitor.currentPlaybackTime(for: .fromBundleIdentifier("com.spotify.client"))
 
         XCTAssertEqual(playbackTime, 44.5)
         XCTAssertEqual(spotifyPlayer.playbackTimeRequestCount, 1)
         XCTAssertEqual(playbackTimeProvider.sources, [])
     }
 
-    func testReadsNonSpotifyPlaybackTimeFromSystemProvider() {
+    func testReadsNonSpotifyPlaybackTimeFromSystemProvider() async {
         let spotifyPlayer = TestSpotifyPlaybackPlayer(playbackTime: 44.5)
         let playbackTimeProvider = RecordingPlaybackTimeProvider(playbackTime: 12)
         let monitor = NowPlayingSessionMonitor(
@@ -27,7 +27,7 @@ final class NowPlayingSessionMonitorRoutingTests: XCTestCase {
         )
         let source = MediaPlaybackSource.fromBundleIdentifier("com.apple.Music")
 
-        let playbackTime = monitor.currentPlaybackTime(for: source)
+        let playbackTime = await monitor.currentPlaybackTime(for: source)
 
         XCTAssertEqual(playbackTime, 12)
         XCTAssertEqual(spotifyPlayer.playbackTimeRequestCount, 0)
@@ -135,7 +135,7 @@ private final class TestSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
         return snapshots.isEmpty ? nil : snapshots.removeFirst()
     }
 
-    func currentPlaybackTime() -> TimeInterval? {
+    func currentPlaybackTime() async -> TimeInterval? {
         playbackTimeRequestCount += 1
         return playbackTime
     }
@@ -154,7 +154,7 @@ private final class RecordingPlaybackTimeProvider: PlaybackTimeProviding {
         self.playbackTime = playbackTime
     }
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
         sources.append(source)
         return playbackTime
     }

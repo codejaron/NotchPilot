@@ -30,7 +30,7 @@ public final class ScreenSessionModel: ObservableObject {
     @Published public private(set) var currentSneakPeek: SneakPeekRequest?
     @Published public var activePluginID: String? {
         didSet {
-            let resolvedID = AIPluginGroup.resolvedActivePluginID(activePluginID)
+            let resolvedID = activePluginIDResolver(activePluginID)
             if activePluginID != resolvedID {
                 activePluginID = resolvedID
             }
@@ -49,11 +49,17 @@ public final class ScreenSessionModel: ObservableObject {
     private var settingsCancellable: AnyCancellable?
     private var activitySneakPreviewsHidden: Bool
     private var openReason: OpenReason?
+    private let activePluginIDResolver: (String?) -> String?
 
-    public init(descriptor: ScreenDescriptor, settingsStore: SettingsStore = .shared) {
+    public init(
+        descriptor: ScreenDescriptor,
+        settingsStore: SettingsStore = .shared,
+        activePluginIDResolver: @escaping (String?) -> String? = { $0 }
+    ) {
         self.descriptor = descriptor
         self.settingsStore = settingsStore
         self.activitySneakPreviewsHidden = settingsStore.activitySneakPreviewsHidden
+        self.activePluginIDResolver = activePluginIDResolver
 
         settingsCancellable = settingsStore.$activitySneakPreviewsHidden
             .removeDuplicates()

@@ -47,12 +47,16 @@ final class NotchTabNavigatorTests: XCTestCase {
 
     func testLegacyAIPluginIDsResolveToVirtualAITab() {
         let tabIDs = ["media-playback", "ai", "system-monitor"]
+        let resolveTabID: (String?) -> String? = { rawID in
+            ["claude", "codex", "devin"].contains(rawID ?? "") ? "ai" : rawID
+        }
 
         XCTAssertEqual(
             NotchTabNavigator.destination(
                 from: "codex",
                 orderedTabIDs: tabIDs,
-                direction: .next
+                direction: .next,
+                resolveTabID: resolveTabID
             ),
             "system-monitor"
         )
@@ -60,7 +64,8 @@ final class NotchTabNavigatorTests: XCTestCase {
             NotchTabNavigator.destination(
                 from: "claude",
                 orderedTabIDs: tabIDs,
-                direction: .previous
+                direction: .previous,
+                resolveTabID: resolveTabID
             ),
             "media-playback"
         )
@@ -103,9 +108,25 @@ final class NotchTabNavigatorTests: XCTestCase {
                 NotchTabNavigator.Tab(id: "system-monitor", title: "System", dockOrder: 120),
                 NotchTabNavigator.Tab(id: "media-playback", title: "Media", dockOrder: 80),
             ],
-            aiTabDockOrder: 100
+            groupTabs: [
+                NotchTabNavigator.Tab(id: "ai", title: "AI", dockOrder: 100),
+            ]
         )
 
         XCTAssertEqual(tabIDs, ["media-playback", "ai", "system-monitor"])
+    }
+
+    func testOrderedTabIDsInsertDeclaredGroupsByDockOrder() {
+        let tabIDs = NotchTabNavigator.orderedTabIDs(
+            pluginTabs: [
+                NotchTabNavigator.Tab(id: "system-monitor", title: "System", dockOrder: 120),
+                NotchTabNavigator.Tab(id: "media-playback", title: "Media", dockOrder: 80),
+            ],
+            groupTabs: [
+                NotchTabNavigator.Tab(id: "tools", title: "Tools", dockOrder: 100),
+            ]
+        )
+
+        XCTAssertEqual(tabIDs, ["media-playback", "tools", "system-monitor"])
     }
 }

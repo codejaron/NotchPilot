@@ -48,15 +48,23 @@ public final class MultiScreenManager {
     }
 
     private func synchronizeScreens() {
-        let descriptors = NSScreen.screens.compactMap(screenDescriptor(for:))
+        let descriptors = NSScreen.screens.compactMap {
+            ScreenDescriptorFactory.descriptor(for: $0, includeClosedNotchSize: true)
+        }
         let nextIDs = Set(descriptors.map(\.id))
 
         for descriptor in descriptors {
             if let existing = sessions[descriptor.id] {
                 existing.updateScreen(descriptor)
             } else {
-                let session = ScreenSessionModel(descriptor: descriptor)
-                session.activePluginID = AIPluginGroup.resolvedActivePluginID(pluginManager.enabledPlugins.first?.id)
+                let session = ScreenSessionModel(
+                    descriptor: descriptor,
+                    activePluginIDResolver: pluginManager.resolvedTabID
+                )
+                session.activePluginID = pluginManager.defaultOpenPluginID(
+                    previewPluginID: nil,
+                    lastSelectedPluginID: nil
+                )
                 sessions[descriptor.id] = session
                 windows[descriptor.id] = NotchWindow(session: session, pluginManager: pluginManager)
             }
@@ -74,7 +82,7 @@ public final class MultiScreenManager {
         let context = ScreenResolutionContext(
             connectedScreens: sessions.values.map(\.descriptor),
             activeScreenID: activeScreenID(),
-            primaryScreenID: NSScreen.main.flatMap(screenID(for:))
+            primaryScreenID: NSScreen.main.flatMap(ScreenDescriptorFactory.screenID(for:))
         )
 
         switch event {
@@ -104,35 +112,8 @@ public final class MultiScreenManager {
     private func activeScreenID() -> String? {
         let location = NSEvent.mouseLocation
         for screen in NSScreen.screens where screen.frame.contains(location) {
-            return screenID(for: screen)
+            return ScreenDescriptorFactory.screenID(for: screen)
         }
         return nil
-    }
-
-    private func screenDescriptor(for screen: NSScreen) -> ScreenDescriptor? {
-        guard let id = screenID(for: screen) else {
-            return nil
-        }
-
-        return ScreenDescriptor(
-            id: id,
-            frame: screen.frame,
-            isPrimary: screen == NSScreen.main,
-            closedNotchSize: NotchSizing.closedCompactSize(
-                screenFrame: screen.frame,
-                auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
-                auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
-                safeAreaTopInset: screen.safeAreaInsets.top,
-                menuBarHeight: screen.frame.maxY - screen.visibleFrame.maxY
-            )
-        )
-    }
-
-    private func screenID(for screen: NSScreen) -> String? {
-        if let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
-            return String(screenNumber.uint32Value)
-        }
-
-        return screen.localizedName
     }
 }

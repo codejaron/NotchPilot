@@ -26,16 +26,29 @@ enum NotchWindowStyle {
 public final class NotchWindow: NSPanel {
     private unowned let session: ScreenSessionModel
     private let pluginManager: PluginManager
-    private var localMouseMonitor: Any?
-    private var globalMouseMonitor: Any?
+    private let mouseActivityMonitor: any MouseActivityMonitoring
+    private var mouseActivityToken: UUID?
     private var lastHoverState: Bool?
     private var pluginObserver: AnyCancellable?
     private var accumulatedTabScrollDelta = CGSize.zero
     private var tabScrollGestureLocked = false
 
-    public init(session: ScreenSessionModel, pluginManager: PluginManager) {
+    public convenience init(session: ScreenSessionModel, pluginManager: PluginManager) {
+        self.init(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: MouseActivityMonitor.shared
+        )
+    }
+
+    init(
+        session: ScreenSessionModel,
+        pluginManager: PluginManager,
+        mouseActivityMonitor: any MouseActivityMonitoring
+    ) {
         self.session = session
         self.pluginManager = pluginManager
+        self.mouseActivityMonitor = mouseActivityMonitor
         super.init(
             contentRect: session.windowFrame,
             styleMask: NotchWindowStyle.defaultStyleMask,
@@ -113,47 +126,34 @@ public final class NotchWindow: NSPanel {
     }
 
     private func installMouseMonitors() {
-        let eventMask: NSEvent.EventTypeMask = [
-            .mouseMoved,
-            .leftMouseDragged,
-            .rightMouseDragged,
-            .otherMouseDragged,
-            .scrollWheel,
-            .swipe
-        ]
-
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) { [weak self] event in
-            var shouldConsumeEvent = false
-            MainActor.assumeIsolated {
-                self?.updateMouseInteraction()
-                shouldConsumeEvent = self?.handleTabGesture(event) == true
-            }
-            if shouldConsumeEvent {
-                return nil
-            }
-            return event
+        guard mouseActivityToken == nil else {
+            return
         }
 
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateMouseInteraction()
+        mouseActivityToken = mouseActivityMonitor.addSubscriber { [weak self] activity in
+            guard let self else {
+                return .passThrough
             }
+
+            self.updateMouseInteraction()
+            guard activity.scope == .local,
+                  self.handleTabGesture(activity.event) else {
+                return .passThrough
+            }
+
+            return .consumeEvent
         }
     }
 
     private func removeMouseMonitors() {
-        if let localMouseMonitor {
-            NSEvent.removeMonitor(localMouseMonitor)
-            self.localMouseMonitor = nil
-        }
-        if let globalMouseMonitor {
-            NSEvent.removeMonitor(globalMouseMonitor)
-            self.globalMouseMonitor = nil
+        if let mouseActivityToken {
+            mouseActivityMonitor.removeSubscriber(mouseActivityToken)
+            self.mouseActivityToken = nil
         }
     }
 
     private func observePluginUpdates() {
-        pluginObserver = pluginManager.objectWillChange.sink { [weak self] _ in
+        pluginObserver = pluginManager.layoutInvalidated.sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
                 self?.refreshFrame(animated: true)
             }
@@ -252,7 +252,8 @@ public final class NotchWindow: NSPanel {
         guard let destination = NotchTabNavigator.destination(
             from: session.activePluginID,
             orderedTabIDs: NotchTabNavigator.orderedTabIDs(from: pluginManager.enabledPlugins),
-            direction: direction
+            direction: direction,
+            resolveTabID: pluginManager.resolvedTabID
         ) else {
             return false
         }

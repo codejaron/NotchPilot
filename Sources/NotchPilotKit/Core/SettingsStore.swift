@@ -1,6 +1,15 @@
 import Combine
 import Foundation
 
+public protocol CodexInstallationDetecting {
+    func isCodexInstalled() -> Bool
+}
+
+public protocol ClaudeHookInstallationInspecting {
+    func claudeHooksInstalled(bridgeScript: String?) -> Bool
+    func claudeHooksNeedUpdate(bridgeScript: String?) -> Bool
+}
+
 @MainActor
 public final class SettingsStore: ObservableObject {
     public static let shared = SettingsStore()
@@ -43,6 +52,8 @@ public final class SettingsStore: ObservableObject {
     private let fileManager: FileManager
     public let homeDirectoryURL: URL
     private let launchAtLoginController: LaunchAtLoginControlling
+    private let codexInstallationDetector: any CodexInstallationDetecting
+    private let claudeHookInspector: any ClaudeHookInstallationInspecting
     private var isSyncingLaunchAtLogin = false
 
     @Published public var claudeHookInstalled: Bool {
@@ -50,8 +61,6 @@ public final class SettingsStore: ObservableObject {
     }
 
     @Published public var claudeHooksNeedUpdate: Bool
-
-    @Published public var codexDesktopConnection: CodexDesktopConnectionState
 
     @Published public var interfaceLanguage: AppLanguage {
         didSet {
@@ -201,31 +210,34 @@ public final class SettingsStore: ObservableObject {
     }
 
     public var codexDetected: Bool {
-        CodexDesktopAppDetector(
-            fileManager: fileManager,
-            homeDirectoryURL: homeDirectoryURL
-        ).isInstalled()
+        codexInstallationDetector.isCodexInstalled()
     }
 
     public init(
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
         homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser,
-        launchAtLoginController: LaunchAtLoginControlling = SMAppServiceLaunchAtLoginController()
+        launchAtLoginController: LaunchAtLoginControlling = SMAppServiceLaunchAtLoginController(),
+        codexInstallationDetector: (any CodexInstallationDetecting)? = nil,
+        claudeHookInspector: (any ClaudeHookInstallationInspecting)? = nil
     ) {
-        let codexInstalled = CodexDesktopAppDetector(
-            fileManager: fileManager,
-            homeDirectoryURL: homeDirectoryURL
-        ).isInstalled()
-
         self.defaults = defaults
         self.fileManager = fileManager
         self.homeDirectoryURL = homeDirectoryURL
         self.launchAtLoginController = launchAtLoginController
+        self.codexInstallationDetector = codexInstallationDetector
+            ?? SettingsStoreDefaultDependencies.makeCodexInstallationDetector(
+                fileManager: fileManager,
+                homeDirectoryURL: homeDirectoryURL
+            )
+        self.claudeHookInspector = claudeHookInspector
+            ?? SettingsStoreDefaultDependencies.makeClaudeHookInspector(
+                fileManager: fileManager,
+                homeDirectoryURL: homeDirectoryURL
+            )
         self.launchAtLoginEnabled = launchAtLoginController.isEnabled()
         self.claudeHookInstalled = defaults.object(forKey: Key.claudeHookInstalled) as? Bool ?? false
         self.claudeHooksNeedUpdate = false
-        self.codexDesktopConnection = codexInstalled ? .disconnected : .notFound
         self.interfaceLanguage = AppLanguage(rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? "")
             ?? .zhHans
         self.autoStartSocket = defaults.object(forKey: Key.autoStartSocket) as? Bool ?? true
@@ -283,19 +295,9 @@ public final class SettingsStore: ObservableObject {
     }
 
     public func synchronizeInstallationState() {
-        let installer = HookInstaller(fileManager: fileManager, homeDirectoryURL: homeDirectoryURL)
         let bridgeScript = bridgeScriptPath.isEmpty ? nil : bridgeScriptPath
-        claudeHookInstalled = installer.claudeHooksInstalled(bridgeScript: bridgeScript)
-        claudeHooksNeedUpdate = installer.claudeHooksNeedUpdate(bridgeScript: bridgeScript)
-        if codexDetected == false {
-            codexDesktopConnection = .notFound
-        } else if codexDesktopConnection.status == .notFound {
-            codexDesktopConnection = .disconnected
-        }
-    }
-
-    public func updateCodexDesktopConnection(_ state: CodexDesktopConnectionState) {
-        codexDesktopConnection = state
+        claudeHookInstalled = claudeHookInspector.claudeHooksInstalled(bridgeScript: bridgeScript)
+        claudeHooksNeedUpdate = claudeHookInspector.claudeHooksNeedUpdate(bridgeScript: bridgeScript)
     }
 
     private static func systemMonitorSneakConfiguration(from defaults: UserDefaults) -> SystemMonitorSneakConfiguration {

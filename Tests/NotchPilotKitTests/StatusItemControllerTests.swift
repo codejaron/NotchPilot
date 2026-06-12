@@ -141,17 +141,21 @@ final class StatusItemControllerTests: XCTestCase {
         }
 
         return StatusItemController(
-            searchLyricsHandler: {},
-            ignoreCurrentTrackLyricsHandler: {},
-            revealCurrentLyricsInFinderHandler: {},
-            canSearchCurrentTrackLyrics: canSearchCurrentTrackLyrics,
-            canIgnoreCurrentTrackLyrics: canIgnoreCurrentTrackLyrics,
-            canRevealCurrentLyricsInFinder: canRevealCurrentLyricsInFinder,
-            canAdjustLyricsOffset: { false },
-            getLyricsOffset: { 0 },
-            setLyricsOffset: { _ in },
-            isActivitySneakPreviewsHidden: isActivitySneakPreviewsHidden,
-            toggleActivitySneakPreviewsHandler: toggleActivitySneakPreviewsHandler,
+            lyricsActions: StatusItemLyricsActions(
+                search: {},
+                ignoreCurrentTrack: {},
+                revealCurrentLyricsInFinder: {},
+                canSearchCurrentTrack: canSearchCurrentTrackLyrics,
+                canIgnoreCurrentTrack: canIgnoreCurrentTrackLyrics,
+                canRevealCurrentLyricsInFinder: canRevealCurrentLyricsInFinder,
+                canAdjustOffset: { false },
+                getOffset: { 0 },
+                setOffset: { _ in }
+            ),
+            activitySneakActions: StatusItemActivitySneakActions(
+                isHidden: isActivitySneakPreviewsHidden,
+                toggle: toggleActivitySneakPreviewsHandler
+            ),
             settingsStore: resolvedSettingsStore,
             settingsHandler: {},
             quitHandler: {}

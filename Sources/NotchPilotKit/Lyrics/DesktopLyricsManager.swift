@@ -11,49 +11,31 @@ protocol DesktopLyricsMouseMonitoring: AnyObject {
 
 @MainActor
 final class DesktopLyricsMouseMonitor: DesktopLyricsMouseMonitoring {
-    private var localMouseMonitor: Any?
-    private var globalMouseMonitor: Any?
+    private let mouseActivityMonitor: any MouseActivityMonitoring
+    private var mouseActivityToken: UUID?
     private var onMouseActivity: (@MainActor () -> Void)?
+
+    init(mouseActivityMonitor: any MouseActivityMonitoring = MouseActivityMonitor.shared) {
+        self.mouseActivityMonitor = mouseActivityMonitor
+    }
 
     func start(onMouseActivity: @escaping @MainActor () -> Void) {
         self.onMouseActivity = onMouseActivity
 
-        guard localMouseMonitor == nil, globalMouseMonitor == nil else {
+        guard mouseActivityToken == nil else {
             return
         }
 
-        let eventMask: NSEvent.EventTypeMask = [
-            .mouseMoved,
-            .leftMouseDragged,
-            .rightMouseDragged,
-            .otherMouseDragged,
-            .scrollWheel,
-            .swipe,
-        ]
-
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.onMouseActivity?()
-            }
-            return event
-        }
-
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.onMouseActivity?()
-            }
+        mouseActivityToken = mouseActivityMonitor.addSubscriber { [weak self] _ in
+            self?.onMouseActivity?()
+            return .passThrough
         }
     }
 
     func stop() {
-        if let localMouseMonitor {
-            NSEvent.removeMonitor(localMouseMonitor)
-            self.localMouseMonitor = nil
-        }
-
-        if let globalMouseMonitor {
-            NSEvent.removeMonitor(globalMouseMonitor)
-            self.globalMouseMonitor = nil
+        if let mouseActivityToken {
+            mouseActivityMonitor.removeSubscriber(mouseActivityToken)
+            self.mouseActivityToken = nil
         }
 
         onMouseActivity = nil
@@ -103,10 +85,7 @@ final class DesktopLyricsManager {
             settingsStore: settingsStore,
             provider: provider,
             cache: cache,
-            ignoredTrackStore: ignoredTrackStore,
-            playbackTimeProvider: { snapshot in
-                nowPlayingController.currentPlaybackTime(for: snapshot.source)
-            }
+            ignoredTrackStore: ignoredTrackStore
         )
         self.fileManager = fileManager
         self.lyricsSearchWindowController = lyricsSearchWindowController
@@ -240,7 +219,7 @@ final class DesktopLyricsManager {
         }
 
         for screen in NSScreen.screens {
-            guard let screenID = screenID(for: screen),
+            guard let screenID = ScreenDescriptorFactory.screenID(for: screen),
                   let window = windows[screenID] else {
                 continue
             }
@@ -293,24 +272,39 @@ final class DesktopLyricsManager {
     }
 
     private func screenDescriptor(for screen: NSScreen) -> ScreenDescriptor? {
-        guard let id = screenID(for: screen) else {
-            return nil
-        }
-
-        return ScreenDescriptor(
-            id: id,
-            frame: screen.frame,
-            isPrimary: screen == NSScreen.main,
-            closedNotchSize: nil
-        )
+        ScreenDescriptorFactory.descriptor(for: screen, includeClosedNotchSize: false)
     }
 
-    private func screenID(for screen: NSScreen) -> String? {
-        if let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
-            return String(screenNumber.uint32Value)
-        }
-
-        return screen.localizedName
+    var statusMenuActions: StatusItemLyricsActions {
+        StatusItemLyricsActions(
+            search: { [weak self] in
+                self?.showLyricsSearchWindow()
+            },
+            ignoreCurrentTrack: { [weak self] in
+                self?.ignoreCurrentTrackLyrics()
+            },
+            revealCurrentLyricsInFinder: { [weak self] in
+                self?.revealCurrentLyricsInFinder()
+            },
+            canSearchCurrentTrack: { [weak self] in
+                self?.canSearchCurrentTrackLyrics ?? false
+            },
+            canIgnoreCurrentTrack: { [weak self] in
+                self?.canIgnoreCurrentTrackLyrics ?? false
+            },
+            canRevealCurrentLyricsInFinder: { [weak self] in
+                self?.canRevealCurrentLyricsInFinder ?? false
+            },
+            canAdjustOffset: { [weak self] in
+                self?.canAdjustLyricsOffset ?? false
+            },
+            getOffset: { [weak self] in
+                self?.currentLyricsOffset ?? 0
+            },
+            setOffset: { [weak self] value in
+                self?.setLyricsOffset(value)
+            }
+        )
     }
 
     var canIgnoreCurrentTrackLyrics: Bool {

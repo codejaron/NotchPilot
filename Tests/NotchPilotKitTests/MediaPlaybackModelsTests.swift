@@ -116,7 +116,112 @@ final class MediaPlaybackModelsTests: XCTestCase {
         XCTAssertEqual(directSnapshot.estimatedCurrentTime(at: captureDate), 42, accuracy: 0.01)
     }
 
-    func testAppleScriptPlaybackTimeProviderReadsSpotifyPlayerPosition() {
+    func testPlaybackTimeResolverUsesProjectedAnchorWhenSameTrackReportsTransientZero() {
+        var resolver = MediaPlaybackTimeResolver()
+        let start = Date(timeIntervalSince1970: 100)
+        let first = Self.activeSnapshot(
+            title: "Track",
+            artist: "Artist",
+            currentTime: 42,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start
+        )
+        let zero = Self.activeSnapshot(
+            title: "Track",
+            artist: "Artist",
+            currentTime: 0,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start.addingTimeInterval(1)
+        )
+
+        _ = resolver.resolve(.active(first), receivedAt: start)
+        let resolved = resolver.resolve(.active(zero), receivedAt: start.addingTimeInterval(1))
+
+        guard case let .active(snapshot) = resolved else {
+            return XCTFail("Expected active snapshot")
+        }
+        XCTAssertEqual(snapshot.currentTime, 43, accuracy: 0.01)
+        XCTAssertEqual(snapshot.lastUpdated, start.addingTimeInterval(1))
+    }
+
+    func testPlaybackTimeResolverUsesProjectionDateAsSnapshotAnchor() {
+        var resolver = MediaPlaybackTimeResolver()
+        let start = Date(timeIntervalSince1970: 100)
+        let first = Self.activeSnapshot(
+            currentTime: 42,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start
+        )
+        let zero = Self.activeSnapshot(
+            currentTime: 0,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start.addingTimeInterval(1)
+        )
+        let receivedAt = start.addingTimeInterval(2)
+
+        _ = resolver.resolve(.active(first), receivedAt: start)
+        let resolved = resolver.resolve(.active(zero), receivedAt: receivedAt)
+
+        guard case let .active(snapshot) = resolved else {
+            return XCTFail("Expected active snapshot")
+        }
+        XCTAssertEqual(snapshot.currentTime, 44, accuracy: 0.01)
+        XCTAssertEqual(snapshot.lastUpdated, receivedAt)
+        XCTAssertEqual(snapshot.estimatedCurrentTime(at: receivedAt), 44, accuracy: 0.01)
+    }
+
+    func testPlaybackTimeResolverDoesNotReuseAnchorAfterValidityWindow() {
+        var resolver = MediaPlaybackTimeResolver(anchorValidity: 12)
+        let start = Date(timeIntervalSince1970: 100)
+        let first = Self.activeSnapshot(
+            currentTime: 42,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start
+        )
+        let staleZero = Self.activeSnapshot(
+            currentTime: 0,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start.addingTimeInterval(13)
+        )
+
+        _ = resolver.resolve(.active(first), receivedAt: start)
+        let resolved = resolver.resolve(.active(staleZero), receivedAt: start.addingTimeInterval(13))
+
+        XCTAssertEqual(resolved, .active(staleZero))
+    }
+
+    func testPlaybackTimeResolverDoesNotReuseAnchorForDifferentTrack() {
+        var resolver = MediaPlaybackTimeResolver()
+        let start = Date(timeIntervalSince1970: 100)
+        let first = Self.activeSnapshot(
+            title: "Track A",
+            currentTime: 42,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start
+        )
+        let other = Self.activeSnapshot(
+            title: "Track B",
+            currentTime: 0,
+            duration: 200,
+            isPlaying: true,
+            lastUpdated: start.addingTimeInterval(1)
+        )
+
+        _ = resolver.resolve(.active(first), receivedAt: start)
+        let resolved = resolver.resolve(.active(other), receivedAt: start.addingTimeInterval(1))
+
+        XCTAssertEqual(resolved, .active(other))
+    }
+
+    @MainActor
+    func testAppleScriptPlaybackTimeProviderReadsSpotifyPlayerPosition() async {
         var receivedScripts: [String] = []
         let provider = AppleScriptPlaybackTimeProvider(
             scriptRunner: { script in
@@ -128,7 +233,7 @@ final class MediaPlaybackModelsTests: XCTestCase {
             }
         )
 
-        let playbackTime = provider.currentPlaybackTime(
+        let playbackTime = await provider.currentPlaybackTime(
             for: .fromBundleIdentifier("com.spotify.client")
         )
 
@@ -139,7 +244,30 @@ final class MediaPlaybackModelsTests: XCTestCase {
         XCTAssertTrue(receivedScripts[0].contains("player position"))
     }
 
-    func testAppleScriptPlaybackTimeProviderDoesNotRunScriptWhenPlayerIsNotRunning() {
+    @MainActor
+    func testAppleScriptPlaybackTimeProviderCachesRecentSuccessfulRead() async {
+        var receivedScripts: [String] = []
+        let provider = AppleScriptPlaybackTimeProvider(
+            scriptRunner: { script in
+                receivedScripts.append(script)
+                return 42.5
+            },
+            isApplicationRunning: { _ in true },
+            cacheDuration: 1,
+            now: { Date(timeIntervalSince1970: 100) }
+        )
+        let source = MediaPlaybackSource.fromBundleIdentifier("com.spotify.client")
+
+        let first = await provider.currentPlaybackTime(for: source)
+        let second = await provider.currentPlaybackTime(for: source)
+
+        XCTAssertEqual(first, 42.5)
+        XCTAssertEqual(second, 42.5)
+        XCTAssertEqual(receivedScripts.count, 1)
+    }
+
+    @MainActor
+    func testAppleScriptPlaybackTimeProviderDoesNotRunScriptWhenPlayerIsNotRunning() async {
         var didRunScript = false
         let provider = AppleScriptPlaybackTimeProvider(
             scriptRunner: { _ in
@@ -149,26 +277,49 @@ final class MediaPlaybackModelsTests: XCTestCase {
             isApplicationRunning: { _ in false }
         )
 
-        XCTAssertNil(
-            provider.currentPlaybackTime(
-                for: .fromBundleIdentifier("com.spotify.client")
-            )
+        let playbackTime = await provider.currentPlaybackTime(
+            for: .fromBundleIdentifier("com.spotify.client")
         )
+        XCTAssertNil(playbackTime)
         XCTAssertFalse(didRunScript)
     }
 
-    func testAppleScriptPlaybackTimeProviderIgnoresUnsupportedPlayers() {
+    @MainActor
+    func testAppleScriptPlaybackTimeProviderIgnoresUnsupportedPlayers() async {
         var didRunScript = false
         let provider = AppleScriptPlaybackTimeProvider { _ in
             didRunScript = true
             return 12
         }
 
-        XCTAssertNil(
-            provider.currentPlaybackTime(
-                for: .fromBundleIdentifier("com.tencent.qqmusic")
-            )
+        let playbackTime = await provider.currentPlaybackTime(
+            for: .fromBundleIdentifier("com.tencent.qqmusic")
         )
+        XCTAssertNil(playbackTime)
         XCTAssertFalse(didRunScript)
+    }
+
+    private static func activeSnapshot(
+        source: MediaPlaybackSource = .fromBundleIdentifier("com.spotify.client"),
+        title: String = "Track",
+        artist: String = "Artist",
+        album: String = "Album",
+        currentTime: TimeInterval,
+        duration: TimeInterval?,
+        isPlaying: Bool,
+        lastUpdated: Date
+    ) -> MediaPlaybackSnapshot {
+        MediaPlaybackSnapshot(
+            source: source,
+            title: title,
+            artist: artist,
+            album: album,
+            artworkData: nil,
+            currentTime: currentTime,
+            duration: duration,
+            playbackRate: isPlaying ? 1 : 0,
+            isPlaying: isPlaying,
+            lastUpdated: lastUpdated
+        )
     }
 }

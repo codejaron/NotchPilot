@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import NotchPilotKit
 
@@ -11,6 +12,20 @@ final class SharedNowPlayingControllerTests: XCTestCase {
         monitor.push(.active(Self.snapshot(isPlaying: true)))
 
         XCTAssertEqual(controller.currentState, .active(Self.snapshot(isPlaying: true)))
+    }
+
+    @MainActor
+    func testMultipleControllerSubscribersReceiveMonitorStateChanges() {
+        let monitor = TestSharedNowPlayingMonitor()
+        let first = SharedNowPlayingController(monitor: monitor)
+        let second = SharedNowPlayingController(monitor: monitor)
+
+        first.start()
+        second.start()
+        monitor.push(.active(Self.snapshot(isPlaying: true)))
+
+        XCTAssertEqual(first.currentState, .active(Self.snapshot(isPlaying: true)))
+        XCTAssertEqual(second.currentState, .active(Self.snapshot(isPlaying: true)))
     }
 
     @MainActor
@@ -72,7 +87,10 @@ final class SharedNowPlayingControllerTests: XCTestCase {
 @MainActor
 private final class TestSharedNowPlayingMonitor: NowPlayingSessionMonitoring {
     var currentState: MediaPlaybackState = .idle
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    private let subject = PassthroughSubject<MediaPlaybackState, Never>()
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
+        subject.eraseToAnyPublisher()
+    }
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var playCount = 0
@@ -114,12 +132,12 @@ private final class TestSharedNowPlayingMonitor: NowPlayingSessionMonitoring {
         seekTimes.append(time)
     }
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
         nil
     }
 
     func push(_ state: MediaPlaybackState) {
         currentState = state
-        onStateChange?(state)
+        subject.send(state)
     }
 }

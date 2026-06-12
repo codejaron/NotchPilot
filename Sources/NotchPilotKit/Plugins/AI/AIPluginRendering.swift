@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-protocol AIPluginRendering: NotchPlugin {
+protocol AIPluginRendering: NotchPlugin, NotchPluginTabGroupRendering {
     var sessions: [AISession] { get }
     var pendingApprovals: [PendingApproval] { get }
     var codexActionableSurface: CodexActionableSurface? { get }
@@ -32,6 +32,7 @@ protocol AIPluginRendering: NotchPlugin {
 }
 
 extension AIPluginRendering {
+    var tabGroup: NotchPluginTabGroup? { AIPluginGroup.tabGroup }
     var usageQuotaSnapshot: AIUsageQuotaSnapshot? { nil }
 
     public func preview(context: NotchContext) -> NotchPluginPreview? {
@@ -67,6 +68,20 @@ extension AIPluginRendering {
         // implementation only exists to satisfy the `NotchPlugin` requirement
         // and is never exercised at runtime.
         AnyView(EmptyView())
+    }
+
+    func tabGroupContentView(members: [any NotchPlugin], context: NotchContext) -> AnyView {
+        AnyView(AIPluginMergedExpandedView(plugins: members.compactMap { $0 as? any AIPluginRendering }))
+    }
+
+    func tabGroupHeaderAccessory(members: [any NotchPlugin]) -> AnyView? {
+        AnyView(
+            AIUsageQuotaHeaderView(
+                snapshots: members
+                    .compactMap { $0 as? any AIPluginRendering }
+                    .compactMap(\.usageQuotaSnapshot)
+            )
+        )
     }
 
     var shouldRenderCompactPreview: Bool {

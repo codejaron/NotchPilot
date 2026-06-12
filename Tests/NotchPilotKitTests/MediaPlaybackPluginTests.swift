@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import XCTest
 @testable import NotchPilotKit
@@ -97,6 +98,23 @@ final class MediaPlaybackPluginTests: XCTestCase {
         XCTAssertNotNil(plugin.preview(context: Self.previewContext))
 
         bus.unsubscribe(token)
+    }
+
+    @MainActor
+    func testPluginAndExternalSubscriberBothReceiveMonitorUpdates() {
+        let store = makeSettingsStore()
+        let monitor = TestNowPlayingSessionMonitor()
+        let plugin = MediaPlaybackPlugin(monitor: monitor, settingsStore: store)
+        let bus = EventBus()
+        var externalStates: [MediaPlaybackState] = []
+        let cancellable = monitor.statePublisher.sink { externalStates.append($0) }
+
+        plugin.activate(bus: bus)
+        monitor.push(Self.activeState(isPlaying: true))
+
+        XCTAssertNotNil(plugin.preview(context: Self.previewContext))
+        XCTAssertEqual(externalStates, [Self.activeState(isPlaying: true)])
+        cancellable.cancel()
     }
 
     @MainActor
@@ -337,7 +355,10 @@ final class MediaPlaybackPluginTests: XCTestCase {
 @MainActor
 private final class TestNowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     var currentState: MediaPlaybackState
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    private let subject = PassthroughSubject<MediaPlaybackState, Never>()
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
+        subject.eraseToAnyPublisher()
+    }
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var playCount = 0
@@ -383,13 +404,13 @@ private final class TestNowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         seekTimes.append(time)
     }
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
         nil
     }
 
     func push(_ state: MediaPlaybackState) {
         currentState = state
-        onStateChange?(state)
+        subject.send(state)
     }
 }
 

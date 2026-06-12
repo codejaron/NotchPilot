@@ -7,13 +7,14 @@ protocol SpotifyPlaybackSnapshotProviding {
 }
 
 protocol SpotifyPlaybackPlayerOperating: SpotifyPlaybackSnapshotProviding, MediaPlaybackCommandPerforming {
-    func currentPlaybackTime() -> TimeInterval?
+    @MainActor
+    func currentPlaybackTime() async -> TimeInterval?
 }
 
 final class AppleScriptSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
     typealias SnapshotScriptRunner = (String) -> String?
     typealias CommandScriptRunner = (String) -> Bool
-    typealias PlaybackTimeScriptRunner = (String) -> TimeInterval?
+    typealias PlaybackTimeScriptRunner = (String) async -> TimeInterval?
     typealias ArtworkDataLoader = (URL) async -> Data?
     typealias RunningCheck = () -> Bool
 
@@ -22,19 +23,26 @@ final class AppleScriptSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
     private let playbackTimeScriptRunner: PlaybackTimeScriptRunner
     private let artworkDataLoader: ArtworkDataLoader
     private let isSpotifyRunning: RunningCheck
+    private let playbackTimeCache = PlaybackTimeCache()
+    private let playbackTimeCacheDuration: TimeInterval
+    private let now: () -> Date
 
     init(
         snapshotScriptRunner: @escaping SnapshotScriptRunner = AppleScriptSpotifyPlaybackPlayer.runSnapshotAppleScript,
         commandScriptRunner: @escaping CommandScriptRunner = AppleScriptSpotifyPlaybackPlayer.runCommandAppleScript,
         playbackTimeScriptRunner: @escaping PlaybackTimeScriptRunner = AppleScriptSpotifyPlaybackPlayer.runPlaybackTimeAppleScript,
         artworkDataLoader: @escaping ArtworkDataLoader = AppleScriptSpotifyPlaybackPlayer.loadArtworkData,
-        isSpotifyRunning: @escaping RunningCheck = AppleScriptSpotifyPlaybackPlayer.isSpotifyRunning
+        isSpotifyRunning: @escaping RunningCheck = AppleScriptSpotifyPlaybackPlayer.isSpotifyRunning,
+        playbackTimeCacheDuration: TimeInterval = 0.75,
+        now: @escaping () -> Date = Date.init
     ) {
         self.snapshotScriptRunner = snapshotScriptRunner
         self.commandScriptRunner = commandScriptRunner
         self.playbackTimeScriptRunner = playbackTimeScriptRunner
         self.artworkDataLoader = artworkDataLoader
         self.isSpotifyRunning = isSpotifyRunning
+        self.playbackTimeCacheDuration = playbackTimeCacheDuration
+        self.now = now
     }
 
     func currentSpotifyPlaybackSnapshot(at date: Date = Date()) async -> MediaPlaybackSnapshot? {
@@ -53,13 +61,27 @@ final class AppleScriptSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
         )
     }
 
-    func currentPlaybackTime() -> TimeInterval? {
-        guard isSpotifyRunning(),
-              let playbackTime = playbackTimeScriptRunner(Self.playbackTimeScript),
+    @MainActor
+    func currentPlaybackTime() async -> TimeInterval? {
+        guard isSpotifyRunning() else {
+            return nil
+        }
+
+        let date = now()
+        if let cachedValue = await playbackTimeCache.value(
+            for: "com.spotify.client",
+            now: date,
+            duration: playbackTimeCacheDuration
+        ) {
+            return cachedValue
+        }
+
+        guard let playbackTime = await playbackTimeScriptRunner(Self.playbackTimeScript),
               playbackTime >= 0 else {
             return nil
         }
 
+        await playbackTimeCache.store(playbackTime, for: "com.spotify.client", at: date)
         return playbackTime
     }
 
@@ -155,18 +177,20 @@ final class AppleScriptSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
         return error == nil
     }
 
-    private static func runPlaybackTimeAppleScript(_ source: String) -> TimeInterval? {
-        guard let script = NSAppleScript(source: source) else {
-            return nil
-        }
+    private static func runPlaybackTimeAppleScript(_ source: String) async -> TimeInterval? {
+        await Task.detached(priority: .utility) {
+            guard let script = NSAppleScript(source: source) else {
+                return nil
+            }
 
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else {
-            return nil
-        }
+            var error: NSDictionary?
+            let result = script.executeAndReturnError(&error)
+            guard error == nil else {
+                return nil
+            }
 
-        return result.doubleValue
+            return result.doubleValue
+        }.value
     }
 }
 

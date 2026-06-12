@@ -14,25 +14,19 @@ enum NotchTabNavigator {
     }
 
     static func orderedTabIDs(from plugins: [any NotchPlugin]) -> [String] {
-        let aiPlugins = AIPluginGroup.aiPlugins(from: plugins)
-        return orderedTabIDs(
-            pluginTabs: AIPluginGroup.nonAIPlugins(from: plugins).map {
-                Tab(id: $0.id, title: $0.title, dockOrder: $0.dockOrder)
-            },
-            aiTabDockOrder: aiPlugins.isEmpty ? nil : AIPluginGroup.dockOrder(of: aiPlugins)
-        )
+        NotchPluginTabCollection(plugins: plugins).orderedTabIDs
     }
 
     static func orderedTabIDs(
         pluginTabs: [Tab],
-        aiTabDockOrder: Int?
+        groupTabs: [Tab]
     ) -> [String] {
         var tabs = pluginTabs.map { tab in
             (order: tab.dockOrder, title: tab.title, id: tab.id)
         }
 
-        if let aiTabDockOrder {
-            tabs.append((order: aiTabDockOrder, title: "AI", id: AIPluginGroup.virtualTabID))
+        for groupTab in groupTabs {
+            tabs.append((order: groupTab.dockOrder, title: groupTab.title, id: groupTab.id))
         }
 
         return tabs
@@ -48,13 +42,14 @@ enum NotchTabNavigator {
     static func destination(
         from currentID: String?,
         orderedTabIDs: [String],
-        direction: Direction
+        direction: Direction,
+        resolveTabID: (String?) -> String? = { $0 }
     ) -> String? {
         guard orderedTabIDs.count > 1 else {
             return nil
         }
 
-        let resolvedCurrentID = AIPluginGroup.resolvedActivePluginID(currentID)
+        let resolvedCurrentID = resolveTabID(currentID)
         guard
             let resolvedCurrentID,
             let currentIndex = orderedTabIDs.firstIndex(of: resolvedCurrentID)

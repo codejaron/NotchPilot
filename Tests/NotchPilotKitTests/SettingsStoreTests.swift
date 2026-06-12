@@ -58,10 +58,21 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertTrue(store.claudeHookInstalled)
         XCTAssertTrue(store.claudeHooksNeedUpdate)
-        XCTAssertEqual(
-            store.codexDesktopConnection.status,
-            store.codexDetected ? .disconnected : .notFound
-        )
+    }
+
+    @MainActor
+    func testCodexDesktopConnectionStoreTracksInstallationStateOutsideSettingsStore() {
+        let store = CodexDesktopConnectionStore(initialConnection: .notFound)
+
+        store.synchronizeInstallationState(isDetected: true)
+        XCTAssertEqual(store.connection, .disconnected)
+
+        store.update(.connected)
+        store.synchronizeInstallationState(isDetected: true)
+        XCTAssertEqual(store.connection, .connected)
+
+        store.synchronizeInstallationState(isDetected: false)
+        XCTAssertEqual(store.connection, .notFound)
     }
 
     @MainActor
@@ -80,6 +91,37 @@ final class SettingsStoreTests: XCTestCase {
         )
 
         XCTAssertTrue(store.codexDetected)
+    }
+
+    @MainActor
+    func testCodexDetectedUsesInjectedInstallationDetector() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            codexInstallationDetector: TestCodexInstallationDetector(isInstalled: false)
+        )
+
+        XCTAssertFalse(store.codexDetected)
+    }
+
+    @MainActor
+    func testSynchronizeInstallationStateUsesInjectedHookInspector() {
+        let hookInspector = TestClaudeHookInspector(isInstalled: true, needsUpdate: false)
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL,
+            claudeHookInspector: hookInspector
+        )
+
+        store.bridgeScriptPath = "/tmp/custom-bridge.py"
+        store.synchronizeInstallationState()
+
+        XCTAssertTrue(store.claudeHookInstalled)
+        XCTAssertFalse(store.claudeHooksNeedUpdate)
+        XCTAssertEqual(hookInspector.installedBridgeScripts, ["/tmp/custom-bridge.py"])
+        XCTAssertEqual(hookInspector.needUpdateBridgeScripts, ["/tmp/custom-bridge.py"])
     }
 
     @MainActor
@@ -429,5 +471,35 @@ private final class FakeLaunchAtLoginController: LaunchAtLoginControlling {
             throw errorToThrow
         }
         enabled = value
+    }
+}
+
+private struct TestCodexInstallationDetector: CodexInstallationDetecting {
+    let isInstalled: Bool
+
+    func isCodexInstalled() -> Bool {
+        isInstalled
+    }
+}
+
+private final class TestClaudeHookInspector: ClaudeHookInstallationInspecting {
+    private let isInstalled: Bool
+    private let needsUpdate: Bool
+    private(set) var installedBridgeScripts: [String?] = []
+    private(set) var needUpdateBridgeScripts: [String?] = []
+
+    init(isInstalled: Bool, needsUpdate: Bool) {
+        self.isInstalled = isInstalled
+        self.needsUpdate = needsUpdate
+    }
+
+    func claudeHooksInstalled(bridgeScript: String?) -> Bool {
+        installedBridgeScripts.append(bridgeScript)
+        return isInstalled
+    }
+
+    func claudeHooksNeedUpdate(bridgeScript: String?) -> Bool {
+        needUpdateBridgeScripts.append(bridgeScript)
+        return needsUpdate
     }
 }

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import XCTest
 @testable import NotchPilotKit
@@ -19,8 +20,14 @@ final class PluginManagerTests: XCTestCase {
 
     func testDefaultOpenPluginMapsLegacyAIIDsToVirtualAIID() {
         let manager = PluginManager()
-        manager.register(PluginManagerTestPlugin(id: "claude", title: "Claude", dockOrder: 100))
-        manager.register(PluginManagerTestPlugin(id: "codex", title: "Codex", dockOrder: 110))
+        let aiGroup = NotchPluginTabGroup(
+            id: "ai",
+            title: "AI",
+            iconSystemName: "sparkles",
+            memberPluginIDs: ["claude", "codex", "devin"]
+        )
+        manager.register(PluginManagerTestPlugin(id: "claude", title: "Claude", dockOrder: 100, tabGroup: aiGroup))
+        manager.register(PluginManagerTestPlugin(id: "codex", title: "Codex", dockOrder: 110, tabGroup: aiGroup))
 
         XCTAssertEqual(
             manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: nil),
@@ -33,6 +40,31 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertEqual(
             manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: "claude"),
             "ai"
+        )
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: "devin"),
+            "ai"
+        )
+    }
+
+    func testDefaultOpenPluginUsesDeclaredPluginGroup() {
+        let manager = PluginManager()
+        let toolsGroup = NotchPluginTabGroup(id: "tools", title: "Tools", iconSystemName: "wrench")
+        manager.register(PluginManagerTestPlugin(id: "alpha-tool", title: "Alpha", dockOrder: 100, tabGroup: toolsGroup))
+        manager.register(PluginManagerTestPlugin(id: "beta-tool", title: "Beta", dockOrder: 110, tabGroup: toolsGroup))
+        manager.register(PluginManagerTestPlugin(id: "system-monitor", title: "System", dockOrder: 120))
+
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: nil),
+            "tools"
+        )
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: "beta-tool", lastSelectedPluginID: nil),
+            "tools"
+        )
+        XCTAssertEqual(
+            manager.defaultOpenPluginID(previewPluginID: nil, lastSelectedPluginID: "alpha-tool"),
+            "tools"
         )
     }
 
@@ -72,6 +104,36 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertEqual(plugin.activateCount, 2)
         XCTAssertEqual(manager.enabledPlugins.map(\.id), ["runtime"])
     }
+
+    func testRuntimePluginChangesDoNotInvalidateLayout() async {
+        let manager = PluginManager()
+        let plugin = PluginManagerTestPlugin(id: "runtime", title: "Runtime", dockOrder: 1)
+        var invalidationCount = 0
+        let cancellable = manager.layoutInvalidated.sink { invalidationCount += 1 }
+
+        manager.register(plugin)
+        invalidationCount = 0
+        plugin.emitRuntimeChange()
+        await Task.yield()
+
+        XCTAssertEqual(invalidationCount, 0)
+        cancellable.cancel()
+    }
+
+    func testPluginAvailabilityChangesInvalidateLayout() async {
+        let manager = PluginManager()
+        let plugin = PluginManagerTestPlugin(id: "runtime", title: "Runtime", dockOrder: 1)
+        var invalidationCount = 0
+        let cancellable = manager.layoutInvalidated.sink { invalidationCount += 1 }
+
+        manager.register(plugin)
+        invalidationCount = 0
+        plugin.isEnabled = false
+        await Task.yield()
+
+        XCTAssertEqual(invalidationCount, 1)
+        cancellable.cancel()
+    }
 }
 
 @MainActor
@@ -80,17 +142,25 @@ private final class PluginManagerTestPlugin: NotchPlugin {
     let title: String
     let iconSystemName = "circle"
     let dockOrder: Int
+    let tabGroup: NotchPluginTabGroup?
     let accentColor: Color = .blue
     @Published var isEnabled: Bool
     let previewPriority: Int? = nil
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
 
-    init(id: String, title: String, dockOrder: Int, isEnabled: Bool = true) {
+    init(
+        id: String,
+        title: String,
+        dockOrder: Int,
+        isEnabled: Bool = true,
+        tabGroup: NotchPluginTabGroup? = nil
+    ) {
         self.id = id
         self.title = title
         self.dockOrder = dockOrder
         self.isEnabled = isEnabled
+        self.tabGroup = tabGroup
     }
 
     func preview(context: NotchContext) -> NotchPluginPreview? {
@@ -107,5 +177,9 @@ private final class PluginManagerTestPlugin: NotchPlugin {
 
     func deactivate() {
         deactivateCount += 1
+    }
+
+    func emitRuntimeChange() {
+        objectWillChange.send()
     }
 }

@@ -128,7 +128,8 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
         XCTAssertFalse(didRunScript)
     }
 
-    func testSpotifyPlayerReadsPlaybackTimeThroughSpotifyScript() {
+    @MainActor
+    func testSpotifyPlayerReadsPlaybackTimeThroughSpotifyScript() async {
         var scripts: [String] = []
         let player = AppleScriptSpotifyPlaybackPlayer(
             snapshotScriptRunner: { _ in nil },
@@ -140,7 +141,31 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
             isSpotifyRunning: { true }
         )
 
-        XCTAssertEqual(player.currentPlaybackTime(), 23.75)
+        let playbackTime = await player.currentPlaybackTime()
+        XCTAssertEqual(playbackTime, 23.75)
+        XCTAssertEqual(scripts, ["tell application \"Spotify\" to return player position"])
+    }
+
+    @MainActor
+    func testSpotifyPlayerCachesRecentPlaybackTimeRead() async {
+        var scripts: [String] = []
+        let player = AppleScriptSpotifyPlaybackPlayer(
+            snapshotScriptRunner: { _ in nil },
+            commandScriptRunner: { _ in false },
+            playbackTimeScriptRunner: {
+                scripts.append($0)
+                return 23.75
+            },
+            isSpotifyRunning: { true },
+            playbackTimeCacheDuration: 1,
+            now: { Date(timeIntervalSince1970: 100) }
+        )
+
+        let first = await player.currentPlaybackTime()
+        let second = await player.currentPlaybackTime()
+
+        XCTAssertEqual(first, 23.75)
+        XCTAssertEqual(second, 23.75)
         XCTAssertEqual(scripts, ["tell application \"Spotify\" to return player position"])
     }
 

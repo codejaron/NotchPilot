@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import NotchPilotKit
 
@@ -184,7 +185,10 @@ final class DesktopLyricsManagerTests: XCTestCase {
 @MainActor
 private final class TestDesktopLyricsNowPlayingMonitor: NowPlayingSessionMonitoring {
     var currentState: MediaPlaybackState = .idle
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    private let subject = PassthroughSubject<MediaPlaybackState, Never>()
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
+        subject.eraseToAnyPublisher()
+    }
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
@@ -208,7 +212,7 @@ private final class TestDesktopLyricsNowPlayingMonitor: NowPlayingSessionMonitor
 
     func seek(to time: Double) {}
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
         nil
     }
 }

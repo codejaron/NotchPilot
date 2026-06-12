@@ -1,4 +1,5 @@
 import Darwin
+import Combine
 import Foundation
 
 private enum MediaRemoteAdapterCommand: Int {
@@ -235,7 +236,7 @@ struct MediaStreamProcessReaper: Sendable {
 @MainActor
 protocol NowPlayingSessionMonitoring: AnyObject {
     var currentState: MediaPlaybackState { get }
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)? { get set }
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> { get }
 
     func start()
     func stop()
@@ -245,13 +246,16 @@ protocol NowPlayingSessionMonitoring: AnyObject {
     func nextTrack()
     func previousTrack()
     func seek(to time: Double)
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval?
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval?
 }
 
 @MainActor
 final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     private(set) var currentState: MediaPlaybackState = .idle
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    private let stateSubject = PassthroughSubject<MediaPlaybackState, Never>()
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
+        stateSubject.eraseToAnyPublisher()
+    }
 
     private let commandController: (any MediaRemoteCommandControlling)? = SystemMediaRemoteCommandController()
     private let playbackTimeProvider: any PlaybackTimeProviding
@@ -264,6 +268,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     private var spotifyTrackGate = SpotifyPlaybackTrackGate()
     private var spotifyNotificationObserver: NSObjectProtocol?
     private var isMonitoring = false
+    private var playbackTimeResolver = MediaPlaybackTimeResolver()
     private lazy var systemPlayer = SystemMediaPlaybackPlayer(
         commandController: commandController,
         resourceProvider: { [weak self] in
@@ -272,6 +277,13 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         processLauncher: { [weak self] executableURL, arguments in
             self?.launchDetachedProcess(executableURL: executableURL, arguments: arguments)
         }
+    )
+    private lazy var commandRouter = MediaPlaybackPlayerCommandRouter(
+        commandPerformers: [
+            .spotify: spotifyPlayer,
+            .system: systemPlayer,
+        ],
+        fallbackPlayer: .system
     )
 
     init(
@@ -338,6 +350,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         self.streamProcess = nil
         spotifyTrackGate.reset()
         playbackStateSelector.reset()
+        playbackTimeResolver.reset()
     }
 
     func play() {
@@ -382,17 +395,18 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         )
     }
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
         if Self.isSpotifySource(source) {
-            return spotifyPlayer.currentPlaybackTime()
+            return await spotifyPlayer.currentPlaybackTime()
         }
 
-        return playbackTimeProvider.currentPlaybackTime(for: source)
+        return await playbackTimeProvider.currentPlaybackTime(for: source)
     }
 
     func updateState(_ state: MediaPlaybackState) {
-        currentState = state
-        onStateChange?(state)
+        let resolvedState = playbackTimeResolver.resolve(state)
+        currentState = resolvedState
+        stateSubject.send(resolvedState)
     }
 
     private func consumeStream(with pipeHandler: JSONLinesPipeHandler) async {
@@ -493,15 +507,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         _ command: MediaPlaybackCommand,
         refreshDelays: [TimeInterval]
     ) {
-        let router = MediaPlaybackPlayerCommandRouter(
-            commandPerformers: [
-                .spotify: spotifyPlayer,
-                .system: systemPlayer,
-            ],
-            fallbackPlayer: .system
-        )
-
-        guard let player = router.perform(command, selectedPlayer: playbackStateSelector.currentPlayer) else {
+        guard let player = commandRouter.perform(command, selectedPlayer: playbackStateSelector.currentPlayer) else {
             return
         }
 
@@ -642,13 +648,24 @@ private struct AdapterPayload: Decodable, Sendable {
             artworkData: artworkData.flatMap {
                 Data(base64Encoded: $0.trimmingCharacters(in: .whitespacesAndNewlines))
             },
-            timestamp: timestamp.flatMap(ISO8601DateFormatter().date(from:)),
+            timestamp: timestamp.flatMap(AdapterTimestampParser.date(from:)),
             playbackRate: playbackRate,
             isPlaying: playing,
             parentApplicationBundleIdentifier: parentApplicationBundleIdentifier,
             bundleIdentifier: bundleIdentifier,
             volume: volume
         ).normalizedState
+    }
+}
+
+private enum AdapterTimestampParser {
+    nonisolated(unsafe) private static let formatter = ISO8601DateFormatter()
+    private static let lock = NSLock()
+
+    static func date(from timestamp: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return formatter.date(from: timestamp)
     }
 }
 

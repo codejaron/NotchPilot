@@ -6,9 +6,15 @@ public final class PluginManager: ObservableObject {
     @Published private var plugins: [any NotchPlugin] = []
     private weak var bus: EventBus?
     private var pluginCancellables: [String: AnyCancellable] = [:]
+    private var pluginEnabledStates: [String: Bool] = [:]
     private var activePluginIDs: Set<String> = []
+    private let layoutInvalidationSubject = PassthroughSubject<Void, Never>()
 
     public init() {}
+
+    public var layoutInvalidated: AnyPublisher<Void, Never> {
+        layoutInvalidationSubject.eraseToAnyPublisher()
+    }
 
     public var enabledPlugins: [any NotchPlugin] {
         plugins
@@ -23,9 +29,11 @@ public final class PluginManager: ObservableObject {
 
     public func register(_ plugin: any NotchPlugin) {
         plugins.append(plugin)
+        pluginEnabledStates[plugin.id] = plugin.isEnabled
         observe(plugin)
         syncActivation(for: plugin)
         objectWillChange.send()
+        layoutInvalidationSubject.send()
     }
 
     public func activateAll(using bus: EventBus) {
@@ -34,6 +42,7 @@ public final class PluginManager: ObservableObject {
             syncActivation(for: plugin)
         }
         objectWillChange.send()
+        layoutInvalidationSubject.send()
     }
 
     public func deactivateAll() {
@@ -44,10 +53,15 @@ public final class PluginManager: ObservableObject {
         activePluginIDs.removeAll()
         bus = nil
         objectWillChange.send()
+        layoutInvalidationSubject.send()
     }
 
     public func plugin(id: String) -> (any NotchPlugin)? {
         enabledPlugins.first(where: { $0.id == id })
+    }
+
+    public func resolvedTabID(_ rawID: String?) -> String? {
+        NotchPluginTabCollection(plugins: enabledPlugins).resolvedTabID(rawID)
     }
 
     public func previewPlugin(
@@ -82,37 +96,31 @@ public final class PluginManager: ObservableObject {
         previewPluginID: String?,
         lastSelectedPluginID: String?
     ) -> String? {
-        let enabledPlugins = enabledPlugins
+        let tabs = NotchPluginTabCollection(plugins: enabledPlugins)
 
         if let previewPluginID,
-           let resolvedID = resolvedDefaultOpenPluginID(previewPluginID, enabledPlugins: enabledPlugins) {
+           let resolvedID = tabs.resolvedAvailableTabID(previewPluginID) {
             return resolvedID
         }
 
         if let lastSelectedPluginID,
-           let resolvedID = resolvedDefaultOpenPluginID(lastSelectedPluginID, enabledPlugins: enabledPlugins) {
+           let resolvedID = tabs.resolvedAvailableTabID(lastSelectedPluginID) {
             return resolvedID
         }
 
-        return enabledPlugins.first.map { AIPluginGroup.resolvedActivePluginID($0.id) ?? $0.id }
-    }
-
-    private func resolvedDefaultOpenPluginID(
-        _ pluginID: String,
-        enabledPlugins: [any NotchPlugin]
-    ) -> String? {
-        let resolvedID = AIPluginGroup.resolvedActivePluginID(pluginID) ?? pluginID
-        if resolvedID == AIPluginGroup.virtualTabID {
-            return AIPluginGroup.aiPlugins(from: enabledPlugins).isEmpty ? nil : resolvedID
-        }
-        return enabledPlugins.contains(where: { $0.id == resolvedID }) ? resolvedID : nil
+        return tabs.defaultTabID
     }
 
     private func observe(_ plugin: any NotchPlugin) {
         pluginCancellables[plugin.id] = plugin.objectWillChange.sink { [weak self, plugin] (_: Void) in
             Task { @MainActor [weak self, plugin] in
+                let wasEnabled = self?.pluginEnabledStates[plugin.id]
                 self?.syncActivation(for: plugin)
+                self?.pluginEnabledStates[plugin.id] = plugin.isEnabled
                 self?.objectWillChange.send()
+                if wasEnabled != plugin.isEnabled {
+                    self?.layoutInvalidationSubject.send()
+                }
             }
         }
     }

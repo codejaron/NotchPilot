@@ -24,6 +24,7 @@ public final class MediaPlaybackPlugin: NotchPlugin {
     private var sneakPeekRequestID: UUID?
     private var presentedAutoDismissAfter: TimeInterval?
     private var settingsCancellables: Set<AnyCancellable> = []
+    private var monitorCancellable: AnyCancellable?
     private var isActivated = false
     private var isMonitoringRequested = false
 
@@ -129,13 +130,13 @@ public final class MediaPlaybackPlugin: NotchPlugin {
 
         isMonitoringRequested = shouldMonitor
         if shouldMonitor {
-            monitor.onStateChange = { [weak self] state in
+            monitorCancellable = monitor.statePublisher.sink { [weak self] state in
                 self?.handleMonitorStateChange(state)
             }
             monitor.start()
             handleMonitorStateChange(monitor.currentState)
         } else {
-            monitor.onStateChange = nil
+            monitorCancellable = nil
             monitor.stop()
             playbackState = .idle
         }

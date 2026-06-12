@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 @MainActor
-public final class ClaudePlugin: AIPluginRendering {
+public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     private enum SneakPeekKey {
         static let activity = "claude-activity"
     }
@@ -14,6 +14,7 @@ public final class ClaudePlugin: AIPluginRendering {
     public let accentColor: Color = NotchPilotTheme.claude
     public let dockOrder = 100
     public let previewPriority: Int? = 100
+    public let tabGroup: NotchPluginTabGroup? = AIPluginGroup.tabGroup
 
     private static let claudeSessionActivityExpiry: TimeInterval = 24 * 60 * 60
 
@@ -225,6 +226,10 @@ public final class ClaudePlugin: AIPluginRendering {
             lastErrorMessage = "Failed to parse \(frame.host.rawValue) bridge event."
             respond(Data("{}".utf8))
         }
+    }
+
+    func canHandleBridgeFrame(host: AIHost) -> Bool {
+        host.isClaudeFamily
     }
 
     private func handleStatusLineFrameIfPresent(_ frame: BridgeFrame) -> Bool {

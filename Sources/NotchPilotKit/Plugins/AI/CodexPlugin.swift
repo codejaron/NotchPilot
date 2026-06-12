@@ -14,6 +14,7 @@ public final class CodexPlugin: AIPluginRendering {
     public let accentColor: Color = NotchPilotTheme.codex
     public let dockOrder = 110
     public let previewPriority: Int? = 90
+    public let tabGroup: NotchPluginTabGroup? = AIPluginGroup.tabGroup
 
     @Published public var isEnabled = true
     @Published public private(set) var sessions: [AISession] = []
@@ -26,6 +27,7 @@ public final class CodexPlugin: AIPluginRendering {
 
     private let settingsStore: SettingsStore
     private let codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring
+    private let connectionStore: CodexDesktopConnectionStore
     private let quotaReader: any CodexUsageQuotaReading
     private let quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling
     private let soundPlayer: any SoundPlaying
@@ -52,12 +54,14 @@ public final class CodexPlugin: AIPluginRendering {
     public convenience init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
+        connectionStore: CodexDesktopConnectionStore = .shared,
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.init(
             settingsStore: settingsStore,
             codexMonitor: codexMonitor,
+            connectionStore: connectionStore,
             quotaReader: CodexAccountUsageQuotaReader(),
             quotaRefreshScheduler: CodexUsageQuotaRefreshScheduler(),
             soundPlayer: SoundManager.shared,
@@ -69,6 +73,7 @@ public final class CodexPlugin: AIPluginRendering {
     init(
         settingsStore: SettingsStore = .shared,
         codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring = CodexDesktopMonitor(),
+        connectionStore: CodexDesktopConnectionStore = .shared,
         quotaReader: any CodexUsageQuotaReading = CodexAccountUsageQuotaReader(),
         quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = CodexUsageQuotaRefreshScheduler(),
         soundPlayer: any SoundPlaying = SoundManager.shared,
@@ -77,6 +82,7 @@ public final class CodexPlugin: AIPluginRendering {
     ) {
         self.settingsStore = settingsStore
         self.codexMonitor = codexMonitor
+        self.connectionStore = connectionStore
         self.quotaReader = quotaReader
         self.quotaRefreshScheduler = quotaRefreshScheduler
         self.soundPlayer = soundPlayer
@@ -443,7 +449,7 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func handleCodexConnectionStateChange(_ state: CodexDesktopConnectionState) {
-        settingsStore.updateCodexDesktopConnection(state)
+        connectionStore.update(state)
     }
 
     private func handleCodexSurfaceChange(_ surface: CodexActionableSurface?) {

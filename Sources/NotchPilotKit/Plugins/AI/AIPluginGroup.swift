@@ -1,17 +1,24 @@
 import Foundation
 
-/// Helpers for treating multiple AI plugins (Claude, Codex, Devin) as a single group
-/// in the notch shell. Used by `NotchContentView` to render one virtual "AI" tab
-/// for all AI plugins, and to map legacy per-host plugin IDs to the unified tab ID.
+/// AI-owned metadata for treating Claude, Codex, and Devin-facing surfaces as one
+/// tab group. Core and Shell consume the generic `NotchPluginTabGroup` exposed by
+/// each AI plugin instead of reaching into this helper directly.
 @MainActor
 enum AIPluginGroup {
+    static let tabGroup = NotchPluginTabGroup(
+        id: "ai",
+        title: "AI",
+        iconSystemName: "sparkles",
+        memberPluginIDs: ["claude", "codex", "devin"]
+    )
+
     /// Synthetic plugin ID used for the merged AI tab (replaces "claude" / "codex" / "devin"
     /// at the shell layer).
-    static let virtualTabID = "ai"
+    static let virtualTabID = tabGroup.id
 
     /// Plugin IDs that belong to the AI group. When any of these appears in
     /// persisted state (e.g. `activePluginID`), it should be mapped to `virtualTabID`.
-    static let memberPluginIDs: Set<String> = ["claude", "codex", "devin"]
+    static let memberPluginIDs = tabGroup.memberPluginIDs
 
     /// Picks AI plugins out of a mixed plugin list.
     static func aiPlugins(from plugins: [any NotchPlugin]) -> [any AIPluginRendering] {

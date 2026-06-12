@@ -12,7 +12,6 @@ final class DesktopLyricsController: ObservableObject {
     private let cache: LyricsCaching
     private let ignoredTrackStore: LyricsTrackIgnoring
     private let offsetStore: LyricsOffsetStoring
-    private let playbackTimeProvider: (MediaPlaybackSnapshot) -> TimeInterval?
 
     private var currentPlaybackState: MediaPlaybackState = .idle
     private(set) var currentTrackKey: LyricsTrackKey?
@@ -21,7 +20,6 @@ final class DesktopLyricsController: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var pendingPresentationRefreshTask: Task<Void, Never>?
     private var activeLyricsPreview: LyricsPreview?
-    private var playbackTimeAnchor: PlaybackTimeAnchor?
     private var settingsCancellables: Set<AnyCancellable> = []
 
     private struct LyricsPreview {
@@ -29,46 +27,18 @@ final class DesktopLyricsController: ObservableObject {
         var originalLyrics: TimedLyrics?
     }
 
-    private struct PlaybackTimeAnchor {
-        let trackKey: LyricsTrackKey
-        let source: MediaPlaybackSource
-        let time: TimeInterval
-        let date: Date
-        let playbackRate: Double
-        let duration: TimeInterval?
-
-        func matches(trackKey: LyricsTrackKey, source: MediaPlaybackSource, at date: Date) -> Bool {
-            let elapsed = date.timeIntervalSince(self.date)
-            return self.trackKey == trackKey &&
-                self.source == source &&
-                elapsed >= 0 &&
-                elapsed <= 12
-        }
-
-        func projectedTime(at date: Date) -> TimeInterval {
-            let elapsed = max(0, date.timeIntervalSince(self.date))
-            let projected = time + (elapsed * max(0, playbackRate))
-            guard let duration else {
-                return max(0, projected)
-            }
-            return min(max(0, projected), max(0, duration))
-        }
-    }
-
     init(
         settingsStore: SettingsStore = .shared,
         provider: LyricsProviding,
         cache: LyricsCaching,
         ignoredTrackStore: LyricsTrackIgnoring,
-        offsetStore: LyricsOffsetStoring = LyricsOffsetStore(),
-        playbackTimeProvider: @escaping (MediaPlaybackSnapshot) -> TimeInterval? = { _ in nil }
+        offsetStore: LyricsOffsetStoring = LyricsOffsetStore()
     ) {
         self.settingsStore = settingsStore
         self.provider = provider
         self.cache = cache
         self.ignoredTrackStore = ignoredTrackStore
         self.offsetStore = offsetStore
-        self.playbackTimeProvider = playbackTimeProvider
 
         settingsStore.$desktopLyricsEnabled
             .combineLatest(settingsStore.$mediaPlaybackEnabled)
@@ -99,11 +69,8 @@ final class DesktopLyricsController: ObservableObject {
             return
         }
 
-        let trackKey = LyricsTrackKey(snapshot: snapshot)
-        let resolvedSnapshot = resolvePlaybackSnapshot(snapshot, trackKey: trackKey, at: date)
-
         let nextPresentation = DesktopLyricsPresentationResolver.resolve(
-            playbackState: .active(resolvedSnapshot),
+            playbackState: .active(snapshot),
             lyrics: currentLyrics,
             offsetMilliseconds: currentOffsetMilliseconds,
             at: date
@@ -111,49 +78,11 @@ final class DesktopLyricsController: ObservableObject {
         assignPresentation(nextPresentation)
         schedulePendingPresentationRefresh(
             for: nextPresentation,
-            snapshot: resolvedSnapshot,
+            snapshot: snapshot,
             lyrics: currentLyrics,
             offsetMilliseconds: currentOffsetMilliseconds,
             at: date
         )
-    }
-
-    private func resolvePlaybackSnapshot(
-        _ snapshot: MediaPlaybackSnapshot,
-        trackKey: LyricsTrackKey,
-        at date: Date
-    ) -> MediaPlaybackSnapshot {
-        let projectedTime = playbackTimeAnchor
-            .flatMap { anchor -> TimeInterval? in
-                guard anchor.matches(trackKey: trackKey, source: snapshot.source, at: date) else {
-                    return nil
-                }
-                return anchor.projectedTime(at: date)
-            }
-
-        if let directPlaybackTime = playbackTimeProvider(snapshot) {
-            if let projectedTime,
-               directPlaybackTime <= 0.25,
-               projectedTime > 2 {
-                return snapshot.replacingCurrentTime(projectedTime, at: date)
-            }
-
-            playbackTimeAnchor = PlaybackTimeAnchor(
-                trackKey: trackKey,
-                source: snapshot.source,
-                time: directPlaybackTime,
-                date: date,
-                playbackRate: snapshot.playbackRate,
-                duration: snapshot.duration
-            )
-            return snapshot.replacingCurrentTime(directPlaybackTime, at: date)
-        }
-
-        if let projectedTime {
-            return snapshot.replacingCurrentTime(projectedTime, at: date)
-        }
-
-        return snapshot
     }
 
     private func assignPresentation(_ next: DesktopLyricsPresentation) {
@@ -355,7 +284,6 @@ final class DesktopLyricsController: ObservableObject {
             activeLyricsPreview = nil
             currentTrackKey = trackKey
             currentLyrics = nil
-            playbackTimeAnchor = nil
             currentOffsetMilliseconds = offsetStore.offset(for: trackKey)
             cancelPendingPresentationRefresh()
             assignPresentation(.hidden)
@@ -407,7 +335,6 @@ final class DesktopLyricsController: ObservableObject {
             currentLyrics = nil
             currentTrackKey = nil
         }
-        playbackTimeAnchor = nil
         assignPresentation(.hidden)
     }
 }

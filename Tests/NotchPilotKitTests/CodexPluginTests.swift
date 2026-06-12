@@ -50,6 +50,25 @@ final class CodexPluginTests: XCTestCase {
         XCTAssertTrue(reenabled)
     }
 
+    func testConnectionStateUpdatesRuntimeConnectionStore() async {
+        let bus = await MainActor.run { EventBus() }
+        let codexMonitor = SplitFakeCodexContextMonitor()
+        let connectionStore = await MainActor.run {
+            CodexDesktopConnectionStore(initialConnection: .notFound)
+        }
+        let plugin = await MainActor.run {
+            makeCodexPlugin(codexMonitor: codexMonitor, connectionStore: connectionStore)
+        }
+
+        await MainActor.run {
+            plugin.activate(bus: bus)
+            codexMonitor.emit(connection: .connected)
+        }
+
+        let connection = await MainActor.run { connectionStore.connection }
+        XCTAssertEqual(connection, .connected)
+    }
+
     func testActionableSurfaceDrivesCompactActivityAndSessionSummary() async throws {
         let bus = await MainActor.run { EventBus() }
         let codexMonitor = SplitFakeCodexContextMonitor()
@@ -1373,6 +1392,7 @@ private func makeSettingsStore(
 private func makeCodexPlugin(
     settingsStore: SettingsStore = .shared,
     codexMonitor: any CodexDesktopContextMonitoring & CodexDesktopActionableSurfaceMonitoring,
+    connectionStore: CodexDesktopConnectionStore = .shared,
     quotaReader: any CodexUsageQuotaReading = SplitFakeCodexQuotaReader(snapshots: [nil]),
     quotaRefreshScheduler: any CodexUsageQuotaRefreshScheduling = SplitFakeCodexQuotaRefreshScheduler(),
     soundPlayer: any SoundPlaying = SplitFakeSoundPlayer(),
@@ -1382,6 +1402,7 @@ private func makeCodexPlugin(
     CodexPlugin(
         settingsStore: settingsStore,
         codexMonitor: codexMonitor,
+        connectionStore: connectionStore,
         quotaReader: quotaReader,
         quotaRefreshScheduler: quotaRefreshScheduler,
         soundPlayer: soundPlayer,

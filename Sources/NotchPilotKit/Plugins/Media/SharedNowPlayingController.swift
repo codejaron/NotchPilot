@@ -5,9 +5,12 @@ import Foundation
 final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonitoring {
     @Published private(set) var currentState: MediaPlaybackState
 
-    var onStateChange: (@MainActor (MediaPlaybackState) -> Void)?
+    var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
+        $currentState.eraseToAnyPublisher()
+    }
 
     private let monitor: any NowPlayingSessionMonitoring
+    private var monitorCancellable: AnyCancellable?
     private var isStarted = false
     private var startRequestCount = 0
 
@@ -23,7 +26,7 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
             return
         }
         isStarted = true
-        monitor.onStateChange = { [weak self] state in
+        monitorCancellable = monitor.statePublisher.sink { [weak self] state in
             self?.handleMonitorStateChange(state)
         }
         monitor.start()
@@ -39,7 +42,7 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
             return
         }
         isStarted = false
-        monitor.onStateChange = nil
+        monitorCancellable = nil
         monitor.stop()
     }
 
@@ -67,13 +70,11 @@ final class SharedNowPlayingController: ObservableObject, NowPlayingSessionMonit
         monitor.seek(to: time)
     }
 
-    func currentPlaybackTime(for source: MediaPlaybackSource) -> TimeInterval? {
-        monitor.currentPlaybackTime(for: source)
+    func currentPlaybackTime(for source: MediaPlaybackSource) async -> TimeInterval? {
+        await monitor.currentPlaybackTime(for: source)
     }
 
     private func handleMonitorStateChange(_ state: MediaPlaybackState) {
         currentState = state
-        onStateChange?(state)
-        objectWillChange.send()
     }
 }

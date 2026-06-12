@@ -352,11 +352,10 @@ final class ScreenSessionModelTests: XCTestCase {
                 id: "primary",
                 frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
                 isPrimary: true
-            )
+            ),
+            activePluginIDResolver: Self.legacyAITabResolver
         )
 
-        // AI plugin IDs (claude/codex/devin) are now mapped to the unified
-        // "ai" virtual tab ID via AIPluginGroup.resolvedActivePluginID.
         session.open(pluginID: "codex")
         session.close()
 
@@ -376,7 +375,8 @@ final class ScreenSessionModelTests: XCTestCase {
                 id: "primary",
                 frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
                 isPrimary: true
-            )
+            ),
+            activePluginIDResolver: Self.legacyAITabResolver
         )
 
         session.activePluginID = "claude"
@@ -387,6 +387,23 @@ final class ScreenSessionModelTests: XCTestCase {
 
         session.activePluginID = "devin"
         XCTAssertEqual(session.activePluginID, "ai")
+    }
+
+    func testDirectActivePluginAssignmentUsesInjectedTabIDResolver() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            ),
+            activePluginIDResolver: { rawID in
+                rawID == "alpha-tool" ? "tools" : rawID
+            }
+        )
+
+        session.activePluginID = "alpha-tool"
+
+        XCTAssertEqual(session.activePluginID, "tools")
     }
 
     func testDirectActivePluginAssignmentLeavesNonAIIDsUnchanged() {
@@ -401,6 +418,10 @@ final class ScreenSessionModelTests: XCTestCase {
         session.activePluginID = "system-monitor"
 
         XCTAssertEqual(session.activePluginID, "system-monitor")
+    }
+
+    private static func legacyAITabResolver(_ rawID: String?) -> String? {
+        ["claude", "codex", "devin"].contains(rawID ?? "") ? "ai" : rawID
     }
 
     private func makeSettingsStore(activitySneakPreviewsHidden: Bool) -> SettingsStore {

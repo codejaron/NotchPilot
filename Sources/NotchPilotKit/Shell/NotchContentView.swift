@@ -102,12 +102,10 @@ public struct NotchContentView: View {
 
     @ViewBuilder
     private func previewClosedBody(previewPlugin: any NotchPlugin, context: NotchContext) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            if let preview = previewPlugin.preview(context: context) {
-                previewBody(preview)
-            } else {
-                idleBody
-            }
+        if let preview = previewPlugin.preview(context: context) {
+            previewBody(preview)
+        } else {
+            idleBody
         }
     }
 
@@ -162,29 +160,22 @@ public struct NotchContentView: View {
     }
 
     private func expandedBody(plugins: [any NotchPlugin], context: NotchContext) -> some View {
-        let aiPlugins = AIPluginGroup.aiPlugins(from: plugins)
-        let nonAIPlugins = AIPluginGroup.nonAIPlugins(from: plugins)
-        let resolvedActiveID = AIPluginGroup.resolvedActivePluginID(session.activePluginID)
-        let activePlugin = activePlugin(
-            nonAIPlugins: nonAIPlugins,
-            aiPluginsExist: !aiPlugins.isEmpty,
-            resolvedActiveID: resolvedActiveID
-        )
-        let aiTabActive = resolvedActiveID == AIPluginGroup.virtualTabID
+        let tabs = NotchPluginTabCollection(plugins: plugins)
+        let resolvedActiveID = tabs.resolvedTabID(session.activePluginID)
+        let activeSelection = activeSelection(in: tabs, resolvedActiveID: resolvedActiveID)
 
         return VStack(alignment: .leading, spacing: 12) {
             headerRow(
-                nonAIPlugins: nonAIPlugins,
-                aiPlugins: aiPlugins,
-                activePluginID: activePlugin?.id,
-                aiTabActive: aiTabActive
+                tabs: tabs,
+                activeTabID: activeSelection.id
             )
 
-            if aiTabActive, !aiPlugins.isEmpty {
-                aiMergedViewport(aiPlugins: aiPlugins, context: context)
-            } else if let activePlugin {
+            switch activeSelection {
+            case .group(let group):
+                groupContentViewport(group, context: context)
+            case .plugin(let activePlugin):
                 pluginContentViewport(activePlugin, context: context)
-            } else {
+            case .none:
                 NotchPilotHUDPanel(cornerRadius: 28) {
                     Text(AppStrings.text(.noPluginsEnabled, language: store.interfaceLanguage))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -217,11 +208,11 @@ public struct NotchContentView: View {
             .clipped()
     }
 
-    private func aiMergedViewport(
-        aiPlugins: [any AIPluginRendering],
+    private func groupContentViewport(
+        _ group: NotchPluginTabCollection.Group,
         context: NotchContext
     ) -> some View {
-        AIPluginMergedExpandedView(plugins: aiPlugins)
+        (group.contentView(context: context) ?? AnyView(EmptyView()))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .clipped()
             .padding(.horizontal, expandedSafeHorizontalPadding)
@@ -235,31 +226,32 @@ public struct NotchContentView: View {
     }
 
     private func headerRow(
-        nonAIPlugins: [any NotchPlugin],
-        aiPlugins: [any AIPluginRendering],
-        activePluginID: String?,
-        aiTabActive: Bool
+        tabs: NotchPluginTabCollection,
+        activeTabID: String?
     ) -> some View {
-        let aiDockOrder = AIPluginGroup.dockOrder(of: aiPlugins)
         return HStack(spacing: 8) {
             HStack(spacing: 6) {
-                ForEach(headerTabs(nonAIPlugins: nonAIPlugins, aiPlugins: aiPlugins, aiDockOrder: aiDockOrder), id: \.id) { tab in
+                ForEach(headerTabs(tabs: tabs), id: \.id) { tab in
                     switch tab {
                     case .plugin(let plugin):
                         pluginTabButton(
                             plugin: plugin,
-                            isActive: activePluginID == plugin.id
+                            isActive: activeTabID == plugin.id
                         )
-                    case .ai:
-                        aiTabButton(isActive: aiTabActive)
+                    case .group(let group):
+                        groupTabButton(
+                            group: group,
+                            isActive: activeTabID == group.id
+                        )
                     }
                 }
             }
 
             Spacer(minLength: 0)
 
-            if aiTabActive {
-                AIUsageQuotaHeaderView(snapshots: aiPlugins.compactMap(\.usageQuotaSnapshot))
+            if let activeTabID,
+               let accessory = tabs.group(id: activeTabID)?.headerAccessory() {
+                accessory
                     .layoutPriority(1)
             }
 
@@ -272,38 +264,63 @@ public struct NotchContentView: View {
     @MainActor
     private enum HeaderTab {
         case plugin(any NotchPlugin)
-        case ai
+        case group(NotchPluginTabCollection.Group)
 
         var id: String {
             switch self {
             case .plugin(let p): return p.id
-            case .ai: return AIPluginGroup.virtualTabID
+            case .group(let group): return group.id
             }
         }
     }
 
-    private func headerTabs(
-        nonAIPlugins: [any NotchPlugin],
-        aiPlugins: [any AIPluginRendering],
-        aiDockOrder: Int
-    ) -> [HeaderTab] {
-        var tabs: [(order: Int, tab: HeaderTab)] = nonAIPlugins.map { ($0.dockOrder, .plugin($0)) }
-        if !aiPlugins.isEmpty {
-            tabs.append((aiDockOrder, .ai))
+    @MainActor
+    private enum ActiveTabSelection {
+        case plugin(any NotchPlugin)
+        case group(NotchPluginTabCollection.Group)
+        case none
+
+        var id: String? {
+            switch self {
+            case .plugin(let plugin):
+                return plugin.id
+            case .group(let group):
+                return group.id
+            case .none:
+                return nil
+            }
         }
-        return tabs
-            .sorted { $0.order < $1.order }
+    }
+
+    private func headerTabs(tabs: NotchPluginTabCollection) -> [HeaderTab] {
+        let pluginTabs: [(order: Int, title: String, tab: HeaderTab)] = tabs.pluginTabs.map {
+            ($0.dockOrder, $0.title, .plugin($0))
+        }
+        let groupTabs: [(order: Int, title: String, tab: HeaderTab)] = tabs.groupTabs.map {
+            ($0.dockOrder, $0.title, .group($0))
+        }
+
+        return (pluginTabs + groupTabs)
+            .sorted { lhs, rhs in
+                if lhs.order == rhs.order {
+                    return lhs.title < rhs.title
+                }
+                return lhs.order < rhs.order
+            }
             .map(\.tab)
     }
 
-    private func aiTabButton(isActive: Bool) -> some View {
+    private func groupTabButton(
+        group: NotchPluginTabCollection.Group,
+        isActive: Bool
+    ) -> some View {
         Button {
-            session.activePluginID = AIPluginGroup.virtualTabID
+            session.activePluginID = group.id
         } label: {
             ZStack {
-                Image(systemName: "sparkles")
+                Image(systemName: group.iconSystemName)
                     .font(.system(size: NotchExpandedLayout.pluginTabIconSize - 2, weight: .bold))
-                    .foregroundStyle(isActive ? NotchPilotTheme.islandTextPrimary : NotchPilotTheme.claude)
+                    .foregroundStyle(isActive ? NotchPilotTheme.islandTextPrimary : group.accentColor)
             }
             .frame(
                 width: NotchExpandedLayout.pluginTabSize.width,
@@ -316,8 +333,8 @@ public struct NotchContentView: View {
                             ? AnyShapeStyle(
                                 LinearGradient(
                                     colors: [
-                                        NotchPilotTheme.claude.opacity(0.2),
-                                        NotchPilotTheme.claude.opacity(0.08),
+                                        group.accentColor.opacity(0.2),
+                                        group.accentColor.opacity(0.08),
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
@@ -329,13 +346,13 @@ public struct NotchContentView: View {
             .overlay {
                 Capsule(style: .continuous)
                     .strokeBorder(
-                        isActive ? NotchPilotTheme.claude.opacity(0.18) : Color.clear,
+                        isActive ? group.accentColor.opacity(0.18) : Color.clear,
                         lineWidth: 1
                     )
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("AI")
+        .accessibilityLabel(group.title)
     }
 
     private func pluginTabButton(
@@ -365,7 +382,7 @@ public struct NotchContentView: View {
                             ? AnyShapeStyle(
                                 LinearGradient(
                                     colors: [
-                                        plugin.accentColor.opacity(plugin.id == "claude" ? 0.2 : 0.24),
+                                        plugin.accentColor.opacity(0.24),
                                         plugin.accentColor.opacity(0.08),
                                     ],
                                     startPoint: .top,
@@ -422,31 +439,30 @@ public struct NotchContentView: View {
         .accessibilityLabel(AppStrings.text(.openSettings, language: store.interfaceLanguage))
     }
 
-    private func activePlugin(
-        nonAIPlugins: [any NotchPlugin],
-        aiPluginsExist: Bool,
+    private func activeSelection(
+        in tabs: NotchPluginTabCollection,
         resolvedActiveID: String?
-    ) -> (any NotchPlugin)? {
-        // AI virtual tab is handled separately by `aiMergedViewport`; from this method's
-        // perspective, the AI tab has no concrete plugin instance.
-        if resolvedActiveID == AIPluginGroup.virtualTabID {
-            return nil
+    ) -> ActiveTabSelection {
+        if let activeID = resolvedActiveID {
+            if let group = tabs.group(id: activeID) {
+                return .group(group)
+            }
+            if let plugin = tabs.plugin(id: activeID) {
+                return .plugin(plugin)
+            }
         }
 
-        if let activeID = resolvedActiveID,
-           let plugin = nonAIPlugins.first(where: { $0.id == activeID }) {
-            return plugin
+        guard let fallbackID = tabs.defaultTabID else {
+            return .none
         }
 
-        // Fallback: pick the first non-AI plugin, or the AI virtual tab if there are no
-        // non-AI plugins available.
-        if let first = nonAIPlugins.first {
-            session.activePluginID = first.id
-            return first
+        session.activePluginID = fallbackID
+        if let group = tabs.group(id: fallbackID) {
+            return .group(group)
         }
-        if aiPluginsExist {
-            session.activePluginID = AIPluginGroup.virtualTabID
+        if let plugin = tabs.plugin(id: fallbackID) {
+            return .plugin(plugin)
         }
-        return nil
+        return .none
     }
 }

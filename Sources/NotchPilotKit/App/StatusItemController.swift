@@ -2,23 +2,58 @@ import AppKit
 import Combine
 import KeyboardShortcuts
 
+public struct StatusItemLyricsActions {
+    let search: () -> Void
+    let ignoreCurrentTrack: () -> Void
+    let revealCurrentLyricsInFinder: () -> Void
+    let canSearchCurrentTrack: () -> Bool
+    let canIgnoreCurrentTrack: () -> Bool
+    let canRevealCurrentLyricsInFinder: () -> Bool
+    let canAdjustOffset: () -> Bool
+    let getOffset: () -> Int
+    let setOffset: (Int) -> Void
+
+    public init(
+        search: @escaping () -> Void,
+        ignoreCurrentTrack: @escaping () -> Void,
+        revealCurrentLyricsInFinder: @escaping () -> Void,
+        canSearchCurrentTrack: @escaping () -> Bool,
+        canIgnoreCurrentTrack: @escaping () -> Bool,
+        canRevealCurrentLyricsInFinder: @escaping () -> Bool,
+        canAdjustOffset: @escaping () -> Bool,
+        getOffset: @escaping () -> Int,
+        setOffset: @escaping (Int) -> Void
+    ) {
+        self.search = search
+        self.ignoreCurrentTrack = ignoreCurrentTrack
+        self.revealCurrentLyricsInFinder = revealCurrentLyricsInFinder
+        self.canSearchCurrentTrack = canSearchCurrentTrack
+        self.canIgnoreCurrentTrack = canIgnoreCurrentTrack
+        self.canRevealCurrentLyricsInFinder = canRevealCurrentLyricsInFinder
+        self.canAdjustOffset = canAdjustOffset
+        self.getOffset = getOffset
+        self.setOffset = setOffset
+    }
+}
+
+public struct StatusItemActivitySneakActions {
+    let isHidden: () -> Bool
+    let toggle: () -> Void
+
+    public init(isHidden: @escaping () -> Bool, toggle: @escaping () -> Void) {
+        self.isHidden = isHidden
+        self.toggle = toggle
+    }
+}
+
 @MainActor
 public final class StatusItemController: NSObject, NSMenuItemValidation {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
-    private let searchLyricsHandler: () -> Void
-    private let ignoreCurrentTrackLyricsHandler: () -> Void
-    private let revealCurrentLyricsInFinderHandler: () -> Void
+    private let lyricsActions: StatusItemLyricsActions
+    private let activitySneakActions: StatusItemActivitySneakActions
     private let settingsHandler: () -> Void
     private let quitHandler: () -> Void
-    private let canSearchCurrentTrackLyrics: () -> Bool
-    private let canIgnoreCurrentTrackLyrics: () -> Bool
-    private let canRevealCurrentLyricsInFinder: () -> Bool
-    private let canAdjustLyricsOffset: () -> Bool
-    private let getLyricsOffset: () -> Int
-    private let setLyricsOffset: (Int) -> Void
-    private let isActivitySneakPreviewsHidden: () -> Bool
-    private let toggleActivitySneakPreviewsHandler: () -> Void
     private let settingsStore: SettingsStore
     private let menu: NSMenu
     private var searchLyricsItem: NSMenuItem!
@@ -32,32 +67,14 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     private var settingsCancellables: Set<AnyCancellable> = []
 
     public init(
-        searchLyricsHandler: @escaping () -> Void,
-        ignoreCurrentTrackLyricsHandler: @escaping () -> Void,
-        revealCurrentLyricsInFinderHandler: @escaping () -> Void,
-        canSearchCurrentTrackLyrics: @escaping () -> Bool,
-        canIgnoreCurrentTrackLyrics: @escaping () -> Bool,
-        canRevealCurrentLyricsInFinder: @escaping () -> Bool,
-        canAdjustLyricsOffset: @escaping () -> Bool,
-        getLyricsOffset: @escaping () -> Int,
-        setLyricsOffset: @escaping (Int) -> Void,
-        isActivitySneakPreviewsHidden: @escaping () -> Bool,
-        toggleActivitySneakPreviewsHandler: @escaping () -> Void,
+        lyricsActions: StatusItemLyricsActions,
+        activitySneakActions: StatusItemActivitySneakActions,
         settingsStore: SettingsStore = .shared,
         settingsHandler: @escaping () -> Void,
         quitHandler: @escaping () -> Void
     ) {
-        self.searchLyricsHandler = searchLyricsHandler
-        self.ignoreCurrentTrackLyricsHandler = ignoreCurrentTrackLyricsHandler
-        self.revealCurrentLyricsInFinderHandler = revealCurrentLyricsInFinderHandler
-        self.canSearchCurrentTrackLyrics = canSearchCurrentTrackLyrics
-        self.canIgnoreCurrentTrackLyrics = canIgnoreCurrentTrackLyrics
-        self.canRevealCurrentLyricsInFinder = canRevealCurrentLyricsInFinder
-        self.canAdjustLyricsOffset = canAdjustLyricsOffset
-        self.getLyricsOffset = getLyricsOffset
-        self.setLyricsOffset = setLyricsOffset
-        self.isActivitySneakPreviewsHidden = isActivitySneakPreviewsHidden
-        self.toggleActivitySneakPreviewsHandler = toggleActivitySneakPreviewsHandler
+        self.lyricsActions = lyricsActions
+        self.activitySneakActions = activitySneakActions
         self.settingsStore = settingsStore
         self.settingsHandler = settingsHandler
         self.quitHandler = quitHandler
@@ -90,7 +107,7 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
         menu.addItem(revealCurrentLyricsInFinderItem)
 
         offsetView = LyricsOffsetMenuView(onChange: { [weak self] value in
-            self?.setLyricsOffset(value)
+            self?.lyricsActions.setOffset(value)
         })
         lyricsOffsetItem = NSMenuItem()
         lyricsOffsetItem.view = offsetView
@@ -125,19 +142,19 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     }
 
     @objc private func searchLyrics() {
-        searchLyricsHandler()
+        lyricsActions.search()
     }
 
     @objc private func ignoreCurrentTrackLyrics() {
-        ignoreCurrentTrackLyricsHandler()
+        lyricsActions.ignoreCurrentTrack()
     }
 
     @objc private func revealCurrentLyricsInFinder() {
-        revealCurrentLyricsInFinderHandler()
+        lyricsActions.revealCurrentLyricsInFinder()
     }
 
     @objc private func toggleActivitySneakPreviews() {
-        toggleActivitySneakPreviewsHandler()
+        activitySneakActions.toggle()
         syncActivitySneakPreviewMenuState()
     }
 
@@ -152,11 +169,11 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(searchLyrics):
-            return canSearchCurrentTrackLyrics()
+            return lyricsActions.canSearchCurrentTrack()
         case #selector(ignoreCurrentTrackLyrics):
-            return canIgnoreCurrentTrackLyrics()
+            return lyricsActions.canIgnoreCurrentTrack()
         case #selector(revealCurrentLyricsInFinder):
-            return canRevealCurrentLyricsInFinder()
+            return lyricsActions.canRevealCurrentLyricsInFinder()
         default:
             return true
         }
@@ -171,7 +188,7 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
     }
 
     private func syncActivitySneakPreviewMenuState() {
-        hideActivitySneaksItem.state = isActivitySneakPreviewsHidden() ? .on : .off
+        hideActivitySneaksItem.state = activitySneakActions.isHidden() ? .on : .off
     }
 
     private func syncLocalizedMenuTitles(language: AppLanguage) {
@@ -219,10 +236,10 @@ public final class StatusItemController: NSObject, NSMenuItemValidation {
 extension StatusItemController: NSMenuDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
         syncActivitySneakPreviewMenuState()
-        let enabled = canAdjustLyricsOffset()
+        let enabled = lyricsActions.canAdjustOffset()
         lyricsOffsetItem.isHidden = !enabled
         if enabled {
-            offsetView.update(value: getLyricsOffset())
+            offsetView.update(value: lyricsActions.getOffset())
         }
         // While the status menu is open, NSMenu enters tracking mode and
         // buffers global keyboard events. Disable the global shortcut so it
@@ -236,7 +253,7 @@ extension StatusItemController: NSMenuDelegate {
 }
 
 final class LyricsOffsetMenuView: NSView {
-    private let label = NSTextField(labelWithString: "歌词偏移:")
+    private let label = NSTextField(labelWithString: "")
     private let textField = NSTextField()
     private let stepper = NSStepper()
     private let unitLabel = NSTextField(labelWithString: "ms")

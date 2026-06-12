@@ -11,6 +11,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
     private let systemMonitorPlugin = SystemMonitorPlugin()
+    private lazy var bridgeDispatcher = AIBridgeDispatcher(handlers: [claudePlugin])
     private let settingsController = SettingsWindowController()
 
     private var multiScreenManager: MultiScreenManager?
@@ -53,39 +54,15 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         self.desktopLyricsManager = desktopLyricsManager
 
         statusItemController = StatusItemController(
-            searchLyricsHandler: { [weak self] in
-                self?.desktopLyricsManager?.showLyricsSearchWindow()
-            },
-            ignoreCurrentTrackLyricsHandler: { [weak self] in
-                self?.desktopLyricsManager?.ignoreCurrentTrackLyrics()
-            },
-            revealCurrentLyricsInFinderHandler: { [weak self] in
-                self?.desktopLyricsManager?.revealCurrentLyricsInFinder()
-            },
-            canSearchCurrentTrackLyrics: { [weak self] in
-                self?.desktopLyricsManager?.canSearchCurrentTrackLyrics ?? false
-            },
-            canIgnoreCurrentTrackLyrics: { [weak self] in
-                self?.desktopLyricsManager?.canIgnoreCurrentTrackLyrics ?? false
-            },
-            canRevealCurrentLyricsInFinder: { [weak self] in
-                self?.desktopLyricsManager?.canRevealCurrentLyricsInFinder ?? false
-            },
-            canAdjustLyricsOffset: { [weak self] in
-                self?.desktopLyricsManager?.canAdjustLyricsOffset ?? false
-            },
-            getLyricsOffset: { [weak self] in
-                self?.desktopLyricsManager?.currentLyricsOffset ?? 0
-            },
-            setLyricsOffset: { [weak self] value in
-                self?.desktopLyricsManager?.setLyricsOffset(value)
-            },
-            isActivitySneakPreviewsHidden: {
-                SettingsStore.shared.activitySneakPreviewsHidden
-            },
-            toggleActivitySneakPreviewsHandler: {
-                SettingsStore.shared.activitySneakPreviewsHidden.toggle()
-            },
+            lyricsActions: desktopLyricsManager.statusMenuActions,
+            activitySneakActions: StatusItemActivitySneakActions(
+                isHidden: {
+                    SettingsStore.shared.activitySneakPreviewsHidden
+                },
+                toggle: {
+                    SettingsStore.shared.activitySneakPreviewsHidden.toggle()
+                }
+            ),
             settingsHandler: { [weak self] in
                 self?.settingsController.showSettings()
             },
@@ -168,12 +145,12 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
             try server.start(
                 onFrame: { [weak self] frame, respond in
                     Task { @MainActor [weak self] in
-                        self?.claudePlugin.handle(frame: frame, respond: respond)
+                        self?.bridgeDispatcher.handle(frame: frame, respond: respond)
                     }
                 },
                 onDisconnect: { [weak self] requestID in
                     Task { @MainActor [weak self] in
-                        self?.claudePlugin.handleDisconnect(requestID: requestID)
+                        self?.bridgeDispatcher.handleDisconnect(requestID: requestID)
                     }
                 }
             )

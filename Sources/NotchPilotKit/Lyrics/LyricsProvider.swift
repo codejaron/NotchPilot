@@ -265,9 +265,9 @@ private final class ConcurrentLyricsProvider: LyricsService.LyricsProvider {
 
 @MainActor
 final class LyricsKitProvider: LyricsProviding, LyricsSearching {
-    private let provider: LyricsService.LyricsProvider
+    private let providerBox: ConcurrentLyricsProviderBox
     private let searchServices: [any LyricsSearchServicing]
-    private static let immediateSelectionScore = 0.75
+    nonisolated private static let immediateSelectionScore = 0.75
 
     private struct SelectedLyricsUpdate {
         let lyrics: TimedLyrics
@@ -279,7 +279,7 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         searchServices: [any LyricsSearchServicing]? = nil
     ) {
         let provider = provider ?? ConcurrentLyricsProvider(services: LyricsKitServiceConfiguration.defaultServices)
-        self.provider = provider
+        self.providerBox = ConcurrentLyricsProviderBox(provider: provider)
         self.searchServices = searchServices ?? LyricsKitSearchServices.default()
     }
 
@@ -302,12 +302,17 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
 
         return AsyncStream { continuation in
-            let task = Task { @MainActor in
+            let providerBox = providerBox
+            let searchServices = searchServices
+            let task = Task.detached {
                 var bestPreference: LyricsCandidatePreference?
                 var deferredUpdate: SelectedLyricsUpdate?
                 var didYieldLyrics = false
 
-                for await update in directLyricUpdates(for: snapshot) {
+                for await update in Self.directLyricUpdates(
+                    for: snapshot,
+                    providerBox: providerBox
+                ) {
                     guard Task.isCancelled == false else {
                         break
                     }
@@ -334,12 +339,13 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
                 if Task.isCancelled == false,
                    searchServices.isEmpty == false,
                    shouldSearchCandidates {
-                    for await update in candidateLyricUpdates(
+                    for await update in Self.candidateLyricUpdates(
                         title: title,
                         artist: artist,
                         duration: snapshot.duration,
                         limit: 8,
-                        initialPreference: bestAvailablePreference
+                        initialPreference: bestAvailablePreference,
+                        searchServices: searchServices
                     ) {
                         guard Task.isCancelled == false else {
                             break
@@ -363,23 +369,25 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
     }
 
-    private func candidateLyricUpdates(
+    nonisolated private static func candidateLyricUpdates(
         title: String,
         artist: String,
         duration: TimeInterval?,
         limit: Int,
-        initialPreference: LyricsCandidatePreference?
+        initialPreference: LyricsCandidatePreference?,
+        searchServices: [any LyricsSearchServicing]
     ) -> AsyncStream<SelectedLyricsUpdate> {
         AsyncStream { continuation in
-            let task = Task { @MainActor in
+            let task = Task.detached {
                 var bestPreference = initialPreference
                 var loadedCandidateIDs: Set<String> = []
 
-                for await candidates in searchLyricsUpdates(
+                for await candidates in Self.searchLyricsUpdates(
                     title: title,
                     artist: artist,
                     duration: duration,
-                    limit: limit
+                    limit: limit,
+                    searchServices: searchServices
                 ) {
                     guard Task.isCancelled == false else {
                         break
@@ -433,7 +441,10 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
     }
 
-    private func directLyricUpdates(for snapshot: MediaPlaybackSnapshot) -> AsyncStream<SelectedLyricsUpdate> {
+    nonisolated private static func directLyricUpdates(
+        for snapshot: MediaPlaybackSnapshot,
+        providerBox: ConcurrentLyricsProviderBox
+    ) -> AsyncStream<SelectedLyricsUpdate> {
         guard let request = Self.makeRequest(for: snapshot) else {
             return AsyncStream { continuation in
                 continuation.finish()
@@ -441,14 +452,14 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
 
         return AsyncStream { continuation in
-            let task = Task { @MainActor in
+            let task = Task.detached {
                 let requestedMetadata = Self.metadata(for: request)
                 var bestPreference: LyricsCandidatePreference?
                 var windowStart: Date?
                 let priorityWindow: TimeInterval = 5
 
                 do {
-                    for try await lyric in provider.lyrics(for: request) {
+                    for try await lyric in providerBox.provider.lyrics(for: request) {
                         guard Task.isCancelled == false else {
                             break
                         }
@@ -507,14 +518,14 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
     }
 
-    private static func metadata(for lyrics: Lyrics) -> (title: String, artist: String) {
+    nonisolated private static func metadata(for lyrics: Lyrics) -> (title: String, artist: String) {
         (
             lyrics.idTags[.title]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             lyrics.idTags[.artist]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         )
     }
 
-    private static func makeRequest(for snapshot: MediaPlaybackSnapshot) -> LyricsSearchRequest? {
+    nonisolated private static func makeRequest(for snapshot: MediaPlaybackSnapshot) -> LyricsSearchRequest? {
         let title = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let artist = snapshot.artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard title.isEmpty == false || artist.isEmpty == false else { return nil }
@@ -527,7 +538,7 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         )
     }
 
-    private static func metadata(for request: LyricsSearchRequest) -> (title: String, artist: String) {
+    nonisolated private static func metadata(for request: LyricsSearchRequest) -> (title: String, artist: String) {
         switch request.searchTerm {
         case let .info(title, artist):
             return (title, artist)
@@ -561,6 +572,22 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         duration: TimeInterval?,
         limit: Int = 40
     ) -> AsyncStream<[LyricsSearchCandidate]> {
+        Self.searchLyricsUpdates(
+            title: title,
+            artist: artist,
+            duration: duration,
+            limit: limit,
+            searchServices: searchServices
+        )
+    }
+
+    nonisolated private static func searchLyricsUpdates(
+        title: String,
+        artist: String,
+        duration: TimeInterval?,
+        limit: Int,
+        searchServices: [any LyricsSearchServicing]
+    ) -> AsyncStream<[LyricsSearchCandidate]> {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -582,7 +609,7 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         let services = searchServices
 
         return AsyncStream { continuation in
-            let task = Task { @MainActor in
+            let task = Task.detached {
                 var collectedResults: [LyricsSearchCandidate] = []
                 await withTaskGroup(of: [LyricsSearchCandidate].self) { group in
                     for service in services {
