@@ -40,7 +40,7 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     private var sneakPeekIDs: [String: UUID] = [:]
     private var settingsCancellables: Set<AnyCancellable> = []
     private var activityTracker = ClaudeSessionActivityTracker(activityExpiry: ClaudePlugin.claudeSessionActivityExpiry)
-    private var cachedToolUseIDs: [ToolUseCorrelationKey: [String]] = [:]
+    private var toolUseCorrelator = ClaudeToolUseCorrelator()
 
     public init(
         settingsStore: SettingsStore = .shared,
@@ -128,7 +128,7 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     public func deactivate() {
         responders.removeAll()
         sneakPeekIDs.removeAll()
-        cachedToolUseIDs.removeAll()
+        toolUseCorrelator.removeAll()
         sessions = []
         pendingApprovals = []
         codexActionableSurface = nil
@@ -257,14 +257,7 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     }
 
     private func cacheToolUseIDIfAvailable(from envelope: AIBridgeEnvelope) {
-        guard envelope.eventType == .preToolUse,
-              let toolUseID = envelope.toolUseID,
-              let key = ToolUseCorrelationKey(envelope: envelope)
-        else {
-            return
-        }
-
-        cachedToolUseIDs[key, default: []].append(toolUseID)
+        toolUseCorrelator.observe(envelope: envelope)
     }
 
     private func correlateCachedToolUseIDIfNeeded(in envelope: AIBridgeEnvelope) -> AIBridgeEnvelope {
@@ -272,12 +265,11 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
               envelope.toolUseID == nil,
               case let .permissionRequest(payload) = envelope.payload,
               payload.toolUseID == nil,
-              let key = ToolUseCorrelationKey(
+              let toolUseID = toolUseCorrelator.correlatedToolUseID(
                 sessionID: envelope.sessionID,
                 toolName: payload.toolName,
                 toolInput: payload.toolInput
-              ),
-              let toolUseID = popCachedToolUseID(for: key)
+              )
         else {
             return envelope
         }
@@ -298,24 +290,8 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
         )
     }
 
-    private func popCachedToolUseID(for key: ToolUseCorrelationKey) -> String? {
-        guard var queue = cachedToolUseIDs[key], queue.isEmpty == false else {
-            return nil
-        }
-
-        let toolUseID = queue.removeFirst()
-        if queue.isEmpty {
-            cachedToolUseIDs.removeValue(forKey: key)
-        } else {
-            cachedToolUseIDs[key] = queue
-        }
-        return toolUseID
-    }
-
     private func clearCachedToolUseIDs(forSessionID sessionID: String) {
-        for key in cachedToolUseIDs.keys where key.sessionID == sessionID {
-            cachedToolUseIDs.removeValue(forKey: key)
-        }
+        toolUseCorrelator.clear(sessionID: sessionID)
     }
 
     private func scheduleTranscriptUsageRefresh(for envelope: AIBridgeEnvelope) {
@@ -849,90 +825,5 @@ private extension AIBridgeEventType {
         case .sessionStart, .stop:
             return false
         }
-    }
-}
-
-private struct ToolUseCorrelationKey: Hashable {
-    let sessionID: String
-    let toolName: String
-    let inputFingerprint: String
-
-    init?(envelope: AIBridgeEnvelope) {
-        self.init(
-            sessionID: envelope.sessionID,
-            toolName: envelope.toolName,
-            toolInput: envelope.toolInput
-        )
-    }
-
-    init?(sessionID: String, toolName: String?, toolInput: JSONValue?) {
-        guard let normalizedToolName = Self.normalized(toolName) else {
-            return nil
-        }
-        self.sessionID = sessionID
-        self.toolName = normalizedToolName
-        self.inputFingerprint = Self.fingerprint(for: toolInput)
-    }
-
-    private static func normalized(_ value: String?) -> String? {
-        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              trimmed.isEmpty == false
-        else {
-            return nil
-        }
-        return trimmed
-    }
-
-    private static func fingerprint(for toolInput: JSONValue?) -> String {
-        guard let toolInput else {
-            return "{}"
-        }
-
-        switch toolInput {
-        case .object, .array:
-            guard JSONSerialization.isValidJSONObject(toolInput.jsonObject),
-                  let data = try? JSONSerialization.data(withJSONObject: toolInput.jsonObject, options: [.sortedKeys]),
-                  let string = String(data: data, encoding: .utf8)
-            else {
-                return String(reflecting: toolInput)
-            }
-            return string
-        case let .string(value):
-            return value
-        case let .integer(value):
-            return "\(value)"
-        case let .double(value):
-            return "\(value)"
-        case let .bool(value):
-            return value ? "true" : "false"
-        case .null:
-            return "null"
-        }
-    }
-}
-
-private struct ClaudeObservedToolUse {
-    let toolUseID: String?
-
-    init?(envelope: AIBridgeEnvelope) {
-        guard case let .generic(values) = envelope.payload else {
-            return nil
-        }
-
-        self.toolUseID = envelope.toolUseID ?? Self.firstNonEmptyValue(in: values, keys: [
-            "tool_use_id",
-            "toolUseID",
-            "toolUseId",
-        ])
-    }
-
-    private static func firstNonEmptyValue(in values: [String: String], keys: [String]) -> String? {
-        for key in keys {
-            if let value = values[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               value.isEmpty == false {
-                return value
-            }
-        }
-        return nil
     }
 }

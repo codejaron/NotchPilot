@@ -296,6 +296,88 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testFeatureNamespacesForwardToPersistedSettings() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        store.media.mediaPlaybackEnabled = false
+        store.media.mediaPlaybackSneakPreviewEnabled = false
+        store.lyrics.desktopLyricsEnabled = true
+        store.lyrics.desktopLyricsHighlightColorHex = "#FF00AA"
+        store.lyrics.desktopLyricsFontSize = 34
+        store.ai.claudePluginEnabled = false
+        store.ai.codexPluginEnabled = false
+        store.systemMonitor.systemMonitorEnabled = false
+        store.systemMonitor.systemMonitorSneakPreviewEnabled = false
+        store.sound.soundEnabled = false
+        store.sound.soundTaskCompleteVolume = 0.25
+        store.general.interfaceLanguage = .english
+        store.bridge.autoStartSocket = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(reloadedStore.media.mediaPlaybackEnabled)
+        XCTAssertFalse(reloadedStore.media.mediaPlaybackSneakPreviewEnabled)
+        XCTAssertTrue(reloadedStore.lyrics.desktopLyricsEnabled)
+        XCTAssertEqual(reloadedStore.lyrics.desktopLyricsHighlightColorHex, "#FF00AA")
+        XCTAssertEqual(reloadedStore.lyrics.desktopLyricsFontSize, 34)
+        XCTAssertFalse(reloadedStore.ai.claudePluginEnabled)
+        XCTAssertFalse(reloadedStore.ai.codexPluginEnabled)
+        XCTAssertFalse(reloadedStore.systemMonitor.systemMonitorEnabled)
+        XCTAssertFalse(reloadedStore.systemMonitor.systemMonitorSneakPreviewEnabled)
+        XCTAssertFalse(reloadedStore.sound.soundEnabled)
+        XCTAssertEqual(reloadedStore.sound.soundTaskCompleteVolume, 0.25)
+        XCTAssertEqual(reloadedStore.general.interfaceLanguage, .english)
+        XCTAssertFalse(reloadedStore.bridge.autoStartSocket)
+    }
+
+    @MainActor
+    func testFeatureNamespacePublishesWhenUnderlyingStoreChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        let expectation = expectation(description: "media namespace publishes store changes")
+        let cancellable = store.media.objectWillChange.sink {
+            expectation.fulfill()
+        }
+
+        store.mediaPlaybackEnabled = false
+
+        wait(for: [expectation], timeout: 0.1)
+        cancellable.cancel()
+    }
+
+    @MainActor
+    func testFeatureNamespacePublishesAfterForwardedValueHasChanged() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+        let expectation = expectation(description: "general namespace publishes after language is updated")
+        var observedLanguage: AppLanguage?
+        let cancellable = store.general.objectWillChange.sink {
+            observedLanguage = store.general.interfaceLanguage
+            expectation.fulfill()
+        }
+
+        store.general.interfaceLanguage = .english
+
+        wait(for: [expectation], timeout: 0.1)
+        XCTAssertEqual(observedLanguage, .english)
+        cancellable.cancel()
+    }
+
+    @MainActor
     func testPluginAvailabilitySettingsDefaultToEnabledAndPersistChanges() {
         let store = SettingsStore(
             defaults: defaults,

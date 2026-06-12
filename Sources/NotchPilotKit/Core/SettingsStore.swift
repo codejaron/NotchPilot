@@ -14,6 +14,14 @@ public protocol ClaudeHookInstallationInspecting {
 public final class SettingsStore: ObservableObject {
     public static let shared = SettingsStore()
 
+    private(set) lazy var general = SettingsGeneralNamespace(store: self)
+    private(set) lazy var bridge = SettingsBridgeNamespace(store: self)
+    private(set) lazy var ai = SettingsAINamespace(store: self)
+    private(set) lazy var media = SettingsMediaNamespace(store: self)
+    private(set) lazy var lyrics = SettingsLyricsNamespace(store: self)
+    private(set) lazy var systemMonitor = SettingsSystemMonitorNamespace(store: self)
+    private(set) lazy var sound = SettingsSoundNamespace(store: self)
+
     private enum Key {
         static let claudeHookInstalled = "claude.hookInstalled"
         static let autoStartSocket = "bridge.autoStartSocket"

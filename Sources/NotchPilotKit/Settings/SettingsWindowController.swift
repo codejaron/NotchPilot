@@ -40,7 +40,10 @@ public final class SettingsWindowController {
     }
 
     private static func configure(window: NSWindow) {
-        window.title = AppStrings.text(.settingsWindowTitle, language: SettingsStore.shared.interfaceLanguage)
+        window.title = AppStrings.text(
+            .settingsWindowTitle,
+            language: SettingsStore.shared.general.interfaceLanguage
+        )
         window.styleMask.insert(.fullSizeContentView)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true

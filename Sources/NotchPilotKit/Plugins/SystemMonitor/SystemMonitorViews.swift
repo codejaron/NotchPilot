@@ -99,7 +99,7 @@ enum SystemMonitorSneakPreviewLayout {
 }
 
 struct SystemMonitorSneakPreviewView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     let snapshot: SystemMonitorSnapshot
     let configuration: SystemMonitorSneakConfiguration
@@ -166,7 +166,7 @@ struct SystemMonitorSneakPreviewView: View {
                 snapshot: snapshot,
                 thresholds: thresholds
             ),
-            language: store.interfaceLanguage
+            language: generalSettings.interfaceLanguage
         )
     }
 }
@@ -578,7 +578,7 @@ enum SystemMonitorDashboardTypography {
 }
 
 private struct SystemMonitorBlockView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     let block: SystemMonitorBlockSnapshot
     let accentColor: Color
@@ -623,7 +623,7 @@ private struct SystemMonitorBlockView: View {
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
+                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: generalSettings.interfaceLanguage))
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundStyle(accentColor)
                     .lineLimit(1)
@@ -650,7 +650,7 @@ private struct SystemMonitorBlockView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(block.topItems) { item in
-                    let displayName = AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage)
+                    let displayName = AppStrings.systemMonitorTopItemName(item.name, language: generalSettings.interfaceLanguage)
                     HStack(spacing: 5) {
                         Text(displayName)
                             .lineLimit(1)
@@ -693,7 +693,7 @@ private struct SystemMonitorBlockView: View {
     private var standardBody: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
+                Text(AppStrings.systemMonitorBlockTitle(block.kind, language: generalSettings.interfaceLanguage))
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundStyle(accentColor)
 
@@ -707,7 +707,7 @@ private struct SystemMonitorBlockView: View {
             }
 
             if block.detail.isEmpty == false {
-                Text(AppStrings.systemMonitorDetail(block.detail, language: store.interfaceLanguage))
+                Text(AppStrings.systemMonitorDetail(block.detail, language: generalSettings.interfaceLanguage))
                     .font(.system(size: SystemMonitorDashboardTypography.detailFontSize, weight: .semibold, design: .rounded))
                     .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.92))
                     .lineLimit(1)
@@ -717,7 +717,7 @@ private struct SystemMonitorBlockView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(block.topItems) { item in
                     HStack(spacing: 5) {
-                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: generalSettings.interfaceLanguage))
                             .lineLimit(1)
                             .truncationMode(.tail)
 
@@ -767,14 +767,14 @@ private struct SystemMonitorBlockView: View {
 
     private var systemStatusBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(AppStrings.systemMonitorBlockTitle(block.kind, language: store.interfaceLanguage))
+            Text(AppStrings.systemMonitorBlockTitle(block.kind, language: generalSettings.interfaceLanguage))
                 .font(.system(size: 9, weight: .heavy, design: .rounded))
                 .foregroundStyle(accentColor)
 
             HStack(alignment: .top, spacing: 14) {
                 ForEach(block.topItems) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: generalSettings.interfaceLanguage))
                             .font(.system(size: 9, weight: .semibold, design: .rounded))
                             .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.9))
                             .lineLimit(1)
@@ -793,14 +793,14 @@ private struct SystemMonitorBlockView: View {
 
     private func inlineSystemBody(_ systemBlock: SystemMonitorBlockSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(AppStrings.systemMonitorBlockTitle(systemBlock.kind, language: store.interfaceLanguage))
+            Text(AppStrings.systemMonitorBlockTitle(systemBlock.kind, language: generalSettings.interfaceLanguage))
                 .font(.system(size: 9, weight: .heavy, design: .rounded))
                 .foregroundStyle(accentColor)
 
             HStack(alignment: .top, spacing: 10) {
                 ForEach(systemBlock.topItems) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(AppStrings.systemMonitorTopItemName(item.name, language: store.interfaceLanguage))
+                        Text(AppStrings.systemMonitorTopItemName(item.name, language: generalSettings.interfaceLanguage))
                             .font(.system(size: 8, weight: .semibold, design: .rounded))
                             .foregroundStyle(NotchPilotTheme.islandTextSecondary.opacity(0.88))
                             .lineLimit(1)

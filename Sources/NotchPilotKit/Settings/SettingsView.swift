@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
     @State private var sidebarState: SettingsSidebarState
 
     public init(selectedPane: SettingsPane = .general) {
@@ -36,7 +36,7 @@ public struct SettingsView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
             sidebarButton(
-                title: AppStrings.text(.general, language: store.interfaceLanguage),
+                title: AppStrings.text(.general, language: language),
                 systemImage: "gearshape",
                 pane: .general
             )
@@ -44,7 +44,7 @@ public struct SettingsView: View {
             ForEach(SettingsPluginID.allCases) { plugin in
                 sidebarButton(
                     plugin: plugin,
-                    title: plugin.title(language: store.interfaceLanguage),
+                    title: plugin.title(language: language),
                     pane: .plugin(plugin)
                 )
             }
@@ -118,5 +118,9 @@ public struct SettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }

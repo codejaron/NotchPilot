@@ -52,7 +52,7 @@ private struct AIPluginSessionRow: View {
     let onQuickApprove: (() -> Void)?
     let onQuickReject: (() -> Void)?
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     private var glyph: NotchPilotBrandGlyph? {
         NotchPilotBrandGlyph(host: summary.host)
@@ -91,7 +91,7 @@ private struct AIPluginSessionRow: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
 
-                        Text(AppStrings.activityLabel(summary.subtitle, language: settingsStore.interfaceLanguage))
+                        Text(AppStrings.activityLabel(summary.subtitle, language: generalSettings.interfaceLanguage))
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(
                                 summary.hasAttention
@@ -181,14 +181,14 @@ private struct AIPluginSessionRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(AppStrings.text(.stopSessionDetection, language: settingsStore.interfaceLanguage))
-                .help(AppStrings.text(.stopSessionDetection, language: settingsStore.interfaceLanguage))
+                .accessibilityLabel(AppStrings.text(.stopSessionDetection, language: generalSettings.interfaceLanguage))
+                .help(AppStrings.text(.stopSessionDetection, language: generalSettings.interfaceLanguage))
             }
         }
     }
 
     private var quickApproveLabel: String {
-        switch settingsStore.interfaceLanguage {
+        switch generalSettings.interfaceLanguage {
         case .zhHans:
             return "同意"
         case .english:
@@ -197,7 +197,7 @@ private struct AIPluginSessionRow: View {
     }
 
     private var quickRejectLabel: String {
-        switch settingsStore.interfaceLanguage {
+        switch generalSettings.interfaceLanguage {
         case .zhHans:
             return "拒绝"
         case .english:
@@ -282,7 +282,7 @@ private struct AIPluginSessionRow: View {
     }
 
     private var contextUsageLabel: String {
-        switch settingsStore.interfaceLanguage {
+        switch generalSettings.interfaceLanguage {
         case .zhHans:
             return "上下文"
         case .english:

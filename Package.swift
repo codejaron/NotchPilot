@@ -33,6 +33,7 @@ let package = Package(
                 .copy("Resources/notch-bridge.py"),
                 .copy("Resources/MediaRemoteAdapter"),
                 .copy("Resources/Sounds"),
+                .process("Resources/Localizable.xcstrings"),
                 .process("Resources/Icons"),
             ]
         ),

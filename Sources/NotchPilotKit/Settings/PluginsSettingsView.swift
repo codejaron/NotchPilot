@@ -93,67 +93,73 @@ struct ClaudeSettingsStatusText: Equatable {
 }
 
 struct MediaPluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var mediaSettings = SettingsStore.shared.media
+    @ObservedObject private var lyricsSettings = SettingsStore.shared.lyrics
 
     var body: some View {
-        SettingsPage(title: AppStrings.text(.media, language: store.interfaceLanguage)) {
-            SettingsGroupSection(title: AppStrings.text(.playback, language: store.interfaceLanguage)) {
+        SettingsPage(title: AppStrings.text(.media, language: language)) {
+            SettingsGroupSection(title: AppStrings.text(.playback, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.enableMediaPlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableMediaPluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.mediaPlaybackEnabled
+                    title: AppStrings.text(.enableMediaPlugin, language: language),
+                    detail: AppStrings.text(.enableMediaPluginDetail, language: language),
+                    isOn: $mediaSettings.mediaPlaybackEnabled
                 )
 
                 SettingsRowDivider()
 
                 SettingsToggleRow(
-                    title: AppStrings.text(.showPlaybackPreview, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.showPlaybackPreviewDetail, language: store.interfaceLanguage),
-                    isEnabled: store.mediaPlaybackEnabled,
-                    isOn: $store.mediaPlaybackSneakPreviewEnabled
+                    title: AppStrings.text(.showPlaybackPreview, language: language),
+                    detail: AppStrings.text(.showPlaybackPreviewDetail, language: language),
+                    isEnabled: mediaSettings.mediaPlaybackEnabled,
+                    isOn: $mediaSettings.mediaPlaybackSneakPreviewEnabled
                 )
 
                 SettingsRowDivider()
 
                 SettingsToggleRow(
-                    title: AppStrings.text(.desktopLyricsCard, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.desktopLyricsCardDetail, language: store.interfaceLanguage),
-                    isEnabled: store.mediaPlaybackEnabled,
-                    isOn: $store.desktopLyricsEnabled
+                    title: AppStrings.text(.desktopLyricsCard, language: language),
+                    detail: AppStrings.text(.desktopLyricsCardDetail, language: language),
+                    isEnabled: mediaSettings.mediaPlaybackEnabled,
+                    isOn: $lyricsSettings.desktopLyricsEnabled
                 )
             }
 
-            SettingsGroupSection(title: AppStrings.text(.lyricsStyle, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.lyricsStyle, language: language)) {
                 SettingsRow(
-                    title: AppStrings.text(.highlightColor, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.highlightColorDetail, language: store.interfaceLanguage),
-                    isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
+                    title: AppStrings.text(.highlightColor, language: language),
+                    detail: AppStrings.text(.highlightColorDetail, language: language),
+                    isEnabled: mediaSettings.mediaPlaybackEnabled && lyricsSettings.desktopLyricsEnabled
                 ) {
                     ColorPicker(
                         "",
                         selection: Binding(
-                            get: { Color(hex: store.desktopLyricsHighlightColorHex) ?? .green },
-                            set: { store.desktopLyricsHighlightColorHex = $0.hexString }
+                            get: { Color(hex: lyricsSettings.desktopLyricsHighlightColorHex) ?? .green },
+                            set: { lyricsSettings.desktopLyricsHighlightColorHex = $0.hexString }
                         ),
                         supportsOpacity: false
                     )
                     .labelsHidden()
-                    .disabled(!store.mediaPlaybackEnabled || !store.desktopLyricsEnabled)
+                    .disabled(!mediaSettings.mediaPlaybackEnabled || !lyricsSettings.desktopLyricsEnabled)
                 }
 
                 SettingsRowDivider()
 
                 SettingsRow(
-                    title: AppStrings.text(.fontSize, language: store.interfaceLanguage),
-                    detail: AppStrings.fontSizeDetail(store.desktopLyricsFontSize, language: store.interfaceLanguage),
-                    isEnabled: store.mediaPlaybackEnabled && store.desktopLyricsEnabled
+                    title: AppStrings.text(.fontSize, language: language),
+                    detail: AppStrings.fontSizeDetail(lyricsSettings.desktopLyricsFontSize, language: language),
+                    isEnabled: mediaSettings.mediaPlaybackEnabled && lyricsSettings.desktopLyricsEnabled
                 ) {
-                    Slider(value: $store.desktopLyricsFontSize, in: 18...42, step: 2)
+                    Slider(value: $lyricsSettings.desktopLyricsFontSize, in: 18...42, step: 2)
                         .frame(width: 170)
-                        .disabled(!store.mediaPlaybackEnabled || !store.desktopLyricsEnabled)
+                        .disabled(!mediaSettings.mediaPlaybackEnabled || !lyricsSettings.desktopLyricsEnabled)
                 }
             }
         }
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }
 
@@ -203,24 +209,25 @@ struct SettingsSidebarState: Equatable {
 }
 
 struct ClaudePluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var aiSettings = SettingsStore.shared.ai
 
     @State private var claudeError: String?
     @State private var isWorking = false
 
     var body: some View {
         SettingsPage(title: "Claude") {
-            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.enableClaudePlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableClaudePluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.claudePluginEnabled
+                    title: AppStrings.text(.enableClaudePlugin, language: language),
+                    detail: AppStrings.text(.enableClaudePluginDetail, language: language),
+                    isOn: $aiSettings.claudePluginEnabled
                 )
             }
 
-            SettingsGroupSection(title: AppStrings.text(.claudeCode, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.claudeCode, language: language)) {
                 SettingsStatusRow(
-                    title: AppStrings.text(.integrationStatus, language: store.interfaceLanguage),
+                    title: AppStrings.text(.integrationStatus, language: language),
                     value: claudeStatusText.value,
                     valueColor: claudeStatusColor
                 )
@@ -228,10 +235,10 @@ struct ClaudePluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsActionRow(
-                    title: AppStrings.text(.actions, language: store.interfaceLanguage),
+                    title: AppStrings.text(.actions, language: language),
                     detail: claudeActionDetail,
                     buttonTitle: claudeActionTitle,
-                    isEnabled: store.claudePluginEnabled && store.claudeCodeDetected && isWorking == false
+                    isEnabled: aiSettings.claudePluginEnabled && aiSettings.claudeCodeDetected && isWorking == false
                 ) {
                     claudeAction()
                 }
@@ -248,10 +255,10 @@ struct ClaudePluginSettingsView: View {
 
     private var claudeStatusText: ClaudeSettingsStatusText {
         ClaudeSettingsStatusText(
-            detected: store.claudeCodeDetected,
-            installed: store.claudeHookInstalled,
-            needsUpdate: store.claudeHooksNeedUpdate,
-            language: store.interfaceLanguage
+            detected: aiSettings.claudeCodeDetected,
+            installed: aiSettings.claudeHookInstalled,
+            needsUpdate: aiSettings.claudeHooksNeedUpdate,
+            language: language
         )
     }
 
@@ -267,20 +274,20 @@ struct ClaudePluginSettingsView: View {
     }
 
     private var claudeActionTitle: String {
-        if store.claudeHookInstalled {
-            return store.claudeHooksNeedUpdate
-                ? AppStrings.text(.updateIntegration, language: store.interfaceLanguage)
-                : AppStrings.text(.removeIntegration, language: store.interfaceLanguage)
+        if aiSettings.claudeHookInstalled {
+            return aiSettings.claudeHooksNeedUpdate
+                ? AppStrings.text(.updateIntegration, language: language)
+                : AppStrings.text(.removeIntegration, language: language)
         }
-        return AppStrings.text(.installIntegration, language: store.interfaceLanguage)
+        return AppStrings.text(.installIntegration, language: language)
     }
 
     private var claudeActionDetail: String? {
-        store.claudeCodeDetected ? nil : AppStrings.text(.claudeCodeMissingDetail, language: store.interfaceLanguage)
+        aiSettings.claudeCodeDetected ? nil : AppStrings.text(.claudeCodeMissingDetail, language: language)
     }
 
     private func claudeAction() {
-        if store.claudeHookInstalled, store.claudeHooksNeedUpdate == false {
+        if aiSettings.claudeHookInstalled, aiSettings.claudeHooksNeedUpdate == false {
             uninstallClaude()
         } else {
             installClaude()
@@ -296,8 +303,8 @@ struct ClaudePluginSettingsView: View {
             let bridgePath = try ensureBridgeScript()
             let installer = HookInstaller()
             try installer.installClaudeHooks(bridgeScript: bridgePath)
-            store.bridgeScriptPath = bridgePath
-            store.synchronizeInstallationState()
+            aiSettings.bridgeScriptPath = bridgePath
+            aiSettings.synchronizeInstallationState()
         } catch {
             claudeError = error.localizedDescription
         }
@@ -309,9 +316,9 @@ struct ClaudePluginSettingsView: View {
         defer { isWorking = false }
 
         do {
-            let bridgePath = store.bridgeScriptPath.isEmpty ? nil : store.bridgeScriptPath
+            let bridgePath = aiSettings.bridgeScriptPath.isEmpty ? nil : aiSettings.bridgeScriptPath
             try HookInstaller().uninstallClaudeHooks(bridgeScript: bridgePath)
-            store.synchronizeInstallationState()
+            aiSettings.synchronizeInstallationState()
         } catch {
             claudeError = error.localizedDescription
         }
@@ -320,13 +327,13 @@ struct ClaudePluginSettingsView: View {
     private func ensureBridgeScript() throws -> String {
         if let bundledURL = Bundle.module.url(forResource: "notch-bridge", withExtension: "py") {
             let path = try HookInstaller().installBridgeScript(fromBundle: bundledURL.path)
-            store.bridgeScriptPath = path
+            aiSettings.bridgeScriptPath = path
             return path
         }
 
-        if store.bridgeScriptPath.isEmpty == false,
-           FileManager.default.fileExists(atPath: store.bridgeScriptPath) {
-            return store.bridgeScriptPath
+        if aiSettings.bridgeScriptPath.isEmpty == false,
+           FileManager.default.fileExists(atPath: aiSettings.bridgeScriptPath) {
+            return aiSettings.bridgeScriptPath
         }
 
         let fallbackPath = FileManager.default.homeDirectoryForCurrentUser
@@ -334,16 +341,20 @@ struct ClaudePluginSettingsView: View {
             .path
         guard FileManager.default.fileExists(atPath: fallbackPath) else {
             throw HookInstallError.writeError(
-                AppStrings.text(.missingClaudeBridgeScriptError, language: store.interfaceLanguage)
+                AppStrings.text(.missingClaudeBridgeScriptError, language: language)
             )
         }
 
-        store.bridgeScriptPath = fallbackPath
+        aiSettings.bridgeScriptPath = fallbackPath
         return fallbackPath
     }
 
     private func refreshInstallationState() {
-        store.synchronizeInstallationState()
+        aiSettings.synchronizeInstallationState()
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }
 
@@ -353,66 +364,72 @@ struct ClaudePluginSettingsView: View {
 /// should surface Devin sessions, plus a hint pointing users at the Claude tab
 /// when the underlying integration is missing or stale.
 struct DevinPluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var aiSettings = SettingsStore.shared.ai
 
     var body: some View {
         SettingsPage(title: "Devin") {
-            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.enableDevinPlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableDevinPluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.devinPluginEnabled
+                    title: AppStrings.text(.enableDevinPlugin, language: language),
+                    detail: AppStrings.text(.enableDevinPluginDetail, language: language),
+                    isOn: $aiSettings.devinPluginEnabled
                 )
             }
 
-            SettingsGroupSection(title: AppStrings.text(.devinIntegration, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.devinIntegration, language: language)) {
                 SettingsStatusRow(
-                    title: AppStrings.text(.integrationStatus, language: store.interfaceLanguage),
+                    title: AppStrings.text(.integrationStatus, language: language),
                     value: devinStatusText,
                     valueColor: .secondary
                 )
             }
 
             SettingsInlineMessage(
-                text: AppStrings.text(.devinIntegrationDetail, language: store.interfaceLanguage),
+                text: AppStrings.text(.devinIntegrationDetail, language: language),
                 color: .secondary
             )
         }
         .onAppear {
-            store.synchronizeInstallationState()
+            aiSettings.synchronizeInstallationState()
         }
     }
 
     private var devinStatusText: String {
         // Devin's "integration" is really the Claude hook bridge — surface
         // whichever underlying state is most actionable for the user.
-        if store.claudeHookInstalled == false {
-            return AppStrings.connectionStatus(.notInstalled, language: store.interfaceLanguage)
+        if aiSettings.claudeHookInstalled == false {
+            return AppStrings.connectionStatus(.notInstalled, language: language)
         }
-        if store.claudeHooksNeedUpdate {
-            return AppStrings.connectionStatus(.updateAvailable, language: store.interfaceLanguage)
+        if aiSettings.claudeHooksNeedUpdate {
+            return AppStrings.connectionStatus(.updateAvailable, language: language)
         }
-        return AppStrings.connectionStatus(.connected, language: store.interfaceLanguage)
+        return AppStrings.connectionStatus(.connected, language: language)
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }
 
 struct CodexPluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var aiSettings = SettingsStore.shared.ai
     @ObservedObject private var connectionStore = CodexDesktopConnectionStore.shared
 
     var body: some View {
         SettingsPage(title: "Codex") {
-            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.enableCodexPlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableCodexPluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.codexPluginEnabled
+                    title: AppStrings.text(.enableCodexPlugin, language: language),
+                    detail: AppStrings.text(.enableCodexPluginDetail, language: language),
+                    isOn: $aiSettings.codexPluginEnabled
                 )
             }
 
-            SettingsGroupSection(title: AppStrings.text(.codexDesktop, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.codexDesktop, language: language)) {
                 SettingsStatusRow(
-                    title: AppStrings.text(.connectionStatus, language: store.interfaceLanguage),
+                    title: AppStrings.text(.connectionStatus, language: language),
                     value: codexStatusText.value,
                     valueColor: codexStatusColor
                 )
@@ -426,62 +443,67 @@ struct CodexPluginSettingsView: View {
             }
         }
         .onAppear {
-            store.synchronizeInstallationState()
-            connectionStore.synchronizeInstallationState(isDetected: store.codexDetected)
+            aiSettings.synchronizeInstallationState()
+            connectionStore.synchronizeInstallationState(isDetected: aiSettings.codexDetected)
         }
     }
 
     private var codexStatusText: CodexSettingsStatusText {
         CodexSettingsStatusText(
-            detected: store.codexDetected,
+            detected: aiSettings.codexDetected,
             connection: connectionStore.connection,
-            language: store.interfaceLanguage
+            language: language
         )
     }
 
     private var codexStatusColor: Color {
         connectionStore.connection.status == .error ? .red : .secondary
     }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
+    }
 }
 
 struct SystemMonitorPluginSettingsView: View {
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var systemSettings = SettingsStore.shared.systemMonitor
 
     var body: some View {
-        SettingsPage(title: AppStrings.text(.system, language: store.interfaceLanguage)) {
-            SettingsGroupSection(title: AppStrings.text(.plugin, language: store.interfaceLanguage)) {
+        SettingsPage(title: AppStrings.text(.system, language: language)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.enableSystemMonitorPlugin, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.enableSystemMonitorPluginDetail, language: store.interfaceLanguage),
-                    isOn: $store.systemMonitorEnabled
+                    title: AppStrings.text(.enableSystemMonitorPlugin, language: language),
+                    detail: AppStrings.text(.enableSystemMonitorPluginDetail, language: language),
+                    isOn: $systemSettings.systemMonitorEnabled
                 )
             }
 
-            SettingsGroupSection(title: AppStrings.text(.preview, language: store.interfaceLanguage)) {
+            SettingsGroupSection(title: AppStrings.text(.preview, language: language)) {
                 SettingsToggleRow(
-                    title: AppStrings.text(.showSystemMonitorPreview, language: store.interfaceLanguage),
-                    isEnabled: store.systemMonitorEnabled,
-                    isOn: $store.systemMonitorSneakPreviewEnabled
+                    title: AppStrings.text(.showSystemMonitorPreview, language: language),
+                    isEnabled: systemSettings.systemMonitorEnabled,
+                    isOn: $systemSettings.systemMonitorSneakPreviewEnabled
                 )
 
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: AppStrings.text(.sneakPreviewMode, language: store.interfaceLanguage),
-                    detail: AppStrings.text(.sneakPreviewModeDetail, language: store.interfaceLanguage),
+                    title: AppStrings.text(.sneakPreviewMode, language: language),
+                    detail: AppStrings.text(.sneakPreviewModeDetail, language: language),
                     selection: modeBinding,
-                    isEnabled: store.systemMonitorEnabled && store.systemMonitorSneakPreviewEnabled
+                    isEnabled: systemSettings.systemMonitorEnabled && systemSettings.systemMonitorSneakPreviewEnabled
                 ) {
                     modeOptions
                 }
             }
 
             SettingsGroupSection(
-                title: AppStrings.text(.pinnedSlots, language: store.interfaceLanguage),
-                footer: AppStrings.text(.pinnedSlotsFooter, language: store.interfaceLanguage)
+                title: AppStrings.text(.pinnedSlots, language: language),
+                footer: AppStrings.text(.pinnedSlotsFooter, language: language)
             ) {
                 SettingsPickerRow(
-                    title: AppStrings.text(.leftSlot1, language: store.interfaceLanguage),
+                    title: AppStrings.text(.leftSlot1, language: language),
                     selection: metricBinding(side: .left, index: 0),
                     isEnabled: arePinnedSlotsActive
                 ) {
@@ -491,7 +513,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: AppStrings.text(.leftSlot2, language: store.interfaceLanguage),
+                    title: AppStrings.text(.leftSlot2, language: language),
                     selection: metricBinding(side: .left, index: 1),
                     isEnabled: arePinnedSlotsActive
                 ) {
@@ -501,7 +523,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: AppStrings.text(.rightSlot1, language: store.interfaceLanguage),
+                    title: AppStrings.text(.rightSlot1, language: language),
                     selection: metricBinding(side: .right, index: 0),
                     isEnabled: arePinnedSlotsActive
                 ) {
@@ -511,7 +533,7 @@ struct SystemMonitorPluginSettingsView: View {
                 SettingsRowDivider()
 
                 SettingsPickerRow(
-                    title: AppStrings.text(.rightSlot2, language: store.interfaceLanguage),
+                    title: AppStrings.text(.rightSlot2, language: language),
                     selection: metricBinding(side: .right, index: 1),
                     isEnabled: arePinnedSlotsActive
                 ) {
@@ -520,8 +542,8 @@ struct SystemMonitorPluginSettingsView: View {
             }
 
             SettingsGroupSection(
-                title: AppStrings.text(.reactiveMetrics, language: store.interfaceLanguage),
-                footer: AppStrings.text(.reactiveMetricsFooter, language: store.interfaceLanguage)
+                title: AppStrings.text(.reactiveMetrics, language: language),
+                footer: AppStrings.text(.reactiveMetricsFooter, language: language)
             ) {
                 ForEach(Array(SystemMonitorMetric.allCases.enumerated()), id: \.element) { entry in
                     let metric = entry.element
@@ -529,11 +551,11 @@ struct SystemMonitorPluginSettingsView: View {
                         SettingsRowDivider()
                     }
                     SettingsToggleRow(
-                        title: metric.settingsTitle(language: store.interfaceLanguage),
+                        title: metric.settingsTitle(language: language),
                         isEnabled: SystemMonitorSettingsAvailability.reactiveMetricToggleActive(
-                            systemMonitorEnabled: store.systemMonitorEnabled,
-                            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled,
-                            mode: store.systemMonitorSneakConfiguration.mode,
+                            systemMonitorEnabled: systemSettings.systemMonitorEnabled,
+                            sneakPreviewEnabled: systemSettings.systemMonitorSneakPreviewEnabled,
+                            mode: systemSettings.systemMonitorSneakConfiguration.mode,
                             isMetricPinned: isMetricPinned(metric)
                         ),
                         isOn: reactiveBinding(for: metric)
@@ -542,8 +564,8 @@ struct SystemMonitorPluginSettingsView: View {
             }
 
             SettingsGroupSection(
-                title: AppStrings.text(.reactiveThresholds, language: store.interfaceLanguage),
-                footer: AppStrings.text(.reactiveThresholdsFooter, language: store.interfaceLanguage)
+                title: AppStrings.text(.reactiveThresholds, language: language),
+                footer: AppStrings.text(.reactiveThresholdsFooter, language: language)
             ) {
                 ForEach(Array(SystemMonitorMetric.allCases.enumerated()), id: \.element) { entry in
                     let metric = entry.element
@@ -558,11 +580,11 @@ struct SystemMonitorPluginSettingsView: View {
 
     @ViewBuilder
     private func thresholdRow(for metric: SystemMonitorMetric) -> some View {
-        let value = store.systemMonitorAlertThresholds.value(for: metric)
+        let value = systemSettings.systemMonitorAlertThresholds.value(for: metric)
         let detail = AppStrings.systemMonitorThresholdDetail(
             metric: metric,
             value: value,
-            language: store.interfaceLanguage
+            language: language
         )
         SettingsRow(
             title: thresholdRowTitle(for: metric),
@@ -601,25 +623,25 @@ struct SystemMonitorPluginSettingsView: View {
     private func thresholdRowTitle(for metric: SystemMonitorMetric) -> String {
         switch metric {
         case .cpu:
-            return AppStrings.text(.cpuThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.cpuThresholdTitle, language: language)
         case .memory:
-            return AppStrings.text(.memoryThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.memoryThresholdTitle, language: language)
         case .temperature:
-            return AppStrings.text(.temperatureThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.temperatureThresholdTitle, language: language)
         case .battery:
-            return AppStrings.text(.batteryThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.batteryThresholdTitle, language: language)
         case .disk:
-            return AppStrings.text(.diskThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.diskThresholdTitle, language: language)
         case .network:
-            return AppStrings.text(.networkThresholdTitle, language: store.interfaceLanguage)
+            return AppStrings.text(.networkThresholdTitle, language: language)
         }
     }
 
     private func thresholdBinding(for metric: SystemMonitorMetric) -> Binding<Double> {
         Binding(
-            get: { store.systemMonitorAlertThresholds.value(for: metric) },
+            get: { systemSettings.systemMonitorAlertThresholds.value(for: metric) },
             set: { newValue in
-                store.systemMonitorAlertThresholds = store.systemMonitorAlertThresholds
+                systemSettings.systemMonitorAlertThresholds = systemSettings.systemMonitorAlertThresholds
                     .setting(newValue.rounded(), for: metric)
             }
         )
@@ -644,25 +666,25 @@ struct SystemMonitorPluginSettingsView: View {
 
     private var arePinnedSlotsActive: Bool {
         SystemMonitorSettingsAvailability.pinnedSlotsActive(
-            systemMonitorEnabled: store.systemMonitorEnabled,
-            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled,
-            mode: store.systemMonitorSneakConfiguration.mode
+            systemMonitorEnabled: systemSettings.systemMonitorEnabled,
+            sneakPreviewEnabled: systemSettings.systemMonitorSneakPreviewEnabled,
+            mode: systemSettings.systemMonitorSneakConfiguration.mode
         )
     }
 
     private var areAlertThresholdsActive: Bool {
         SystemMonitorSettingsAvailability.alertThresholdsActive(
-            systemMonitorEnabled: store.systemMonitorEnabled,
-            sneakPreviewEnabled: store.systemMonitorSneakPreviewEnabled
+            systemMonitorEnabled: systemSettings.systemMonitorEnabled,
+            sneakPreviewEnabled: systemSettings.systemMonitorSneakPreviewEnabled
         )
     }
 
     private var modeBinding: Binding<SystemMonitorSneakMode> {
         Binding(
-            get: { store.systemMonitorSneakConfiguration.mode },
+            get: { systemSettings.systemMonitorSneakConfiguration.mode },
             set: { newMode in
-                let configuration = store.systemMonitorSneakConfiguration
-                store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                let configuration = systemSettings.systemMonitorSneakConfiguration
+                systemSettings.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
                     mode: newMode,
                     left: configuration.leftMetrics,
                     right: configuration.rightMetrics,
@@ -674,21 +696,21 @@ struct SystemMonitorPluginSettingsView: View {
 
     @ViewBuilder
     private var modeOptions: some View {
-        Text(AppStrings.text(.sneakPreviewModeAlwaysOn, language: store.interfaceLanguage))
+        Text(AppStrings.text(.sneakPreviewModeAlwaysOn, language: language))
             .tag(SystemMonitorSneakMode.alwaysOn)
-        Text(AppStrings.text(.sneakPreviewModePinnedReactive, language: store.interfaceLanguage))
+        Text(AppStrings.text(.sneakPreviewModePinnedReactive, language: language))
             .tag(SystemMonitorSneakMode.pinnedReactive)
-        Text(AppStrings.text(.sneakPreviewModeAmbient, language: store.interfaceLanguage))
+        Text(AppStrings.text(.sneakPreviewModeAmbient, language: language))
             .tag(SystemMonitorSneakMode.ambient)
     }
 
     @ViewBuilder
     private var metricOptions: some View {
-        Text(AppStrings.text(.hidden, language: store.interfaceLanguage))
+        Text(AppStrings.text(.hidden, language: language))
             .tag(SystemMonitorMetric?.none)
 
         ForEach(SystemMonitorMetric.allCases, id: \.self) { metric in
-            Text(metric.settingsTitle(language: store.interfaceLanguage))
+            Text(metric.settingsTitle(language: language))
                 .tag(Optional(metric))
         }
     }
@@ -715,24 +737,24 @@ struct SystemMonitorPluginSettingsView: View {
     private func metrics(side: SystemMonitorSneakSide) -> [SystemMonitorMetric] {
         switch side {
         case .left:
-            return store.systemMonitorSneakConfiguration.leftMetrics
+            return systemSettings.systemMonitorSneakConfiguration.leftMetrics
         case .right:
-            return store.systemMonitorSneakConfiguration.rightMetrics
+            return systemSettings.systemMonitorSneakConfiguration.rightMetrics
         }
     }
 
     private func updateMetric(_ metric: SystemMonitorMetric?, side: SystemMonitorSneakSide, index: Int) {
-        let configuration = store.systemMonitorSneakConfiguration
+        let configuration = systemSettings.systemMonitorSneakConfiguration
         switch side {
         case .left:
-            store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            systemSettings.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
                 mode: configuration.mode,
                 left: updatedMetrics(configuration.leftMetrics, setting: metric, at: index),
                 right: configuration.rightMetrics,
                 reactive: configuration.reactiveMetrics
             )
         case .right:
-            store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+            systemSettings.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
                 mode: configuration.mode,
                 left: configuration.leftMetrics,
                 right: updatedMetrics(configuration.rightMetrics, setting: metric, at: index),
@@ -754,7 +776,7 @@ struct SystemMonitorPluginSettingsView: View {
     }
 
     private func isMetricPinned(_ metric: SystemMonitorMetric) -> Bool {
-        let configuration = store.systemMonitorSneakConfiguration
+        let configuration = systemSettings.systemMonitorSneakConfiguration
         return configuration.leftMetrics.contains(metric)
             || configuration.rightMetrics.contains(metric)
     }
@@ -762,7 +784,7 @@ struct SystemMonitorPluginSettingsView: View {
     private func reactiveBinding(for metric: SystemMonitorMetric) -> Binding<Bool> {
         Binding(
             get: {
-                let configuration = store.systemMonitorSneakConfiguration
+                let configuration = systemSettings.systemMonitorSneakConfiguration
                 return SystemMonitorSettingsAvailability.reactiveMetricToggleValue(
                     storedValue: configuration.reactiveMetrics.contains(metric),
                     mode: configuration.mode,
@@ -770,7 +792,7 @@ struct SystemMonitorPluginSettingsView: View {
                 )
             },
             set: { isOn in
-                let configuration = store.systemMonitorSneakConfiguration
+                let configuration = systemSettings.systemMonitorSneakConfiguration
                 var reactive = configuration.reactiveMetrics
                 if isOn {
                     if reactive.contains(metric) == false {
@@ -779,7 +801,7 @@ struct SystemMonitorPluginSettingsView: View {
                 } else {
                     reactive.removeAll { $0 == metric }
                 }
-                store.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
+                systemSettings.systemMonitorSneakConfiguration = SystemMonitorSneakConfiguration(
                     mode: configuration.mode,
                     left: configuration.leftMetrics,
                     right: configuration.rightMetrics,
@@ -787,6 +809,10 @@ struct SystemMonitorPluginSettingsView: View {
                 )
             }
         )
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }
 

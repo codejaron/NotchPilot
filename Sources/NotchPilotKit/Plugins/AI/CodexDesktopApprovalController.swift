@@ -39,10 +39,8 @@ struct CodexDesktopApprovalResponse: Equatable, Sendable {
 }
 
 final class CodexDesktopApprovalController {
-    private enum Delivery: Equatable {
-        case response
-        case threadFollower(ownerClientID: String, conversationID: String, version: Int)
-    }
+    private typealias Delivery = CodexDesktopApprovalDelivery
+    private typealias SupportedMethod = CodexDesktopApprovalMethod
 
     private struct FollowUpRequest {
         let threadID: String
@@ -81,16 +79,6 @@ final class CodexDesktopApprovalController {
         var surface: CodexActionableSurface
     }
 
-    private enum SupportedMethod: String {
-        case commandExecution = "item/commandExecution/requestApproval"
-        case fileChange = "item/fileChange/requestApproval"
-        case permissions = "item/permissions/requestApproval"
-        case toolRequestUserInput = "item/tool/requestUserInput"
-        case mcpServerElicitation = "mcpServer/elicitation/request"
-        case legacyExecCommand = "execCommandApproval"
-        case legacyApplyPatch = "applyPatchApproval"
-    }
-
     private var pendingApproval: PendingApproval?
     private let followUpCreatedAtMillisecondsProvider: @Sendable () -> Int
 
@@ -107,23 +95,7 @@ final class CodexDesktopApprovalController {
     }
 
     static func canHandle(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
-        guard let request,
-              let method = SupportedMethod(rawValue: request.method)
-        else {
-            return false
-        }
-
-        switch method {
-        case .mcpServerElicitation:
-            return isMCPToolApprovalElicitation(params: request.params)
-        case .commandExecution,
-             .fileChange,
-             .permissions,
-             .toolRequestUserInput,
-             .legacyExecCommand,
-             .legacyApplyPatch:
-            return true
-        }
+        CodexDesktopApprovalRequestRouter.canHandle(request)
     }
 
     func handle(request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
@@ -142,7 +114,7 @@ final class CodexDesktopApprovalController {
         request: CodexDesktopIPCRequestFrame,
         delivery: Delivery
     ) -> CodexActionableSurface? {
-        guard let method = SupportedMethod(rawValue: request.method) else {
+        guard let method = CodexDesktopApprovalRequestRouter.method(for: request) else {
             return nil
         }
 
@@ -157,7 +129,7 @@ final class CodexDesktopApprovalController {
         case .toolRequestUserInput:
             pendingApproval = makeUserInputRequest(from: request, delivery: delivery)
         case .mcpServerElicitation:
-            guard Self.isMCPToolApprovalElicitation(params: request.params) else {
+            guard CodexDesktopApprovalRequestRouter.isMCPToolApprovalElicitation(params: request.params) else {
                 return nil
             }
             pendingApproval = makeMCPToolApprovalElicitation(from: request, delivery: delivery)
@@ -688,31 +660,7 @@ final class CodexDesktopApprovalController {
     }
 
     private func liveDelivery(for request: CodexDesktopIPCRequestFrame) -> Delivery? {
-        guard let method = SupportedMethod(rawValue: request.method) else {
-            return nil
-        }
-
-        switch method {
-        case .commandExecution,
-             .fileChange,
-             .permissions,
-             .toolRequestUserInput,
-             .mcpServerElicitation:
-            guard let conversationID = request.params.stringValue(at: ["threadId"])?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  conversationID.isEmpty == false
-            else {
-                return nil
-            }
-
-            let ownerClientID = request.sourceClientID.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard ownerClientID.isEmpty == false else {
-                return nil
-            }
-
-            return .threadFollower(ownerClientID: ownerClientID, conversationID: conversationID, version: 1)
-        case .legacyExecCommand, .legacyApplyPatch:
-            return nil
-        }
+        CodexDesktopApprovalRequestRouter.liveDelivery(for: request)
     }
 
     private func submission(
@@ -1129,19 +1077,6 @@ final class CodexDesktopApprovalController {
                 ]),
             ]),
         ])
-    }
-
-    private static func isMCPToolApprovalElicitation(params: [String: JSONValue]) -> Bool {
-        let kindPaths = [
-            ["_meta", "codex_approval_kind"],
-            ["_meta", "codexApprovalKind"],
-            ["meta", "codex_approval_kind"],
-            ["meta", "codexApprovalKind"],
-        ]
-
-        return kindPaths.contains { path in
-            params.stringValue(at: path) == "mcp_tool_call"
-        }
     }
 
     private func permissionsGrantResult(

@@ -53,7 +53,10 @@ final class LyricsSearchController: ObservableObject {
 
     var selectedPreviewText: String {
         guard let selectedLyrics else {
-            return errorMessage ?? AppStrings.text(.noLyricsPreview, language: SettingsStore.shared.interfaceLanguage)
+            return errorMessage ?? AppStrings.text(
+                .noLyricsPreview,
+                language: SettingsStore.shared.general.interfaceLanguage
+            )
         }
 
         return selectedLyrics.lines
@@ -106,7 +109,10 @@ final class LyricsSearchController: ObservableObject {
         isSearching = false
 
         if results.isEmpty || didReceiveResults == false {
-            errorMessage = AppStrings.text(.noLyricsFound, language: SettingsStore.shared.interfaceLanguage)
+            errorMessage = AppStrings.text(
+                .noLyricsFound,
+                language: SettingsStore.shared.general.interfaceLanguage
+            )
         } else {
             errorMessage = nil
         }
@@ -159,7 +165,10 @@ final class LyricsSearchController: ObservableObject {
                 return
             }
             selectedLyrics = nil
-            errorMessage = AppStrings.text(.unableToLoadLyrics, language: SettingsStore.shared.interfaceLanguage)
+            errorMessage = AppStrings.text(
+                .unableToLoadLyrics,
+                language: SettingsStore.shared.general.interfaceLanguage
+            )
         }
     }
 
@@ -188,7 +197,7 @@ final class LyricsSearchController: ObservableObject {
 
 struct LyricsSearchView: View {
     @ObservedObject var controller: LyricsSearchController
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
     let closeWindow: () -> Void
 
     private var selectedResultBinding: Binding<LyricsSearchCandidate.ID?> {
@@ -208,7 +217,7 @@ struct LyricsSearchView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(AppStrings.text(.lyricsBoundTo, language: store.interfaceLanguage))
+                    Text(AppStrings.text(.lyricsBoundTo, language: generalSettings.interfaceLanguage))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(controller.bindingDisplayTitle)
@@ -218,7 +227,7 @@ struct LyricsSearchView: View {
 
                 Spacer(minLength: 16)
 
-                Button(AppStrings.text(.close, language: store.interfaceLanguage)) {
+                Button(AppStrings.text(.close, language: generalSettings.interfaceLanguage)) {
                     controller.cancelPreview()
                     closeWindow()
                 }
@@ -230,12 +239,12 @@ struct LyricsSearchView: View {
 
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
-                    TextField(AppStrings.text(.song, language: store.interfaceLanguage), text: $controller.searchTitle)
-                    TextField(AppStrings.text(.artist, language: store.interfaceLanguage), text: $controller.searchArtist)
+                    TextField(AppStrings.text(.song, language: generalSettings.interfaceLanguage), text: $controller.searchTitle)
+                    TextField(AppStrings.text(.artist, language: generalSettings.interfaceLanguage), text: $controller.searchArtist)
                     Button(
                         controller.isSearching
-                            ? AppStrings.text(.searching, language: store.interfaceLanguage)
-                            : AppStrings.text(.search, language: store.interfaceLanguage)
+                            ? AppStrings.text(.searching, language: generalSettings.interfaceLanguage)
+                            : AppStrings.text(.search, language: generalSettings.interfaceLanguage)
                     ) {
                         Task {
                             await controller.search()
@@ -247,11 +256,11 @@ struct LyricsSearchView: View {
                 HSplitView {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            Text(AppStrings.text(.song, language: store.interfaceLanguage))
+                            Text(AppStrings.text(.song, language: generalSettings.interfaceLanguage))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(AppStrings.text(.artist, language: store.interfaceLanguage))
+                            Text(AppStrings.text(.artist, language: generalSettings.interfaceLanguage))
                                 .frame(width: 180, alignment: .leading)
-                            Text(AppStrings.text(.source, language: store.interfaceLanguage))
+                            Text(AppStrings.text(.source, language: generalSettings.interfaceLanguage))
                                 .frame(width: 110, alignment: .leading)
                         }
                         .font(.headline)
@@ -305,7 +314,7 @@ struct LyricsSearchView: View {
 
                     Spacer()
 
-                    Button(AppStrings.text(.applyToCurrentSong, language: store.interfaceLanguage)) {
+                    Button(AppStrings.text(.applyToCurrentSong, language: generalSettings.interfaceLanguage)) {
                         controller.applySelectedLyrics()
                         closeWindow()
                     }
@@ -368,7 +377,10 @@ final class LyricsSearchWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = AppStrings.text(.searchLyricsWindowTitle, language: SettingsStore.shared.interfaceLanguage)
+        window.title = AppStrings.text(
+            .searchLyricsWindowTitle,
+            language: SettingsStore.shared.general.interfaceLanguage
+        )
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = delegate

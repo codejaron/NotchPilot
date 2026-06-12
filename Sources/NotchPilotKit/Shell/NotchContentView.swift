@@ -11,7 +11,7 @@ public struct NotchContentView: View {
 
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager
-    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.session = session
@@ -177,7 +177,7 @@ public struct NotchContentView: View {
                 pluginContentViewport(activePlugin, context: context)
             case .none:
                 NotchPilotHUDPanel(cornerRadius: 28) {
-                    Text(AppStrings.text(.noPluginsEnabled, language: store.interfaceLanguage))
+                    Text(AppStrings.text(.noPluginsEnabled, language: language))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(NotchPilotTheme.islandTextSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -407,9 +407,9 @@ public struct NotchContentView: View {
     private func pluginTabAccessibilityLabel(_ plugin: any NotchPlugin) -> String {
         switch plugin.id {
         case SettingsPluginID.media.rawValue:
-            return AppStrings.text(.media, language: store.interfaceLanguage)
+            return AppStrings.text(.media, language: language)
         case SettingsPluginID.systemMonitor.rawValue:
-            return AppStrings.text(.system, language: store.interfaceLanguage)
+            return AppStrings.text(.system, language: language)
         default:
             return plugin.title
         }
@@ -436,7 +436,7 @@ public struct NotchContentView: View {
                 }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(AppStrings.text(.openSettings, language: store.interfaceLanguage))
+        .accessibilityLabel(AppStrings.text(.openSettings, language: language))
     }
 
     private func activeSelection(
@@ -464,5 +464,9 @@ public struct NotchContentView: View {
             return .plugin(plugin)
         }
         return .none
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }

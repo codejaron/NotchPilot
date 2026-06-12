@@ -17,7 +17,7 @@ struct AIPluginCodexSurfaceView: View {
     let onSelectOption: (String) -> Void
     let onUpdateText: (String) -> Void
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     private let codexTextInputFont = NSFont.systemFont(
         ofSize: CodexApprovalCompactLayout.textInputFontSize,
@@ -67,7 +67,7 @@ struct AIPluginCodexSurfaceView: View {
             minimalBackButton
 
             if let summaryText = presentation.summaryText {
-                Text(AppStrings.codexSurfaceSummary(summaryText, language: settingsStore.interfaceLanguage))
+                Text(AppStrings.codexSurfaceSummary(summaryText, language: generalSettings.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.headerSummaryFontSize,
                         weight: .semibold,
@@ -121,7 +121,7 @@ struct AIPluginCodexSurfaceView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.primaryColumnSpacing) {
             AIPluginApprovalCommandView(
-                text: AppStrings.codexSurfaceSummary(presentation.commandText, language: settingsStore.interfaceLanguage),
+                text: AppStrings.codexSurfaceSummary(presentation.commandText, language: generalSettings.interfaceLanguage),
                 compact: true
             )
             codexSurfaceControls(surface)
@@ -201,7 +201,7 @@ struct AIPluginCodexSurfaceView: View {
         let presentation = CodexApprovalTextInputPresentation.feedback(
             textInput: textInput,
             option: option,
-            language: settingsStore.interfaceLanguage
+            language: generalSettings.interfaceLanguage
         )
 
         return codexSurfaceTextInput(
@@ -223,7 +223,7 @@ struct AIPluginCodexSurfaceView: View {
         let presentation = CodexApprovalTextInputPresentation.standalone(
             textInput: textInput,
             index: index,
-            language: settingsStore.interfaceLanguage
+            language: generalSettings.interfaceLanguage
         )
 
         return codexSurfaceTextInput(

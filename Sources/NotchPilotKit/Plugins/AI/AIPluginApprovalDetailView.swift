@@ -17,7 +17,7 @@ struct AIPluginApprovalDetailView: View {
     let onBack: () -> Void
     let onRespond: (ApprovalAction) -> Void
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     @State private var claudeApprovalInteractionState: ClaudeApprovalInteractionState?
 
@@ -117,7 +117,7 @@ struct AIPluginApprovalDetailView: View {
     private var currentApprovalOptions: [ClaudeApprovalOptionPresentation] {
         ClaudeApprovalOptionPresentation.options(
             for: approval.availableActions,
-            language: settingsStore.interfaceLanguage
+            language: generalSettings.interfaceLanguage
         )
     }
 
@@ -283,7 +283,7 @@ struct AIPluginApprovalDetailView: View {
                 )
 
                 if feedbackText.isEmpty {
-                    Text(AppStrings.text(.tellClaudeWhatToChange, language: settingsStore.interfaceLanguage))
+                    Text(AppStrings.text(.tellClaudeWhatToChange, language: generalSettings.interfaceLanguage))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.3))
                         .padding(.horizontal, 10)
@@ -297,7 +297,7 @@ struct AIPluginApprovalDetailView: View {
                 Button {
                     submitClaudeFeedback()
                 } label: {
-                    Text(AppStrings.text(.send, language: settingsStore.interfaceLanguage))
+                    Text(AppStrings.text(.send, language: generalSettings.interfaceLanguage))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -326,13 +326,13 @@ struct AIPluginApprovalDetailView: View {
 
     private var claudeApprovalSummary: String {
         if approval.approvalKind == .networkAccess {
-            return AppStrings.text(.networkAccessRequest, language: settingsStore.interfaceLanguage)
+            return AppStrings.text(.networkAccessRequest, language: generalSettings.interfaceLanguage)
         }
         let title = approval.payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty == false {
-            return AppStrings.claudeApprovalTitle(title, language: settingsStore.interfaceLanguage)
+            return AppStrings.claudeApprovalTitle(title, language: generalSettings.interfaceLanguage)
         }
-        return AppStrings.text(.claudeWaitingApproval, language: settingsStore.interfaceLanguage)
+        return AppStrings.text(.claudeWaitingApproval, language: generalSettings.interfaceLanguage)
     }
 
     private var approvalCommandText: String {
@@ -375,7 +375,7 @@ struct AIPluginApprovalDetailView: View {
     private func submitClaudeFeedback() {
         let action = ApprovalAction(
             id: "claude-deny-feedback-submit",
-            title: AppStrings.text(.noTellClaudeWhy, language: settingsStore.interfaceLanguage),
+            title: AppStrings.text(.noTellClaudeWhy, language: generalSettings.interfaceLanguage),
             style: .destructive,
             payload: .claude(
                 ApprovalDecision(

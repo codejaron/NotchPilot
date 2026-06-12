@@ -11,7 +11,7 @@ import SwiftUI
 struct AIPluginMergedExpandedView: View {
     let plugins: [any AIPluginRendering]
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
     @State private var approvalReviewState = AIPluginApprovalReviewState()
     @State private var codexSurfaceReviewState = AIPluginCodexSurfaceReviewState()
     @State private var codexApprovalInteractionState: CodexApprovalInteractionState?

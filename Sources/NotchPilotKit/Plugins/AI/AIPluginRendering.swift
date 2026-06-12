@@ -150,11 +150,11 @@ extension AIPluginRendering {
     func stopSession(id: String) -> Bool { false }
 
     var approvalSneakNotificationsEnabled: Bool {
-        SettingsStore.shared.approvalSneakNotificationsEnabled
+        SettingsStore.shared.ai.approvalSneakNotificationsEnabled
     }
 
     var activitySneakPreviewsHidden: Bool {
-        SettingsStore.shared.activitySneakPreviewsHidden
+        SettingsStore.shared.ai.activitySneakPreviewsHidden
     }
 
     func approvalSneakNotice() -> AIPluginApprovalSneakNotice? {

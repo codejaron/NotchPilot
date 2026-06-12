@@ -8,7 +8,7 @@ struct AIPluginCodexSurfaceActionButtons: View {
     let onCancel: () -> Void
     let onSubmit: () -> Void
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     var body: some View {
         let cancelFocused = focusedTarget == .cancel
@@ -19,7 +19,7 @@ struct AIPluginCodexSurfaceActionButtons: View {
                 onFocus(.cancel)
                 onCancel()
             } label: {
-                Text(AppStrings.codexButtonTitle(surface.cancelButtonTitle, language: settingsStore.interfaceLanguage))
+                Text(AppStrings.codexButtonTitle(surface.cancelButtonTitle, language: generalSettings.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.actionFontSize,
                         weight: .bold,
@@ -45,7 +45,7 @@ struct AIPluginCodexSurfaceActionButtons: View {
                 onFocus(.submit)
                 onSubmit()
             } label: {
-                Text(AppStrings.codexButtonTitle(surface.primaryButtonTitle, language: settingsStore.interfaceLanguage))
+                Text(AppStrings.codexButtonTitle(surface.primaryButtonTitle, language: generalSettings.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.actionFontSize,
                         weight: .bold,
@@ -84,7 +84,7 @@ struct AIPluginCodexSurfaceOptionRow: View {
     let isSelected: Bool
     let onActivate: () -> Void
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     var body: some View {
         Button {
@@ -111,7 +111,7 @@ struct AIPluginCodexSurfaceOptionRow: View {
                             )
                     )
 
-                Text(AppStrings.codexOptionTitle(option.title, language: settingsStore.interfaceLanguage))
+                Text(AppStrings.codexOptionTitle(option.title, language: generalSettings.interfaceLanguage))
                     .font(.system(
                         size: CodexApprovalCompactLayout.optionTitleFontSize,
                         weight: .semibold,

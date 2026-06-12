@@ -3,7 +3,7 @@ import SwiftUI
 
 struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     @ObservedObject var plugin: Plugin
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     let context: NotchContext
     let approvalNotice: AIPluginApprovalSneakNotice?
@@ -46,7 +46,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
                 Circle()
                     .fill(Color.gray)
                     .frame(width: 10, height: 10)
-                Text(AppStrings.text(.idle, language: settingsStore.interfaceLanguage))
+                Text(AppStrings.text(.idle, language: generalSettings.interfaceLanguage))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
             }
@@ -110,7 +110,7 @@ struct AIPluginCompactView<Plugin: AIPluginRendering>: View {
     }
 
     private func localizedApprovalNoticeText(_ text: String) -> String {
-        let language = settingsStore.interfaceLanguage
+        let language = generalSettings.interfaceLanguage
         let codexSummary = AppStrings.codexSurfaceSummary(text, language: language)
         let claudeTitle = AppStrings.claudeApprovalTitle(codexSummary, language: language)
         return AppStrings.activityLabel(claudeTitle, language: language)

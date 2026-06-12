@@ -7,6 +7,9 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let bus = EventBus()
     private let pluginManager = PluginManager()
     private let nowPlayingController = SharedNowPlayingController()
+    private let settingsStore = SettingsStore.shared
+    private let generalSettings = SettingsStore.shared.general
+    private let bridgeSettings = SettingsStore.shared.bridge
     private lazy var mediaPlaybackPlugin = MediaPlaybackPlugin(monitor: nowPlayingController)
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
@@ -37,7 +40,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         self.multiScreenManager = multiScreenManager
         pluginManager.activateAll(using: bus)
 
-        let lyricsCache = LyricsCache(homeDirectoryURL: SettingsStore.shared.homeDirectoryURL)
+        let lyricsCache = LyricsCache(homeDirectoryURL: settingsStore.homeDirectoryURL)
         let lyricsRemoteProvider = LyricsKitProvider()
         let desktopLyricsManager = DesktopLyricsManager(
             nowPlayingController: nowPlayingController,
@@ -56,11 +59,11 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(
             lyricsActions: desktopLyricsManager.statusMenuActions,
             activitySneakActions: StatusItemActivitySneakActions(
-                isHidden: {
-                    SettingsStore.shared.activitySneakPreviewsHidden
+                isHidden: { [weak self] in
+                    self?.generalSettings.activitySneakPreviewsHidden ?? false
                 },
-                toggle: {
-                    SettingsStore.shared.activitySneakPreviewsHidden.toggle()
+                toggle: { [weak self] in
+                    self?.generalSettings.activitySneakPreviewsHidden.toggle()
                 }
             ),
             settingsHandler: { [weak self] in
@@ -74,8 +77,8 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
         applySocketPreference()
 
         KeyboardShortcuts.onKeyDown(for: .toggleHideAllPreviews) {
-            Task { @MainActor in
-                SettingsStore.shared.activitySneakPreviewsHidden.toggle()
+            Task { @MainActor [weak self] in
+                self?.generalSettings.activitySneakPreviewsHidden.toggle()
             }
         }
 
@@ -107,7 +110,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidBecomeActive(_ notification: Notification) {
-        SettingsStore.shared.refreshLaunchAtLoginState()
+        generalSettings.refreshLaunchAtLoginState()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
@@ -128,7 +131,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySocketPreference() {
-        if SettingsStore.shared.autoStartSocket {
+        if bridgeSettings.autoStartSocket {
             startSocketServer()
         } else {
             stopSocketServer()

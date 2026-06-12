@@ -6,7 +6,7 @@ struct AIPluginClaudeQuestionView: View {
     @Binding var questionTextAnswers: [String: String]
     let onRespond: (ApprovalAction) -> Void
 
-    @ObservedObject private var settingsStore = SettingsStore.shared
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -18,7 +18,7 @@ struct AIPluginClaudeQuestionView: View {
                 Button {
                     submitSkip()
                 } label: {
-                    Text(AppStrings.text(.skip, language: settingsStore.interfaceLanguage))
+                    Text(AppStrings.text(.skip, language: generalSettings.interfaceLanguage))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(NotchPilotTheme.islandTextPrimary)
                         .lineLimit(1)
@@ -38,7 +38,7 @@ struct AIPluginClaudeQuestionView: View {
                 Button {
                     submitAnswers()
                 } label: {
-                    Text(AppStrings.text(.submit, language: settingsStore.interfaceLanguage))
+                    Text(AppStrings.text(.submit, language: generalSettings.interfaceLanguage))
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -246,7 +246,7 @@ struct AIPluginClaudeQuestionView: View {
 
         let action = ApprovalAction(
             id: "claude-question-submit",
-            title: AppStrings.text(.submit, language: settingsStore.interfaceLanguage),
+            title: AppStrings.text(.submit, language: generalSettings.interfaceLanguage),
             style: .primary,
             payload: .claude(
                 ApprovalDecision(
@@ -261,7 +261,7 @@ struct AIPluginClaudeQuestionView: View {
     private func submitSkip() {
         let action = ApprovalAction(
             id: "claude-question-skip",
-            title: AppStrings.text(.skip, language: settingsStore.interfaceLanguage),
+            title: AppStrings.text(.skip, language: generalSettings.interfaceLanguage),
             style: .outline,
             payload: .claude(
                 ApprovalDecision(
