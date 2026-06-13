@@ -2,6 +2,22 @@ import XCTest
 @testable import NotchPilotKit
 
 final class ClaudeTranscriptReaderTests: XCTestCase {
+    func testDeduplicatesRepeatedAssistantMessageUsageByMessageID() async throws {
+        let url = try writeTranscript("""
+        {"type":"assistant","message":{"id":"msg-1","role":"assistant","usage":{"input_tokens":100,"output_tokens":40}}}
+        {"type":"assistant","message":{"id":"msg-1","role":"assistant","usage":{"input_tokens":100,"output_tokens":40}}}
+        {"type":"assistant","message":{"id":"msg-2","role":"assistant","usage":{"input_tokens":120,"output_tokens":75}}}
+        {"type":"assistant","message":{"id":"msg-2","role":"assistant","usage":{"input_tokens":120,"output_tokens":75}}}
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let reader = ClaudeTranscriptReader()
+        let usage = await reader.usage(forSessionID: "s-dedupe", transcriptPath: url.path)
+
+        XCTAssertEqual(usage?.contextInputTokens, 120)
+        XCTAssertEqual(usage?.totalOutputTokens, 40 + 75)
+    }
+
     func testParsesLatestContextInputAndCumulativeOutput() async throws {
         let url = try writeTranscript("""
         {"type":"user","message":{"role":"user","content":"hi"}}

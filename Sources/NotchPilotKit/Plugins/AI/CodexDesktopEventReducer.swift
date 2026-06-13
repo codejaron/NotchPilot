@@ -262,7 +262,7 @@ public struct CodexDesktopEventReducer {
             activityLabel: conversationActivityLabel(from: state),
             phase: conversationPhase(from: state),
             inputTokenCount: contextInputTokenCount(from: state),
-            outputTokenCount: lastOutputTokenCount(from: state),
+            outputTokenCount: totalOutputTokenCount(from: state) ?? lastOutputTokenCount(from: state),
             contextInputTokenCount: contextInputTokenCount(from: state),
             contextWindowTokenCount: contextWindowTokenCount(from: state),
             launchContext: conversationLaunchContext(conversationID: conversationID)
@@ -296,6 +296,23 @@ public struct CodexDesktopEventReducer {
             ["latestTokenUsageInfo", "info", "lastTokenUsage", "output_tokens"],
             ["latestTokenUsageInfo", "info", "last_token_usage", "outputTokens"],
             ["latestTokenUsageInfo", "info", "last_token_usage", "output_tokens"],
+        ])
+    }
+
+    private func totalOutputTokenCount(from state: [String: JSONValue]) -> Int? {
+        firstNonNegativeInteger(in: state, paths: [
+            ["latestTokenUsageInfo", "total", "outputTokens"],
+            ["latestTokenUsageInfo", "total", "output_tokens"],
+            ["latestTokenUsageInfo", "totalTokenUsage", "outputTokens"],
+            ["latestTokenUsageInfo", "totalTokenUsage", "output_tokens"],
+            ["latestTokenUsageInfo", "total_token_usage", "outputTokens"],
+            ["latestTokenUsageInfo", "total_token_usage", "output_tokens"],
+            ["latestTokenUsageInfo", "info", "total", "outputTokens"],
+            ["latestTokenUsageInfo", "info", "total", "output_tokens"],
+            ["latestTokenUsageInfo", "info", "totalTokenUsage", "outputTokens"],
+            ["latestTokenUsageInfo", "info", "totalTokenUsage", "output_tokens"],
+            ["latestTokenUsageInfo", "info", "total_token_usage", "outputTokens"],
+            ["latestTokenUsageInfo", "info", "total_token_usage", "output_tokens"],
         ])
     }
 

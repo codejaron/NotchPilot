@@ -75,6 +75,7 @@ public actor ClaudeTranscriptReader: ClaudeTranscriptReading {
 
         var latestContextInput: Int?
         var totalOutput = 0
+        var outputByAssistantMessageID: [String: Int] = [:]
         var sawAny = false
 
         text.enumerateLines { line, _ in
@@ -96,7 +97,15 @@ public actor ClaudeTranscriptReader: ClaudeTranscriptReading {
             let output = ClaudeTranscriptReader.intValue(usage["output_tokens"]) ?? 0
 
             latestContextInput = input + cacheCreate + cacheRead
-            totalOutput += output
+
+            if let messageID = (message["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               messageID.isEmpty == false {
+                let previousOutput = outputByAssistantMessageID[messageID] ?? 0
+                outputByAssistantMessageID[messageID] = output
+                totalOutput += output - previousOutput
+            } else {
+                totalOutput += output
+            }
         }
 
         guard sawAny else { return nil }

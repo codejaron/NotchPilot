@@ -77,7 +77,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         XCTAssertFalse(marksActivity)
     }
 
-    func testThreadStreamSnapshotUsesLastTokenUsageForSessionTokenCountsAndContextWindowOccupancy() throws {
+    func testThreadStreamSnapshotUsesLastInputAndTotalOutputForSessionTokenCounts() throws {
         var reducer = CodexDesktopEventReducer()
 
         let outputs = try reducer.consume(
@@ -127,7 +127,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
         }
 
         XCTAssertEqual(context.inputTokenCount, 69_000)
-        XCTAssertEqual(context.outputTokenCount, 1_200)
+        XCTAssertEqual(context.outputTokenCount, 77_200)
         XCTAssertEqual(context.contextInputTokenCount, 69_000)
         XCTAssertEqual(context.contextWindowTokenCount, 258_400)
         XCTAssertEqual(try XCTUnwrap(context.contextUsagePercent), 26.702, accuracy: 0.001)
