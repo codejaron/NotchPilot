@@ -115,6 +115,167 @@ final class NowPlayingSessionMonitorRoutingTests: XCTestCase {
 
         XCTAssertEqual(spotifyPlayer.snapshotRequestCount, 1)
     }
+
+    func testSpotifyPausedPayloadIsNotOverriddenByCompleteSnapshotRefresh() async {
+        let stalePlayingSnapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Stale Playing Song",
+            artist: "Stale Artist",
+            album: "Stale Album",
+            artworkData: Data([7, 8, 9]),
+            currentTime: 30,
+            duration: 180,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: Date(timeIntervalSince1970: 10)
+        )
+        let spotifyPlayer = TestSpotifyPlaybackPlayer(
+            playbackTime: nil,
+            snapshots: [stalePlayingSnapshot]
+        )
+        let monitor = NowPlayingSessionMonitor(
+            playbackTimeProvider: RecordingPlaybackTimeProvider(playbackTime: nil),
+            spotifyPlayer: spotifyPlayer
+        )
+        let payload = SpotifyPlaybackNotice.Payload(
+            playback: .paused,
+            title: "Paused Song",
+            artist: "Paused Artist",
+            album: "Paused Album",
+            position: 12,
+            duration: 180_000,
+            artworkURL: nil,
+            trackID: "spotify:track:paused"
+        )
+
+        await monitor.applySpotifyPlaybackPayload(payload)
+
+        XCTAssertEqual(spotifyPlayer.snapshotRequestCount, 0)
+        guard case let .active(current) = monitor.currentState else {
+            return XCTFail("Expected paused Spotify snapshot")
+        }
+        XCTAssertEqual(current.title, "Paused Song")
+        XCTAssertFalse(current.isPlaying)
+        XCTAssertEqual(current.playbackRate, 0)
+    }
+
+    func testSpotifyStoppedPayloadClearsPlaybackWithoutCompleteSnapshotRefresh() async {
+        let stalePlayingSnapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Stale Playing Song",
+            artist: "Stale Artist",
+            album: "Stale Album",
+            artworkData: Data([7, 8, 9]),
+            currentTime: 30,
+            duration: 180,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: Date(timeIntervalSince1970: 10)
+        )
+        let spotifyPlayer = TestSpotifyPlaybackPlayer(
+            playbackTime: nil,
+            snapshots: [stalePlayingSnapshot]
+        )
+        let monitor = NowPlayingSessionMonitor(
+            playbackTimeProvider: RecordingPlaybackTimeProvider(playbackTime: nil),
+            spotifyPlayer: spotifyPlayer
+        )
+        let payload = SpotifyPlaybackNotice.Payload(
+            playback: .stopped,
+            title: nil,
+            artist: nil,
+            album: nil,
+            position: nil,
+            duration: nil,
+            artworkURL: nil,
+            trackID: "spotify:track:stopped"
+        )
+
+        await monitor.applySpotifyPlaybackPayload(payload)
+
+        XCTAssertEqual(spotifyPlayer.snapshotRequestCount, 0)
+        XCTAssertEqual(monitor.currentState, .idle)
+    }
+
+    func testSpotifyPausedPayloadDoesNotMarkTrackAsCompletelyRefreshed() async {
+        let completeSnapshot = MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.spotify.client"),
+            title: "Complete Song",
+            artist: "Complete Artist",
+            album: "Complete Album",
+            artworkData: Data([7, 8, 9]),
+            currentTime: 14,
+            duration: 180,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: Date(timeIntervalSince1970: 10)
+        )
+        let spotifyPlayer = TestSpotifyPlaybackPlayer(
+            playbackTime: nil,
+            snapshots: [completeSnapshot]
+        )
+        let monitor = NowPlayingSessionMonitor(
+            playbackTimeProvider: RecordingPlaybackTimeProvider(playbackTime: nil),
+            spotifyPlayer: spotifyPlayer
+        )
+        let pausedPayload = SpotifyPlaybackNotice.Payload(
+            playback: .paused,
+            title: "Paused Song",
+            artist: "Paused Artist",
+            album: "Paused Album",
+            position: 12,
+            duration: 180_000,
+            artworkURL: nil,
+            trackID: "spotify:track:same"
+        )
+        let playingPayload = SpotifyPlaybackNotice.Payload(
+            playback: .playing,
+            title: "Playing Song",
+            artist: "Playing Artist",
+            album: "Playing Album",
+            position: 13,
+            duration: 180_000,
+            artworkURL: nil,
+            trackID: "spotify:track:same"
+        )
+
+        await monitor.applySpotifyPlaybackPayload(pausedPayload)
+        await monitor.applySpotifyPlaybackPayload(playingPayload)
+
+        XCTAssertEqual(spotifyPlayer.snapshotRequestCount, 1)
+        guard case let .active(current) = monitor.currentState else {
+            return XCTFail("Expected active Spotify snapshot")
+        }
+        XCTAssertEqual(current.title, "Complete Song")
+        XCTAssertEqual(current.artworkData, Data([7, 8, 9]))
+    }
+
+    func testPlaybackTimeReconciliationReanchorsSpotifySeek() async {
+        let spotifyPlayer = TestSpotifyPlaybackPlayer(playbackTime: 75)
+        let monitor = NowPlayingSessionMonitor(
+            playbackTimeProvider: RecordingPlaybackTimeProvider(playbackTime: nil),
+            spotifyPlayer: spotifyPlayer
+        )
+        let initialPayload = SpotifyPlaybackNotice.Payload(
+            playback: .playing,
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            position: 10,
+            duration: 180,
+            artworkURL: nil,
+            trackID: "spotify:track:song"
+        )
+
+        await monitor.applySpotifyPlaybackPayload(initialPayload)
+        await monitor.reconcilePlaybackTime(at: Date(timeIntervalSince1970: 11))
+
+        XCTAssertEqual(spotifyPlayer.playbackTimeRequestCount, 1)
+        guard case let .active(current) = monitor.currentState else {
+            return XCTFail("Expected active Spotify snapshot")
+        }
+        XCTAssertEqual(current.currentTime, 75)
+    }
 }
 
 private final class TestSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {

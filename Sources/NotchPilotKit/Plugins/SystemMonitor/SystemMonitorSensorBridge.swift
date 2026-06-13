@@ -1,6 +1,11 @@
 import Foundation
 import IOKit
 
+protocol SystemMonitorSMCReading: AnyObject, Sendable {
+    func value(forKey key: String) -> Double?
+    func allKeys() -> [String]
+}
+
 struct SystemMonitorSMCSensorBridge: Sendable {
     private static let intelCPUTemperatureKeys = ["TC0D", "TC0E", "TC0F", "TC0P", "TC0H"]
     private static let appleSiliconCPUTemperatureKeys = Array(Set([
@@ -12,9 +17,10 @@ struct SystemMonitorSMCSensorBridge: Sendable {
         "Tp00", "Tp04", "Tp08", "Tp0C", "Tp0G", "Tp0K", "Tp0O", "Tp0R", "Tp0U", "Tp0a", "Tp0d", "Tp0g", "Tp0m", "Tp0p", "Tp0u", "Tp0y",
     ])).sorted()
 
-    private let smc: SystemMonitorSMCConnection?
+    private let smc: (any SystemMonitorSMCReading)?
+    private let temperatureCache = SystemMonitorSMCTemperatureCache()
 
-    init(smc: SystemMonitorSMCConnection? = SystemMonitorSMCConnection()) {
+    init(smc: (any SystemMonitorSMCReading)? = SystemMonitorSMCConnection()) {
         self.smc = smc
     }
 
@@ -23,24 +29,48 @@ struct SystemMonitorSMCSensorBridge: Sendable {
             return nil
         }
 
+        if let cachedKeys = temperatureCache.temperatureKeys() {
+            let cachedTemperatures = cachedKeys.compactMap { key in
+                smc.value(forKey: key)
+            }
+            if let cachedAverage = Self.averageTemperature(from: cachedTemperatures) {
+                return cachedAverage
+            }
+            temperatureCache.clearTemperatureKeys()
+        }
+
         for key in Self.intelCPUTemperatureKeys {
             if let temperature = smc.value(forKey: key), Self.isValidTemperature(temperature) {
+                temperatureCache.storeTemperatureKeys([key])
                 return temperature
             }
         }
 
-        let appleSiliconTemperatures = Self.appleSiliconCPUTemperatureKeys.compactMap { key in
-            smc.value(forKey: key)
+        let appleSiliconReadings = Self.appleSiliconCPUTemperatureKeys.compactMap { key -> (String, Double)? in
+            guard let temperature = smc.value(forKey: key), Self.isValidTemperature(temperature) else {
+                return nil
+            }
+            return (key, temperature)
         }
-        if let average = Self.averageTemperature(from: appleSiliconTemperatures) {
+        if let average = Self.averageTemperature(from: appleSiliconReadings.map(\.1)) {
+            temperatureCache.storeTemperatureKeys(appleSiliconReadings.map(\.0))
             return average
         }
 
-        let discoveredTemperatures = smc
+        let discoveredReadings = smc
             .allKeys()
             .filter { $0.hasPrefix("T") }
-            .compactMap { key in smc.value(forKey: key) }
-        return Self.averageTemperature(from: discoveredTemperatures)
+            .compactMap { key -> (String, Double)? in
+                guard let temperature = smc.value(forKey: key), Self.isValidTemperature(temperature) else {
+                    return nil
+                }
+                return (key, temperature)
+            }
+        let discoveredAverage = Self.averageTemperature(from: discoveredReadings.map(\.1))
+        if discoveredAverage != nil {
+            temperatureCache.storeTemperatureKeys(discoveredReadings.map(\.0))
+        }
+        return discoveredAverage
     }
 
     static func averageTemperature(from values: [Double]) -> Double? {
@@ -99,7 +129,30 @@ struct SystemMonitorSMCSensorBridge: Sendable {
     }
 }
 
-final class SystemMonitorSMCConnection: @unchecked Sendable {
+private final class SystemMonitorSMCTemperatureCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cachedTemperatureKeys: [String]?
+
+    func temperatureKeys() -> [String]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cachedTemperatureKeys
+    }
+
+    func storeTemperatureKeys(_ keys: [String]) {
+        lock.lock()
+        cachedTemperatureKeys = keys
+        lock.unlock()
+    }
+
+    func clearTemperatureKeys() {
+        lock.lock()
+        cachedTemperatureKeys = nil
+        lock.unlock()
+    }
+}
+
+final class SystemMonitorSMCConnection: SystemMonitorSMCReading, @unchecked Sendable {
     private var connection: io_connect_t = 0
     private let lock = NSLock()
 

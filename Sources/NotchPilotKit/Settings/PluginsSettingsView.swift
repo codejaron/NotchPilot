@@ -123,6 +123,18 @@ struct MediaPluginSettingsView: View {
                     isEnabled: mediaSettings.mediaPlaybackEnabled,
                     isOn: $lyricsSettings.desktopLyricsEnabled
                 )
+
+                SettingsRowDivider()
+
+                SettingsToggleRow(
+                    title: AppStrings.text(.blockHTTPLyricsSources, language: language),
+                    detail: AppStrings.text(.blockHTTPLyricsSourcesDetail, language: language),
+                    isEnabled: mediaSettings.mediaPlaybackEnabled && lyricsSettings.desktopLyricsEnabled,
+                    isOn: Binding(
+                        get: { lyricsSettings.desktopLyricsAllowInsecureSources == false },
+                        set: { lyricsSettings.desktopLyricsAllowInsecureSources = $0 == false }
+                    )
+                )
             }
 
             SettingsGroupSection(title: AppStrings.text(.lyricsStyle, language: language)) {

@@ -148,28 +148,6 @@ final class HookResponseEncoderTests: XCTestCase {
         )
     }
 
-    func testClaudePreToolUsePersistRuleTriggersRuleStoreAndAllows() throws {
-        final class RuleRecorder: PermissionRuleWriting, @unchecked Sendable {
-            var recorded: [ClaudePermissionRule] = []
-            func appendAllowRule(_ rule: ClaudePermissionRule) throws {
-                recorded.append(rule)
-            }
-        }
-
-        let recorder = RuleRecorder()
-        let encoder = HookResponseEncoder(permissionRuleStore: recorder)
-        let decision = ApprovalDecision(
-            behavior: .allow,
-            persistRule: .bashPrefix("git status")
-        )
-
-        let data = try encoder.encode(decision: decision, for: .claude, eventType: .preToolUse)
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-
-        XCTAssertEqual(recorder.recorded, [.bashPrefix("git status")])
-        XCTAssertTrue(json.contains(#""permissionDecision":"allow""#))
-    }
-
     // MARK: - Devin Local
 
     /// Devin Local speaks the Claude Code hook protocol, so its PermissionRequest
@@ -209,26 +187,6 @@ final class HookResponseEncoderTests: XCTestCase {
         )
 
         XCTAssertEqual(devinData, claudeData)
-    }
-
-    /// Devin Local imports `~/.claude/settings.json` and shares Claude Code's
-    /// permission-rule file. A persist-rule decision raised on a Devin frame
-    /// must therefore land in the same permissions store as a Claude one.
-    func testDevinPersistRuleAppendsToClaudeFamilyRuleStore() throws {
-        final class RuleRecorder: PermissionRuleWriting, @unchecked Sendable {
-            var recorded: [ClaudePermissionRule] = []
-            func appendAllowRule(_ rule: ClaudePermissionRule) throws {
-                recorded.append(rule)
-            }
-        }
-
-        let recorder = RuleRecorder()
-        let encoder = HookResponseEncoder(permissionRuleStore: recorder)
-        let decision = ApprovalDecision(behavior: .allow, persistRule: .bashPrefix("ls"))
-
-        _ = try encoder.encode(decision: decision, for: .devin, eventType: .preToolUse)
-
-        XCTAssertEqual(recorder.recorded, [.bashPrefix("ls")])
     }
 
     func testFeedbackWithSpecialCharactersIsEscapedInJSON() throws {

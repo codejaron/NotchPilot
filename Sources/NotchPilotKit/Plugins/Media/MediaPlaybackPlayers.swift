@@ -51,6 +51,8 @@ struct MediaPlaybackPlayerCommandRouter {
 }
 
 struct MediaPlaybackPlayerSelector {
+    private static let spotifyBundleIdentifier = "com.spotify.client"
+
     private let players: [MediaPlaybackPlayerID]
     private var states: [MediaPlaybackPlayerID: MediaPlaybackState] = [:]
     private var selectedPlayer: MediaPlaybackPlayerID?
@@ -68,7 +70,21 @@ struct MediaPlaybackPlayerSelector {
         for player: MediaPlaybackPlayerID,
         at date: Date = Date()
     ) -> MediaPlaybackState {
-        states[player] = Self.projected(state, at: date)
+        let projectedState = Self.projected(state, at: date)
+
+        if player == .system,
+           states[.spotify] != nil,
+           Self.isSpotifyState(projectedState) {
+            return selectedState(at: date)
+        }
+
+        states[player] = projectedState
+
+        if player == .spotify,
+           Self.isSpotifyState(states[.system]) {
+            states[.system] = nil
+        }
+
         return selectedState(at: date)
     }
 
@@ -123,6 +139,10 @@ struct MediaPlaybackPlayerSelector {
             return nil
         }
         return snapshot
+    }
+
+    private static func isSpotifyState(_ state: MediaPlaybackState?) -> Bool {
+        snapshot(from: state)?.source.bundleIdentifier == spotifyBundleIdentifier
     }
 
     private static func projected(_ state: MediaPlaybackState, at date: Date) -> MediaPlaybackState {

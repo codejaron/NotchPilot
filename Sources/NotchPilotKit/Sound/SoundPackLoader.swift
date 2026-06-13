@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum SoundPackLoaderError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -12,6 +13,7 @@ public enum SoundPackLoaderError: Error, Equatable, Sendable, CustomStringConver
     case fileTooLarge(String, bytes: Int)
     case packTooLarge(bytes: Int)
     case invalidAudioHeader(String)
+    case checksumMismatch(String)
 
     public var description: String {
         switch self {
@@ -37,6 +39,8 @@ public enum SoundPackLoaderError: Error, Equatable, Sendable, CustomStringConver
             return "Pack exceeds 50 MB cap (\(bytes) bytes)"
         case let .invalidAudioHeader(value):
             return "Audio file '\(value)' has invalid header bytes"
+        case let .checksumMismatch(value):
+            return "Audio file '\(value)' does not match its manifest sha256"
         }
     }
 }
@@ -95,6 +99,7 @@ public struct SoundPackLoader {
             for sound in entry.sounds {
                 let url = try validate(
                     soundRelativePath: sound.file,
+                    expectedSHA256: sound.sha256,
                     packRoot: packRoot,
                     canonicalRoot: canonicalRoot,
                     totalBytesSoFar: &totalBytes
@@ -167,6 +172,7 @@ public struct SoundPackLoader {
 
     private func validate(
         soundRelativePath: String,
+        expectedSHA256: String?,
         packRoot: URL,
         canonicalRoot: String,
         totalBytesSoFar: inout Int
@@ -227,6 +233,10 @@ public struct SoundPackLoader {
             throw SoundPackLoaderError.invalidAudioHeader(fileName)
         }
 
+        if let expectedSHA256, expectedSHA256.isEmpty == false {
+            try validateChecksum(at: candidate, fileName: fileName, expected: expectedSHA256)
+        }
+
         return candidate
     }
 
@@ -260,6 +270,30 @@ public struct SoundPackLoader {
         default:
             return false
         }
+    }
+
+    private func validateChecksum(at url: URL, fileName: String, expected: String) throws {
+        let normalizedExpected = expected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedExpected.count == 64 else {
+            throw SoundPackLoaderError.checksumMismatch(fileName)
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw SoundPackLoaderError.fileMissing(fileName)
+        }
+
+        guard sha256Hex(data) == normalizedExpected else {
+            throw SoundPackLoaderError.checksumMismatch(fileName)
+        }
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     // MARK: - Regex helpers

@@ -46,6 +46,91 @@ final class SoundManagerPickTests: XCTestCase {
     }
 }
 
+final class SoundManagerImportTests: XCTestCase {
+    private var tempRoot: URL!
+
+    override func setUpWithError() throws {
+        tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: tempRoot)
+        tempRoot = nil
+    }
+
+    @MainActor
+    func testImportPackCopiesOnlyManifestAndReferencedSounds() throws {
+        let source = try writePackWithExtraFiles(name: "clean-import")
+        let installRoot = tempRoot.appendingPathComponent("installed", isDirectory: true)
+        let manager = makeIsolatedManager(installRoot: installRoot)
+
+        let loaded = try manager.importPack(from: source)
+
+        let target = installRoot.appendingPathComponent("clean-import", isDirectory: true)
+        XCTAssertEqual(loaded.rootURL.standardizedFileURL, target.standardizedFileURL)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: target.appendingPathComponent(SoundPackLoader.manifestFileName).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: target.appendingPathComponent("sounds/done.wav").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: target.appendingPathComponent("sounds/unreferenced.wav").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: target.appendingPathComponent("junk.bin").path
+        ))
+    }
+
+    @MainActor
+    private func makeIsolatedManager(installRoot: URL) -> SoundManager {
+        SoundManager(
+            loader: SoundPackLoader(),
+            store: SettingsStore(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            bundleLookup: { nil },
+            installedPacksRoot: { installRoot }
+        )
+    }
+
+    private func writePackWithExtraFiles(name: String) throws -> URL {
+        let pack = tempRoot.appendingPathComponent(name, isDirectory: true)
+        let sounds = pack.appendingPathComponent("sounds", isDirectory: true)
+        try FileManager.default.createDirectory(at: sounds, withIntermediateDirectories: true)
+
+        try validRIFFBytes().write(to: sounds.appendingPathComponent("done.wav"))
+        try validRIFFBytes().write(to: sounds.appendingPathComponent("unreferenced.wav"))
+        try Data(repeating: 0x7F, count: 16).write(to: pack.appendingPathComponent("junk.bin"))
+
+        let manifestObject: [String: Any] = [
+            "cesp_version": "1.0",
+            "name": name,
+            "display_name": name,
+            "version": "1.0.0",
+            "categories": [
+                "task.complete": [
+                    "sounds": [
+                        ["file": "sounds/done.wav", "label": "Done"],
+                    ],
+                ],
+            ],
+        ]
+
+        let manifestData = try JSONSerialization.data(withJSONObject: manifestObject, options: [.prettyPrinted])
+        try manifestData.write(to: pack.appendingPathComponent(SoundPackLoader.manifestFileName))
+        return pack
+    }
+
+    private func validRIFFBytes() -> Data {
+        Data([
+            0x52, 0x49, 0x46, 0x46,
+            0x24, 0x00, 0x00, 0x00,
+            0x57, 0x41, 0x56, 0x45,
+        ])
+    }
+}
+
 extension SoundManager {
     /// Test-only seam for the `lastPlayedURL` cache so we don't have to
     /// trigger real audio playback to verify the no-repeat contract.

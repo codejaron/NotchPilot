@@ -201,6 +201,106 @@ final class CodexDesktopMonitorTests: XCTestCase {
         XCTAssertTrue(performResult.value)
     }
 
+    func testClearingOneLiveApprovalDoesNotResetAnotherPendingApproval() throws {
+        let server = try TestCodexIPCServer()
+        defer { server.stop() }
+
+        let monitor = CodexDesktopMonitor(
+            detector: CodexDesktopAppDetector(
+                fileManager: .default,
+                homeDirectoryURL: server.installedAppHomeDirectoryURL
+            ),
+            discovery: CodexDesktopIPCDiscovery(directoryURL: server.socketDirectoryURL),
+            requestTimeout: 1
+        )
+        let firstSurfaceSignal = DispatchSemaphore(value: 0)
+        let secondSurfaceSignal = DispatchSemaphore(value: 0)
+        let firstConversationClearedSignal = DispatchSemaphore(value: 0)
+        let firstConversationUpdateCount = LockedCounter()
+        monitor.onThreadContextChanged = { update in
+            guard update.context.threadID == "conv-live-first" else { return }
+            if firstConversationUpdateCount.increment() == 2 {
+                firstConversationClearedSignal.signal()
+            }
+        }
+        monitor.onSurfaceChanged = { surface in
+            switch surface?.id {
+            case "codex-ipc-91":
+                firstSurfaceSignal.signal()
+            case "codex-ipc-92":
+                secondSurfaceSignal.signal()
+            default:
+                break
+            }
+        }
+
+        monitor.start()
+        defer { monitor.stop() }
+
+        let initializeFrame = try server.waitForRequest(method: "initialize")
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: initializeFrame.requestID,
+                    method: "initialize",
+                    result: .object([
+                        "clientId": .string("notchpilot-test-client"),
+                    ]),
+                    error: nil
+                )
+            )
+        )
+
+        try server.send(frame: liveApprovalSnapshotFrame(
+            conversationID: "conv-live-first",
+            requestID: 91,
+            command: "date"
+        ))
+        XCTAssertEqual(firstSurfaceSignal.wait(timeout: .now() + 2), .success)
+
+        try server.send(frame: liveApprovalSnapshotFrame(
+            conversationID: "conv-live-second",
+            requestID: 92,
+            command: "pwd"
+        ))
+        XCTAssertEqual(secondSurfaceSignal.wait(timeout: .now() + 2), .success)
+
+        try server.send(frame: liveApprovalClearFrame(conversationID: "conv-live-first"))
+        XCTAssertEqual(firstConversationClearedSignal.wait(timeout: .now() + 2), .success)
+
+        let performResult = BooleanBox()
+        let performSignal = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            performResult.value = monitor.perform(action: .primary, on: "codex-ipc-92")
+            performSignal.signal()
+        }
+
+        let outboundFrame = try server.waitForNextFrame()
+        guard case let .request(request) = outboundFrame else {
+            return XCTFail("expected second approval decision request, got \(outboundFrame)")
+        }
+
+        XCTAssertEqual(request.method, "thread-follower-command-approval-decision")
+        XCTAssertEqual(request.params["conversationId"]?.stringValue, "conv-live-second")
+        XCTAssertEqual(request.params["requestId"], .integer(92))
+        XCTAssertEqual(request.params["decision"], .string("accept"))
+        XCTAssertEqual(request.targetClientID, "desktop-owner-client")
+
+        try server.send(
+            frame: .response(
+                CodexDesktopIPCResponseFrame(
+                    requestID: request.requestID,
+                    method: request.method,
+                    result: .object([:]),
+                    error: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(performResult.value)
+    }
+
     func testPerformingDirectCommandApprovalFeedbackRepliesThenUsesThreadFollowerFollowUpWithInactiveFallback() throws {
         let server = try TestCodexIPCServer()
         defer { server.stop() }
@@ -837,10 +937,88 @@ final class CodexDesktopMonitorTests: XCTestCase {
         XCTAssertEqual(performSignal.wait(timeout: .now() + 2), .success)
         XCTAssertTrue(performResult.value)
     }
+
+    private func liveApprovalSnapshotFrame(
+        conversationID: String,
+        requestID: Int,
+        command: String
+    ) -> CodexDesktopIPCFrame {
+        .broadcast(
+            CodexDesktopIPCBroadcastFrame(
+                method: "thread-stream-state-changed",
+                params: [
+                    "conversationId": .string(conversationID),
+                    "change": .object([
+                        "type": .string("snapshot"),
+                        "conversationState": .object([
+                            "id": .string(conversationID),
+                            "threadRuntimeStatus": .object([
+                                "type": .string("idle"),
+                            ]),
+                            "requests": .array([
+                                .object([
+                                    "method": .string("item/commandExecution/requestApproval"),
+                                    "id": .integer(requestID),
+                                    "params": .object([
+                                        "threadId": .string(conversationID),
+                                        "reason": .string("Run \(command)?"),
+                                        "command": .string(command),
+                                        "availableDecisions": .array([
+                                            .string("accept"),
+                                            .string("decline"),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+    }
+
+    private func liveApprovalClearFrame(conversationID: String) -> CodexDesktopIPCFrame {
+        .broadcast(
+            CodexDesktopIPCBroadcastFrame(
+                method: "thread-stream-state-changed",
+                params: [
+                    "conversationId": .string(conversationID),
+                    "change": .object([
+                        "type": .string("patches"),
+                        "patches": .array([
+                            .object([
+                                "op": .string("replace"),
+                                "path": .array([.string("requests")]),
+                                "value": .array([]),
+                            ]),
+                        ]),
+                    ]),
+                ],
+                sourceClientID: "desktop-owner-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+    }
 }
 
 private final class BooleanBox: @unchecked Sendable {
     var value = false
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func increment() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
 }
 
 private final class TestCodexIPCServer: @unchecked Sendable {

@@ -83,6 +83,8 @@ extension LyricsTrackKey: Hashable {
 }
 
 struct TimedLyricLine: Equatable, Codable, Sendable {
+    static let maxTextCharacterCount = 1_000
+
     struct InlineTag: Equatable, Codable, Sendable {
         let index: Int
         let timeOffset: TimeInterval
@@ -95,17 +97,46 @@ struct TimedLyricLine: Equatable, Codable, Sendable {
 
     init(timestamp: TimeInterval, text: String, translation: String? = nil, inlineTags: [InlineTag]? = nil) {
         self.timestamp = timestamp
-        self.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.text = Self.limitedText(text)
         self.translation = translation?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .limitedLyricText
             .nilIfEmpty
         self.inlineTags = inlineTags
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(TimeInterval.self, forKey: .timestamp)
+        text = Self.limitedText(try container.decode(String.self, forKey: .text))
+        translation = try container.decodeIfPresent(String.self, forKey: .translation)?
+            .limitedLyricText
+            .nilIfEmpty
+        inlineTags = try container.decodeIfPresent([InlineTag].self, forKey: .inlineTags)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case timestamp
+        case text
+        case translation
+        case inlineTags
+    }
+
+    private static func limitedText(_ value: String) -> String {
+        value.limitedLyricText
     }
 }
 
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+
+    var limitedLyricText: String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > TimedLyricLine.maxTextCharacterCount else {
+            return trimmed
+        }
+        return String(trimmed.prefix(TimedLyricLine.maxTextCharacterCount))
     }
 
     var sanitizedFileNameComponent: String {
@@ -163,6 +194,10 @@ enum DesktopLyricsPlaybackFilter {
 }
 
 struct TimedLyrics: Equatable, Codable, Sendable {
+    static let maxLineCount = 1_000
+    static let maxLineCharacterCount = TimedLyricLine.maxTextCharacterCount
+    static let maxRawCharacterCount = 250_000
+
     let title: String
     let artist: String
     let album: String
@@ -193,6 +228,8 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         self.lines = lines
             .filter { $0.text.isEmpty == false }
             .sorted { $0.timestamp < $1.timestamp }
+            .prefix(Self.maxLineCount)
+            .map { $0 }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -216,6 +253,8 @@ struct TimedLyrics: Equatable, Codable, Sendable {
         lines = try container.decode([TimedLyricLine].self, forKey: .lines)
             .filter { $0.text.isEmpty == false }
             .sorted { $0.timestamp < $1.timestamp }
+            .prefix(Self.maxLineCount)
+            .map { $0 }
     }
 
     init?(
@@ -237,6 +276,10 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             return nil
         }
 
+        guard Self.rawCharacterCount(for: lyrics) <= Self.maxRawCharacterCount else {
+            return nil
+        }
+
         self.init(
             title: title,
             artist: artist,
@@ -244,7 +287,7 @@ struct TimedLyrics: Equatable, Codable, Sendable {
             duration: lyrics.length,
             service: service,
             sourceOffsetMilliseconds: lyrics.offset,
-            lines: lyrics.lines.map { line in
+            lines: lyrics.lines.prefix(Self.maxLineCount).map { line in
                 let inlineTags: [TimedLyricLine.InlineTag]? = line.attachments.timetag.map { timetag in
                     timetag.tags.map { tag in
                         TimedLyricLine.InlineTag(index: tag.index, timeOffset: tag.time)
@@ -261,6 +304,14 @@ struct TimedLyrics: Equatable, Codable, Sendable {
 
         guard lines.isEmpty == false else {
             return nil
+        }
+    }
+
+    private static func rawCharacterCount(for lyrics: Lyrics) -> Int {
+        lyrics.lines.reduce(0) { count, line in
+            count
+                + line.content.count
+                + (line.attachments.translation()?.count ?? 0)
         }
     }
 

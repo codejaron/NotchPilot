@@ -2,6 +2,20 @@ import XCTest
 @testable import NotchPilotKit
 
 final class CodexDesktopEventReducerTests: XCTestCase {
+    func testReducerEvictsLeastRecentConversationWhenCapacityIsExceeded() throws {
+        var reducer = CodexDesktopEventReducer(maxTrackedConversations: 2)
+
+        _ = try reducer.consume(frame: threadSnapshotFrame(conversationID: "conv-1"))
+        _ = try reducer.consume(frame: threadSnapshotFrame(conversationID: "conv-2"))
+        XCTAssertEqual(reducer.isLatestTurnInProgress(for: "conv-1"), true)
+
+        _ = try reducer.consume(frame: threadSnapshotFrame(conversationID: "conv-3"))
+
+        XCTAssertNil(reducer.isLatestTurnInProgress(for: "conv-1"))
+        XCTAssertEqual(reducer.isLatestTurnInProgress(for: "conv-2"), true)
+        XCTAssertEqual(reducer.isLatestTurnInProgress(for: "conv-3"), true)
+    }
+
     func testThreadStreamSnapshotCreatesThreadContextFromConversationState() throws {
         var reducer = CodexDesktopEventReducer()
 
@@ -505,7 +519,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .approvalRequestChanged(request)? = outputs.last else {
+        guard case let .approvalRequestChanged(_, request)? = outputs.last else {
             return XCTFail("expected approval request output")
         }
 
@@ -581,10 +595,11 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .approvalRequestChanged(request)? = outputs.last else {
+        guard case let .approvalRequestChanged(conversationID, request)? = outputs.last else {
             return XCTFail("expected approval request output")
         }
 
+        XCTAssertEqual(conversationID, "conv-clear-approval")
         XCTAssertNil(request)
     }
 
@@ -651,7 +666,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
 
-        guard case let .approvalRequestChanged(request)? = outputs.last else {
+        guard case let .approvalRequestChanged(_, request)? = outputs.last else {
             return XCTFail("expected actionable request output")
         }
 
@@ -732,7 +747,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             return XCTFail("expected approval request output")
         }
 
-        guard case let .approvalRequestChanged(request) = approvalOutput else {
+        guard case let .approvalRequestChanged(_, request) = approvalOutput else {
             return XCTFail("expected approval request output")
         }
 
@@ -789,7 +804,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             return XCTFail("expected approval request output")
         }
 
-        guard case let .approvalRequestChanged(request) = approvalOutput else {
+        guard case let .approvalRequestChanged(_, request) = approvalOutput else {
             return XCTFail("expected approval request output")
         }
 
@@ -899,7 +914,7 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             return XCTFail("expected approval request output")
         }
 
-        guard case let .approvalRequestChanged(request) = approvalOutput else {
+        guard case let .approvalRequestChanged(_, request) = approvalOutput else {
             return XCTFail("expected approval request output")
         }
 
@@ -1390,5 +1405,33 @@ final class CodexDesktopEventReducerTests: XCTestCase {
 
         XCTAssertEqual(context.title, "Codex")
         XCTAssertFalse(marksActivity)
+    }
+
+    private func threadSnapshotFrame(conversationID: String) -> CodexDesktopIPCFrame {
+        .broadcast(
+            CodexDesktopIPCBroadcastFrame(
+                method: "thread-stream-state-changed",
+                params: [
+                    "conversationId": .string(conversationID),
+                    "change": .object([
+                        "type": .string("snapshot"),
+                        "conversationState": .object([
+                            "id": .string(conversationID),
+                            "title": .string(conversationID),
+                            "turns": .array([
+                                .object([
+                                    "turnId": .string("turn-1"),
+                                    "status": .string("inProgress"),
+                                    "items": .array([]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
     }
 }

@@ -185,12 +185,12 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
             switch output {
             case let .threadContextUpsert(context, marksActivity):
                 onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
-            case let .approvalRequestChanged(request):
+            case let .approvalRequestChanged(conversationID, request):
                 if let request {
                     emitSurface(approvalController.handleLiveRequest(request))
                 } else {
-                    _ = approvalController.reset()
-                    emitSurface(nil)
+                    approvalController.reset(conversationID: conversationID)
+                    emitSurface(approvalController.currentSurface)
                 }
             }
         }

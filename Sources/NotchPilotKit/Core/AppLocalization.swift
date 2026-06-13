@@ -45,6 +45,8 @@ enum AppTextKey: String, CaseIterable {
     case showPlaybackPreviewDetail
     case desktopLyricsCard
     case desktopLyricsCardDetail
+    case blockHTTPLyricsSources
+    case blockHTTPLyricsSourcesDetail
     case lyricsStyle
     case highlightColor
     case highlightColorDetail

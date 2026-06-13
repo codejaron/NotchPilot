@@ -1,7 +1,25 @@
 import Foundation
 
 struct ClaudeToolUseCorrelator {
-    private var cachedToolUseIDs: [ClaudeToolUseCorrelationKey: [String]] = [:]
+    private struct CachedToolUseID {
+        let value: String
+        let observedAt: Date
+    }
+
+    private var cachedToolUseIDs: [ClaudeToolUseCorrelationKey: [CachedToolUseID]] = [:]
+    private let maxEntriesPerKey: Int
+    private let maxAge: TimeInterval
+    private let nowProvider: @Sendable () -> Date
+
+    init(
+        maxEntriesPerKey: Int = 8,
+        maxAge: TimeInterval = 300,
+        nowProvider: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.maxEntriesPerKey = maxEntriesPerKey
+        self.maxAge = maxAge
+        self.nowProvider = nowProvider
+    }
 
     mutating func observe(
         sessionID: String,
@@ -9,6 +27,8 @@ struct ClaudeToolUseCorrelator {
         toolInput: JSONValue?,
         toolUseID: String?
     ) {
+        let now = nowProvider()
+        pruneExpired(now: now)
         guard let toolUseID,
               let key = ClaudeToolUseCorrelationKey(
                 sessionID: sessionID,
@@ -19,7 +39,10 @@ struct ClaudeToolUseCorrelator {
             return
         }
 
-        cachedToolUseIDs[key, default: []].append(toolUseID)
+        cachedToolUseIDs[key, default: []].append(CachedToolUseID(value: toolUseID, observedAt: now))
+        if let queue = cachedToolUseIDs[key], queue.count > maxEntriesPerKey {
+            cachedToolUseIDs[key] = Array(queue.suffix(maxEntriesPerKey))
+        }
     }
 
     mutating func observe(envelope: AIBridgeEnvelope) {
@@ -40,6 +63,7 @@ struct ClaudeToolUseCorrelator {
         toolName: String?,
         toolInput: JSONValue?
     ) -> String? {
+        pruneExpired(now: nowProvider())
         guard let key = ClaudeToolUseCorrelationKey(
             sessionID: sessionID,
             toolName: toolName,
@@ -51,13 +75,40 @@ struct ClaudeToolUseCorrelator {
             return nil
         }
 
-        let toolUseID = queue.removeFirst()
+        let toolUseID = queue.removeFirst().value
         if queue.isEmpty {
             cachedToolUseIDs.removeValue(forKey: key)
         } else {
             cachedToolUseIDs[key] = queue
         }
         return toolUseID
+    }
+
+    mutating func consume(
+        sessionID: String,
+        toolName: String?,
+        toolInput: JSONValue?,
+        toolUseID: String?
+    ) {
+        pruneExpired(now: nowProvider())
+        guard let toolUseID,
+              let key = ClaudeToolUseCorrelationKey(
+                sessionID: sessionID,
+                toolName: toolName,
+                toolInput: toolInput
+              ),
+              var queue = cachedToolUseIDs[key],
+              let index = queue.firstIndex(where: { $0.value == toolUseID })
+        else {
+            return
+        }
+
+        queue.remove(at: index)
+        if queue.isEmpty {
+            cachedToolUseIDs.removeValue(forKey: key)
+        } else {
+            cachedToolUseIDs[key] = queue
+        }
     }
 
     mutating func clear(sessionID: String) {
@@ -68,6 +119,24 @@ struct ClaudeToolUseCorrelator {
 
     mutating func removeAll() {
         cachedToolUseIDs.removeAll()
+    }
+
+    private mutating func pruneExpired(now: Date) {
+        guard maxAge > 0 else {
+            cachedToolUseIDs.removeAll()
+            return
+        }
+
+        for key in cachedToolUseIDs.keys {
+            let retained = cachedToolUseIDs[key, default: []].filter {
+                now.timeIntervalSince($0.observedAt) <= maxAge
+            }
+            if retained.isEmpty {
+                cachedToolUseIDs.removeValue(forKey: key)
+            } else {
+                cachedToolUseIDs[key] = retained
+            }
+        }
     }
 }
 

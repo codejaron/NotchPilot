@@ -251,6 +251,9 @@ protocol NowPlayingSessionMonitoring: AnyObject {
 
 @MainActor
 final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
+    private static let playbackTimeReconciliationInterval: TimeInterval = 1
+    private static let playbackTimeReconciliationThreshold: TimeInterval = 1
+
     private(set) var currentState: MediaPlaybackState = .idle
     private let stateSubject = PassthroughSubject<MediaPlaybackState, Never>()
     var statePublisher: AnyPublisher<MediaPlaybackState, Never> {
@@ -264,6 +267,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     private var streamProcess: (any MediaStreamProcessHandling)?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
+    private var playbackTimeReconciliationTask: Task<Void, Never>?
     private var playbackStateSelector = MediaPlaybackPlayerSelector(players: [.spotify, .system])
     private var spotifyTrackGate = SpotifyPlaybackTrackGate()
     private var spotifyNotificationObserver: NSObjectProtocol?
@@ -303,6 +307,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
         isMonitoring = true
         startSpotifyPlaybackObservation()
+        startPlaybackTimeReconciliation()
         Task { [weak self] in
             await self?.refreshSpotifyPlaybackSnapshot()
         }
@@ -337,6 +342,8 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         stopSpotifyPlaybackObservation()
         streamTask?.cancel()
         streamTask = nil
+        playbackTimeReconciliationTask?.cancel()
+        playbackTimeReconciliationTask = nil
 
         let pipeHandler = pipeHandler
         self.pipeHandler = nil
@@ -403,6 +410,28 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         return await playbackTimeProvider.currentPlaybackTime(for: source)
     }
 
+    func reconcilePlaybackTime(at date: Date = Date(), requiresMonitoring: Bool = false) async {
+        guard requiresMonitoring == false || isMonitoring,
+              case let .active(snapshot) = currentState,
+              snapshot.isPlaying,
+              let playbackTime = await currentPlaybackTime(for: snapshot.source)
+        else {
+            return
+        }
+
+        guard requiresMonitoring == false || isMonitoring else {
+            return
+        }
+
+        let estimatedTime = snapshot.estimatedCurrentTime(at: date)
+        guard abs(playbackTime - estimatedTime) >= Self.playbackTimeReconciliationThreshold else {
+            return
+        }
+
+        let state = MediaPlaybackState.active(snapshot.replacingCurrentTime(playbackTime, at: date))
+        updateState(playbackStateSelector.update(state, for: playerID(for: snapshot.source), at: date))
+    }
+
     func updateState(_ state: MediaPlaybackState) {
         let resolvedState = playbackTimeResolver.resolve(state)
         currentState = resolvedState
@@ -420,6 +449,23 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     private func handleAdapterUpdate(_ update: AdapterUpdate) {
         let state = playbackStateSelector.update(update.payload.normalizedState, for: .system)
         updateState(state)
+    }
+
+    private func startPlaybackTimeReconciliation() {
+        guard playbackTimeReconciliationTask == nil else {
+            return
+        }
+
+        playbackTimeReconciliationTask = Task { [weak self] in
+            while Task.isCancelled == false {
+                try? await Task.sleep(for: .seconds(Self.playbackTimeReconciliationInterval))
+                guard Task.isCancelled == false else {
+                    return
+                }
+
+                await self?.reconcilePlaybackTime(requiresMonitoring: true)
+            }
+        }
     }
 
     private func startSpotifyPlaybackObservation() {
@@ -472,7 +518,8 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     func applySpotifyPlaybackPayload(_ payload: SpotifyPlaybackNotice.Payload) async {
         let date = Date()
-        if spotifyTrackGate.shouldRefreshCompleteSnapshot(for: payload.trackID),
+        if payload.playback == .playing,
+           spotifyTrackGate.shouldRefreshCompleteSnapshot(for: payload.trackID),
            await refreshSpotifyPlaybackSnapshot() {
             spotifyTrackGate.accept(payload.trackID)
             return
@@ -486,7 +533,14 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             return
         }
 
-        spotifyTrackGate.accept(payload.trackID)
+        switch payload.playback {
+        case .playing:
+            spotifyTrackGate.accept(payload.trackID)
+        case .paused:
+            break
+        case .stopped:
+            spotifyTrackGate.reset()
+        }
         updateState(playbackStateSelector.update(state, for: .spotify, at: date))
     }
 
@@ -563,6 +617,10 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
             source.displayName.lowercased().contains("spotify")
     }
 
+    private func playerID(for source: MediaPlaybackSource) -> MediaPlaybackPlayerID {
+        Self.isSpotifySource(source) ? .spotify : .system
+    }
+
     private func launchDetachedProcess(executableURL: URL, arguments: [String]) {
         Task.detached(priority: .utility) {
             let process = Process()
@@ -587,30 +645,15 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
 
     private static func fetchCurrentState(using resource: MediaRemoteAdapterResource) async -> MediaPlaybackState? {
         await Task.detached(priority: .utility) {
-            let outputPipe = Pipe()
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-            process.arguments = [resource.scriptURL.path, resource.frameworkURL.path, "get"]
-            process.standardOutput = outputPipe
-            process.standardError = Pipe()
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                guard process.terminationStatus == 0 else {
-                    return nil
-                }
-
-                let outputData = try outputPipe.fileHandleForReading.readToEnd() ?? Data()
-                guard outputData.isEmpty == false else {
-                    return nil
-                }
-
-                return try? JSONDecoder().decode(AdapterPayload.self, from: outputData).normalizedState
-            } catch {
+            guard let output = ProcessOutputCapture.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+                arguments: [resource.scriptURL.path, resource.frameworkURL.path, "get"],
+                timeout: 2
+            ), output.terminationStatus == 0, output.standardOutput.isEmpty == false else {
                 return nil
             }
+
+            return try? JSONDecoder().decode(AdapterPayload.self, from: output.standardOutput).normalizedState
         }.value
     }
 }
@@ -669,10 +712,12 @@ private enum AdapterTimestampParser {
     }
 }
 
-private actor JSONLinesPipeHandler {
-    let pipe = Pipe()
+actor JSONLinesPipeHandler {
+    nonisolated let pipe = Pipe()
     private let fileHandle: FileHandle
-    private var buffer = ""
+    private var buffer = Data()
+    private var pendingRead: CheckedContinuation<Data, Error>?
+    private var isClosed = false
 
     init() {
         self.fileHandle = pipe.fileHandleForReading
@@ -690,7 +735,10 @@ private actor JSONLinesPipeHandler {
     }
 
     func close() async {
+        isClosed = true
         fileHandle.readabilityHandler = nil
+        pendingRead?.resume(returning: Data())
+        pendingRead = nil
         try? fileHandle.close()
     }
 
@@ -704,21 +752,21 @@ private actor JSONLinesPipeHandler {
                 break
             }
 
-            guard let chunk = String(data: data, encoding: .utf8) else {
-                continue
-            }
+            buffer.append(data)
 
-            buffer.append(chunk)
+            while let newlineIndex = buffer.firstIndex(of: 0x0A) {
+                var lineData = Data(buffer[..<newlineIndex])
+                buffer.removeSubrange(...newlineIndex)
 
-            while let range = buffer.range(of: "\n") {
-                let line = String(buffer[..<range.lowerBound])
-                buffer = String(buffer[range.upperBound...])
+                if lineData.last == 0x0D {
+                    lineData.removeLast()
+                }
 
-                guard line.isEmpty == false, let jsonData = line.data(using: .utf8) else {
+                guard lineData.isEmpty == false else {
                     continue
                 }
 
-                if let decodedObject = try? JSONDecoder().decode(T.self, from: jsonData) {
+                if let decodedObject = try? JSONDecoder().decode(T.self, from: lineData) {
                     await onLine(decodedObject)
                 }
             }
@@ -727,11 +775,24 @@ private actor JSONLinesPipeHandler {
 
     private func readData() async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
+            guard isClosed == false else {
+                continuation.resume(returning: Data())
+                return
+            }
+
+            pendingRead = continuation
             fileHandle.readabilityHandler = { handle in
                 let data = handle.availableData
-                handle.readabilityHandler = nil
-                continuation.resume(returning: data)
+                Task {
+                    await self.completeRead(with: data)
+                }
             }
         }
+    }
+
+    private func completeRead(with data: Data) {
+        fileHandle.readabilityHandler = nil
+        pendingRead?.resume(returning: data)
+        pendingRead = nil
     }
 }

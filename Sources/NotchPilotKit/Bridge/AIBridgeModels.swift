@@ -341,26 +341,6 @@ public struct AIBridgeEnvelope: Equatable, Sendable {
     }
 }
 
-public enum ClaudePermissionRule: Equatable, Sendable, Hashable {
-    case tool(String)
-    case bashPrefix(String)
-    case webFetchDomain(String)
-    case mcp(server: String, tool: String)
-
-    public var ruleString: String {
-        switch self {
-        case let .tool(name):
-            return name
-        case let .bashPrefix(prefix):
-            return "Bash(\(prefix):*)"
-        case let .webFetchDomain(domain):
-            return "WebFetch(domain:\(domain))"
-        case let .mcp(server, tool):
-            return "mcp__\(server)__\(tool)"
-        }
-    }
-}
-
 public struct ApprovalDecision: Equatable, Sendable {
     public enum Behavior: Equatable, Sendable {
         case allow
@@ -369,23 +349,17 @@ public struct ApprovalDecision: Equatable, Sendable {
 
     public var behavior: Behavior
     public var feedbackText: String?
-    public var persistRule: ClaudePermissionRule?
-    public var sessionRule: ClaudePermissionRule?
     public var permissionUpdates: [JSONValue]
     public var updatedInput: JSONValue?
 
     public init(
         behavior: Behavior,
         feedbackText: String? = nil,
-        persistRule: ClaudePermissionRule? = nil,
-        sessionRule: ClaudePermissionRule? = nil,
         permissionUpdates: [JSONValue] = [],
         updatedInput: JSONValue? = nil
     ) {
         self.behavior = behavior
         self.feedbackText = feedbackText
-        self.persistRule = persistRule
-        self.sessionRule = sessionRule
         self.permissionUpdates = permissionUpdates
         self.updatedInput = updatedInput
     }

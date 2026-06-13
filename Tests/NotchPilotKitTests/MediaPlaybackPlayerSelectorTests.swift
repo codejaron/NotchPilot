@@ -95,6 +95,69 @@ final class MediaPlaybackPlayerSelectorTests: XCTestCase {
         XCTAssertEqual(selected, .active(appleMusic.replacingCurrentTime(42, at: date.addingTimeInterval(2))))
     }
 
+    func testAggregateSpotifyPlaybackDoesNotOverrideConcreteSpotifyPause() {
+        let date = Date(timeIntervalSince1970: 350)
+        var selector = MediaPlaybackPlayerSelector(players: [.spotify, .system])
+        let spotifyPlaying = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 20,
+            isPlaying: true,
+            lastUpdated: date
+        )
+        let staleAggregateSpotify = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 20,
+            isPlaying: true,
+            lastUpdated: date
+        )
+        let spotifyPaused = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 22,
+            playbackRate: 0,
+            isPlaying: false,
+            lastUpdated: date.addingTimeInterval(2)
+        )
+
+        _ = selector.update(.active(spotifyPlaying), for: .spotify, at: date)
+        _ = selector.update(.active(staleAggregateSpotify), for: .system, at: date.addingTimeInterval(1))
+        let selected = selector.update(.active(spotifyPaused), for: .spotify, at: date.addingTimeInterval(2))
+
+        XCTAssertEqual(selected, .active(spotifyPaused))
+    }
+
+    func testAggregateSpotifyPlaybackDoesNotReviveStoppedConcreteSpotify() {
+        let date = Date(timeIntervalSince1970: 360)
+        var selector = MediaPlaybackPlayerSelector(players: [.spotify, .system])
+        let spotifyPlaying = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 20,
+            isPlaying: true,
+            lastUpdated: date
+        )
+        let staleAggregateSpotify = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 20,
+            isPlaying: true,
+            lastUpdated: date
+        )
+
+        _ = selector.update(.active(spotifyPlaying), for: .spotify, at: date)
+        _ = selector.update(.active(staleAggregateSpotify), for: .system, at: date.addingTimeInterval(1))
+        let selected = selector.update(.idle, for: .spotify, at: date.addingTimeInterval(2))
+
+        XCTAssertEqual(selected, .idle)
+    }
+
     func testConcretePausedPlayerWinsOverAggregatePausedPlayerWhenNothingIsPlaying() {
         let date = Date(timeIntervalSince1970: 400)
         var selector = MediaPlaybackPlayerSelector(players: [.spotify, .system])

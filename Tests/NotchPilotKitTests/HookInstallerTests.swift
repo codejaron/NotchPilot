@@ -55,6 +55,26 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertTrue(statusLineCommand.contains("--status-line"))
     }
 
+    func testInstallClaudeHooksBacksUpExistingSettingsBeforeWriting() throws {
+        let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+
+        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
+        let originalSettings = """
+        {
+          "theme": "dark"
+        }
+        """
+        try Data(originalSettings.utf8).write(to: settingsURL)
+
+        let installer = HookInstaller(homeDirectoryURL: tempHomeURL)
+        try installer.installClaudeHooks(bridgeScript: "/tmp/notch-bridge.py")
+
+        let backupURL = claudeDirectory.appendingPathComponent("settings.json.bak")
+        let backup = try String(contentsOf: backupURL, encoding: .utf8)
+        XCTAssertEqual(backup, originalSettings)
+    }
+
     func testUninstallClaudeHooksRemovesOnlyManagedEntries() throws {
         let claudeDirectory = tempHomeURL.appendingPathComponent(".claude", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)

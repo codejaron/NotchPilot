@@ -7,14 +7,44 @@ public final class MultiScreenManager {
 
     private let bus: EventBus
     private let pluginManager: PluginManager
+    private let screenDescriptorProvider: @MainActor () -> [ScreenDescriptor]
+    private let activeScreenIDProvider: @MainActor () -> String?
+    private let primaryScreenIDProvider: @MainActor () -> String?
+    private let windowFactory: @MainActor (ScreenSessionModel, PluginManager) -> NotchWindow?
 
     private var windows: [String: NotchWindow] = [:]
     private var busToken: UUID?
     private var screenObserver: NSObjectProtocol?
+    private var activeSneakPeekRequests: [SneakPeekRequest] = []
+    private var connectedDescriptors: [ScreenDescriptor] = []
 
-    public init(bus: EventBus, pluginManager: PluginManager) {
+    public convenience init(bus: EventBus, pluginManager: PluginManager) {
+        self.init(
+            bus: bus,
+            pluginManager: pluginManager,
+            screenDescriptorProvider: Self.defaultScreenDescriptors,
+            activeScreenIDProvider: Self.defaultActiveScreenID,
+            primaryScreenIDProvider: Self.defaultPrimaryScreenID,
+            windowFactory: { session, pluginManager in
+                NotchWindow(session: session, pluginManager: pluginManager)
+            }
+        )
+    }
+
+    init(
+        bus: EventBus,
+        pluginManager: PluginManager,
+        screenDescriptorProvider: @escaping @MainActor () -> [ScreenDescriptor],
+        activeScreenIDProvider: @escaping @MainActor () -> String?,
+        primaryScreenIDProvider: @escaping @MainActor () -> String?,
+        windowFactory: @escaping @MainActor (ScreenSessionModel, PluginManager) -> NotchWindow?
+    ) {
         self.bus = bus
         self.pluginManager = pluginManager
+        self.screenDescriptorProvider = screenDescriptorProvider
+        self.activeScreenIDProvider = activeScreenIDProvider
+        self.primaryScreenIDProvider = primaryScreenIDProvider
+        self.windowFactory = windowFactory
     }
 
     public func start() {
@@ -45,13 +75,14 @@ public final class MultiScreenManager {
         windows.values.forEach { $0.close() }
         windows.removeAll()
         sessions.removeAll()
+        connectedDescriptors.removeAll()
+        activeSneakPeekRequests.removeAll()
     }
 
-    private func synchronizeScreens() {
-        let descriptors = NSScreen.screens.compactMap {
-            ScreenDescriptorFactory.descriptor(for: $0, includeClosedNotchSize: true)
-        }
+    func synchronizeScreens() {
+        let descriptors = screenDescriptorProvider()
         let nextIDs = Set(descriptors.map(\.id))
+        var newSessionIDs: [String] = []
 
         for descriptor in descriptors {
             if let existing = sessions[descriptor.id] {
@@ -66,7 +97,8 @@ public final class MultiScreenManager {
                     lastSelectedPluginID: nil
                 )
                 sessions[descriptor.id] = session
-                windows[descriptor.id] = NotchWindow(session: session, pluginManager: pluginManager)
+                windows[descriptor.id] = windowFactory(session, pluginManager)
+                newSessionIDs.append(descriptor.id)
             }
         }
 
@@ -76,26 +108,29 @@ public final class MultiScreenManager {
             windows.removeValue(forKey: id)
             sessions.removeValue(forKey: id)
         }
+
+        connectedDescriptors = descriptors.filter { sessions[$0.id] != nil }
+        replayActiveSneakPeekRequests(to: Set(newSessionIDs))
     }
 
-    private func handle(event: NotchEvent) {
-        let context = ScreenResolutionContext(
-            connectedScreens: sessions.values.map(\.descriptor),
-            activeScreenID: activeScreenID(),
-            primaryScreenID: NSScreen.main.flatMap(ScreenDescriptorFactory.screenID(for:))
-        )
+    func handle(event: NotchEvent) {
+        let context = screenResolutionContext()
 
         switch event {
         case let .sneakPeekRequested(request):
+            rememberActiveSneakPeekRequestIfNeeded(request)
             for id in PresentationTargetResolver.resolve(request.target, in: context) {
                 sessions[id]?.enqueue(request)
             }
         case let .updateSneakPeekPriority(requestID, priority, target):
+            updateActiveSneakPeekRequest(requestID: requestID, priority: priority)
             for id in PresentationTargetResolver.resolve(target, in: context) {
                 sessions[id]?.updateSneakPeekPriority(requestID: requestID, priority: priority)
             }
         case let .dismissSneakPeek(requestID, target):
-            for id in PresentationTargetResolver.resolve(target, in: context) {
+            let resolvedIDs = PresentationTargetResolver.resolve(target, in: context)
+            forgetActiveSneakPeekRequest(requestID: requestID, resolvedSessionIDs: resolvedIDs)
+            for id in resolvedIDs {
                 sessions[id]?.dismissSneakPeek(requestID: requestID)
             }
         case let .openRequested(pluginID, target):
@@ -109,11 +144,88 @@ public final class MultiScreenManager {
         }
     }
 
-    private func activeScreenID() -> String? {
+    private func replayActiveSneakPeekRequests(to sessionIDs: Set<String>) {
+        guard sessionIDs.isEmpty == false, activeSneakPeekRequests.isEmpty == false else {
+            return
+        }
+
+        let context = screenResolutionContext()
+        for request in activeSneakPeekRequests {
+            let resolvedIDs = Set(PresentationTargetResolver.resolve(request.target, in: context))
+            for id in sessionIDs where resolvedIDs.contains(id) {
+                sessions[id]?.enqueue(request)
+            }
+        }
+    }
+
+    private func rememberActiveSneakPeekRequestIfNeeded(_ request: SneakPeekRequest) {
+        guard request.autoDismissAfter == nil else {
+            return
+        }
+
+        if let index = activeSneakPeekRequests.firstIndex(where: { $0.id == request.id }) {
+            activeSneakPeekRequests[index] = request
+        } else {
+            activeSneakPeekRequests.append(request)
+        }
+    }
+
+    private func updateActiveSneakPeekRequest(requestID: UUID, priority: Int) {
+        guard let index = activeSneakPeekRequests.firstIndex(where: { $0.id == requestID }) else {
+            return
+        }
+
+        let existing = activeSneakPeekRequests[index]
+        activeSneakPeekRequests[index] = SneakPeekRequest(
+            id: existing.id,
+            pluginID: existing.pluginID,
+            priority: priority,
+            target: existing.target,
+            kind: existing.kind,
+            isInteractive: existing.isInteractive,
+            autoDismissAfter: existing.autoDismissAfter,
+            createdAt: existing.createdAt
+        )
+    }
+
+    private func forgetActiveSneakPeekRequest(
+        requestID: UUID?,
+        resolvedSessionIDs: [String]
+    ) {
+        if let requestID {
+            activeSneakPeekRequests.removeAll { $0.id == requestID }
+            return
+        }
+
+        let currentRequestIDs = Set(resolvedSessionIDs.compactMap {
+            sessions[$0]?.currentSneakPeek?.id
+        })
+        activeSneakPeekRequests.removeAll { currentRequestIDs.contains($0.id) }
+    }
+
+    private func screenResolutionContext() -> ScreenResolutionContext {
+        ScreenResolutionContext(
+            connectedScreens: connectedDescriptors,
+            activeScreenID: activeScreenIDProvider(),
+            primaryScreenID: primaryScreenIDProvider()
+        )
+    }
+
+    private static func defaultScreenDescriptors() -> [ScreenDescriptor] {
+        NSScreen.screens.compactMap {
+            ScreenDescriptorFactory.descriptor(for: $0, includeClosedNotchSize: true)
+        }
+    }
+
+    private static func defaultActiveScreenID() -> String? {
         let location = NSEvent.mouseLocation
         for screen in NSScreen.screens where screen.frame.contains(location) {
             return ScreenDescriptorFactory.screenID(for: screen)
         }
         return nil
+    }
+
+    private static func defaultPrimaryScreenID() -> String? {
+        NSScreen.screens.first.flatMap(ScreenDescriptorFactory.screenID(for:))
     }
 }

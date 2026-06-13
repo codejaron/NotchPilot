@@ -33,6 +33,26 @@ final class SneakPeekQueueTests: XCTestCase {
         XCTAssertEqual(queue.current?.id, next.id)
     }
 
+    func testExpiredAutoDismissRequestIsNotReturnedAsCurrent() {
+        let queue = SneakPeekQueue()
+        let expired = SneakPeekRequest(
+            id: UUID(),
+            pluginID: "media",
+            priority: 0,
+            target: .activeScreen,
+            isInteractive: false,
+            autoDismissAfter: 1,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let persistent = makeRequest(priority: 100)
+
+        queue.enqueue(expired)
+        queue.enqueue(persistent)
+
+        XCTAssertEqual(queue.current(at: Date(timeIntervalSince1970: 2))?.id, persistent.id)
+        XCTAssertEqual(queue.requests(at: Date(timeIntervalSince1970: 2)).map(\.id), [persistent.id])
+    }
+
     func testPriorityRanksApprovalsAIActivityAndMediaPlayback() {
         // Lower priority value = served earlier in the queue.
         XCTAssertEqual(SneakPeekRequestPriority.ai, SneakPeekRequestPriority.aiApproval)

@@ -536,6 +536,48 @@ final class ClaudePluginTests: XCTestCase {
     }
 
     @MainActor
+    func testDeactivateReleasesPendingHookRespondersWithEmptyResponse() {
+        let store = Self.makeSettingsStore()
+        store.claudePluginEnabled = true
+        store.devinPluginEnabled = false
+        let bus = EventBus()
+        let plugin = Self.makePlugin(settingsStore: store)
+        let responseBox = SplitResponseBox()
+
+        plugin.activate(bus: bus)
+        Self.sendPreToolUse(
+            plugin: plugin,
+            requestID: "claude-pre-deactivate",
+            sessionID: "claude-session-deactivate",
+            command: "echo pending",
+            toolUseID: "toolu_deactivate"
+        )
+        plugin.handle(
+            frame: BridgeFrame(
+                host: .claude,
+                requestID: "claude-request-deactivate",
+                rawJSON: """
+                {
+                  "hook_event_name": "PermissionRequest",
+                  "session_id": "claude-session-deactivate",
+                  "tool_name": "Bash",
+                  "tool_input": { "command": "echo pending" },
+                  "tool_use_id": "toolu_deactivate"
+                }
+                """
+            ),
+            respond: { data in responseBox.data = data }
+        )
+
+        XCTAssertNil(responseBox.data)
+
+        plugin.deactivate()
+
+        XCTAssertEqual(String(data: responseBox.data ?? Data(), encoding: .utf8), "{}")
+        XCTAssertTrue(plugin.pendingApprovals.isEmpty)
+    }
+
+    @MainActor
     func testReenablingApprovalSneakPresentsExistingPendingApproval() {
         let previousValue = SettingsStore.shared.approvalSneakNotificationsEnabled
         SettingsStore.shared.approvalSneakNotificationsEnabled = false
@@ -1465,8 +1507,6 @@ private extension ClaudePluginTests {
     @MainActor
     static func makePlugin(
         settingsStore: SettingsStore = .shared,
-        permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
-        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         transcriptReader: any ClaudeTranscriptReading = ClaudeTranscriptReader(),
         soundPlayer: any SoundPlaying = SplitFakeSoundPlayer(),
@@ -1474,8 +1514,6 @@ private extension ClaudePluginTests {
     ) -> ClaudePlugin {
         ClaudePlugin(
             settingsStore: settingsStore,
-            permissionRuleStore: permissionRuleStore,
-            sessionScopedApprovalStore: sessionScopedApprovalStore,
             sessionFocuser: sessionFocuser,
             transcriptReader: transcriptReader,
             soundPlayer: soundPlayer,

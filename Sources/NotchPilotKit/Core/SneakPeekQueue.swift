@@ -12,16 +12,26 @@ public final class SneakPeekQueue {
     public init() {}
 
     public var current: SneakPeekRequest? {
-        orderedEntries.first?.request
+        current(at: Date())
     }
 
     public var requests: [SneakPeekRequest] {
-        orderedEntries.map(\.request)
+        requests(at: Date())
     }
 
     public func enqueue(_ request: SneakPeekRequest) {
         entries.append(Entry(request: request, sequence: nextSequence))
         nextSequence += 1
+    }
+
+    public func current(at date: Date) -> SneakPeekRequest? {
+        pruneExpired(now: date)
+        return orderedEntries.first?.request
+    }
+
+    public func requests(at date: Date) -> [SneakPeekRequest] {
+        pruneExpired(now: date)
+        return orderedEntries.map(\.request)
     }
 
     public func updatePriority(
@@ -78,5 +88,16 @@ public final class SneakPeekQueue {
 
             return $0.request.priority < $1.request.priority
         }
+    }
+
+    private func isExpired(_ request: SneakPeekRequest, now: Date) -> Bool {
+        guard let autoDismissAfter = request.autoDismissAfter else {
+            return false
+        }
+        return now.timeIntervalSince(request.createdAt) >= autoDismissAfter
+    }
+
+    private func pruneExpired(now: Date) {
+        entries.removeAll { isExpired($0.request, now: now) }
     }
 }

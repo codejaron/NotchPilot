@@ -72,6 +72,7 @@ final class CodexDesktopApprovalController {
         let requestID: String
         let rawRequestID: JSONValue
         let method: String
+        let conversationID: String?
         let selectionMode: SelectionMode
         let cancelResult: JSONValue
         let delivery: Delivery
@@ -79,7 +80,8 @@ final class CodexDesktopApprovalController {
         var surface: CodexActionableSurface
     }
 
-    private var pendingApproval: PendingApproval?
+    private var pendingApprovals: [String: PendingApproval] = [:]
+    private var pendingSurfaceOrder: [String] = []
     private let followUpCreatedAtMillisecondsProvider: @Sendable () -> Int
 
     init(
@@ -91,7 +93,9 @@ final class CodexDesktopApprovalController {
     }
 
     var currentSurface: CodexActionableSurface? {
-        pendingApproval?.surface
+        pendingSurfaceOrder.reversed().compactMap {
+            pendingApprovals[$0]?.surface
+        }.first
     }
 
     static func canHandle(_ request: CodexDesktopIPCRequestFrame?) -> Bool {
@@ -139,26 +143,24 @@ final class CodexDesktopApprovalController {
             pendingApproval = makeLegacyPatchApproval(from: request, delivery: delivery)
         }
 
-        self.pendingApproval = pendingApproval
+        store(pendingApproval)
         return pendingApproval.surface
     }
 
     func selectOption(_ optionID: String, on surfaceID: String) -> CodexActionableSurface? {
-        guard var pendingApproval,
-              pendingApproval.surface.id == surfaceID,
+        guard var pendingApproval = pendingApprovals[surfaceID],
               pendingApproval.surface.options.contains(where: { $0.id == optionID })
         else {
             return nil
         }
 
         pendingApproval.surface = pendingApproval.surface.selectingOption(optionID)
-        self.pendingApproval = pendingApproval
+        pendingApprovals[surfaceID] = pendingApproval
         return pendingApproval.surface
     }
 
     func updateText(_ text: String, on surfaceID: String) -> CodexActionableSurface? {
-        guard var pendingApproval,
-              pendingApproval.surface.id == surfaceID,
+        guard var pendingApproval = pendingApprovals[surfaceID],
               pendingApproval.surface.textInput != nil
         else {
             return nil
@@ -168,14 +170,12 @@ final class CodexDesktopApprovalController {
         pendingApproval.surface = shouldClearSelectionOnTextUpdate(for: pendingApproval.selectionMode)
             ? surfaceByClearingSelection(updatedSurface)
             : updatedSurface
-        self.pendingApproval = pendingApproval
+        pendingApprovals[surfaceID] = pendingApproval
         return pendingApproval.surface
     }
 
     func perform(action: CodexSurfaceAction, on surfaceID: String) -> CodexDesktopApprovalResponse? {
-        guard let pendingApproval,
-              pendingApproval.surface.id == surfaceID
-        else {
+        guard let pendingApproval = pendingApprovals[surfaceID] else {
             return nil
         }
 
@@ -249,14 +249,24 @@ final class CodexDesktopApprovalController {
             }
         }
 
-        self.pendingApproval = nil
+        removePendingApproval(surfaceID: surfaceID)
         return response
     }
 
     func reset() -> CodexActionableSurface? {
-        let surface = pendingApproval?.surface
-        pendingApproval = nil
+        let surface = currentSurface
+        pendingApprovals.removeAll()
+        pendingSurfaceOrder.removeAll()
         return surface
+    }
+
+    func reset(conversationID: String) {
+        let surfaceIDs = pendingApprovals.values.compactMap { pendingApproval in
+            pendingApproval.conversationID == conversationID ? pendingApproval.surface.id : nil
+        }
+        for surfaceID in surfaceIDs {
+            removePendingApproval(surfaceID: surfaceID)
+        }
     }
 
     private func makeCommandApproval(
@@ -640,6 +650,7 @@ final class CodexDesktopApprovalController {
             requestID: request.requestID,
             rawRequestID: request.rawRequestID ?? .string(request.requestID),
             method: request.method,
+            conversationID: conversationID(threadID: threadID, delivery: delivery),
             selectionMode: selectionMode,
             cancelResult: cancelResult,
             delivery: delivery,
@@ -657,6 +668,27 @@ final class CodexDesktopApprovalController {
                 quickActions: quickActions
             )
         )
+    }
+
+    private func store(_ pendingApproval: PendingApproval) {
+        let surfaceID = pendingApproval.surface.id
+        pendingApprovals[surfaceID] = pendingApproval
+        pendingSurfaceOrder.removeAll { $0 == surfaceID }
+        pendingSurfaceOrder.append(surfaceID)
+    }
+
+    private func removePendingApproval(surfaceID: String) {
+        pendingApprovals.removeValue(forKey: surfaceID)
+        pendingSurfaceOrder.removeAll { $0 == surfaceID }
+    }
+
+    private func conversationID(threadID: String?, delivery: Delivery) -> String? {
+        switch delivery {
+        case .response:
+            return threadID
+        case let .threadFollower(_, conversationID, _):
+            return conversationID
+        }
     }
 
     private func liveDelivery(for request: CodexDesktopIPCRequestFrame) -> Delivery? {

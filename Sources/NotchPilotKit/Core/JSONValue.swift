@@ -67,13 +67,16 @@ public enum JSONValue: Equatable, Sendable {
     var integerValue: Int? {
         switch self {
         case let .integer(value):
-            value
+            return value
         case let .double(value):
-            Int(value)
+            guard value.isFinite else {
+                return nil
+            }
+            return Int(exactly: value)
         case let .string(value):
-            Int(value)
+            return Int(value)
         default:
-            nil
+            return nil
         }
     }
 

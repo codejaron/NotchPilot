@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct BridgeSocketConfiguration: Sendable {
@@ -7,21 +8,31 @@ public struct BridgeSocketConfiguration: Sendable {
         self.socketPath = socketPath
     }
 
-    public static let `default` = BridgeSocketConfiguration(socketPath: "/tmp/notchpilot.sock")
+    public static let `default`: BridgeSocketConfiguration = {
+        let directoryURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".notchpilot", isDirectory: true)
+        return BridgeSocketConfiguration(
+            socketPath: directoryURL.appendingPathComponent("notchpilot.sock").path
+        )
+    }()
 }
 
 public enum UnixDomainSocketServerError: Error {
     case unableToCreateSocket
     case invalidSocketPath
+    case directoryCreationFailed(path: String)
     case bindFailed(code: Int32)
+    case permissionUpdateFailed(code: Int32)
     case listenFailed(code: Int32)
 }
 
 public final class UnixDomainSocketServer: @unchecked Sendable {
     public typealias FrameHandler = @Sendable (BridgeFrame, @escaping @Sendable (Data) -> Void) -> Void
     public typealias DisconnectHandler = @Sendable (String) -> Void
+    public typealias PeerValidator = @Sendable (Int32) -> Bool
 
     private let socketPath: String
+    private let peerValidator: PeerValidator
     private let listenerQueue = DispatchQueue(label: "NotchPilot.UnixDomainSocketServer.listener")
 
     private var serverFileDescriptor: Int32 = -1
@@ -31,8 +42,13 @@ public final class UnixDomainSocketServer: @unchecked Sendable {
     private var activeConnections: [UUID: ClientConnection] = [:]
     private let activeConnectionsLock = NSLock()
 
-    public init(socketPath: String) {
+    public convenience init(socketPath: String) {
+        self.init(socketPath: socketPath, peerValidator: UnixDomainSocketServer.sameEffectiveUserPeer)
+    }
+
+    init(socketPath: String, peerValidator: @escaping PeerValidator) {
         self.socketPath = socketPath
+        self.peerValidator = peerValidator
     }
 
     deinit {
@@ -44,6 +60,17 @@ public final class UnixDomainSocketServer: @unchecked Sendable {
 
         self.onFrame = onFrame
         self.onDisconnect = onDisconnect
+
+        let socketURL = URL(fileURLWithPath: socketPath)
+        let directoryURL = socketURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw UnixDomainSocketServerError.directoryCreationFailed(path: directoryURL.path)
+        }
 
         unlink(socketPath)
 
@@ -84,9 +111,17 @@ public final class UnixDomainSocketServer: @unchecked Sendable {
             throw UnixDomainSocketServerError.bindFailed(code: errorCode)
         }
 
+        guard chmod(socketPath, 0o600) == 0 else {
+            let errorCode = errno
+            close(fileDescriptor)
+            unlink(socketPath)
+            throw UnixDomainSocketServerError.permissionUpdateFailed(code: errorCode)
+        }
+
         guard listen(fileDescriptor, SOMAXCONN) == 0 else {
             let errorCode = errno
             close(fileDescriptor)
+            unlink(socketPath)
             throw UnixDomainSocketServerError.listenFailed(code: errorCode)
         }
 
@@ -130,6 +165,11 @@ public final class UnixDomainSocketServer: @unchecked Sendable {
                 return
             }
 
+            guard peerValidator(clientFileDescriptor) else {
+                close(clientFileDescriptor)
+                continue
+            }
+
             let connectionID = UUID()
             let connection = ClientConnection(
                 fileDescriptor: clientFileDescriptor,
@@ -150,6 +190,15 @@ public final class UnixDomainSocketServer: @unchecked Sendable {
         activeConnectionsLock.lock()
         activeConnections.removeValue(forKey: id)
         activeConnectionsLock.unlock()
+    }
+
+    private static func sameEffectiveUserPeer(fileDescriptor: Int32) -> Bool {
+        var effectiveUserID = uid_t()
+        var effectiveGroupID = gid_t()
+        guard getpeereid(fileDescriptor, &effectiveUserID, &effectiveGroupID) == 0 else {
+            return false
+        }
+        return effectiveUserID == geteuid()
     }
 }
 

@@ -175,6 +175,34 @@ final class SystemMonitorAlertEngineTests: XCTestCase {
         })
     }
 
+    func testGreaterThanRuleStaysFiringUntilValueDropsBelowHysteresisClearPoint() {
+        let clock = MutableClock(start: Date(timeIntervalSince1970: 0))
+        let rule = SystemMonitorAlertRule(
+            id: "cpu.warn",
+            metric: .cpu,
+            comparison: .greaterThan,
+            threshold: 85,
+            sustainSeconds: 0,
+            severity: .warn
+        )
+        let engine = SystemMonitorAlertEngine(rules: [rule], clock: clock)
+
+        _ = engine.process(snapshot: snapshot(cpuUsage: 0.90))
+        XCTAssertEqual(engine.currentAlerts[.cpu]?.severity, .warn)
+
+        XCTAssertTrue(engine.process(snapshot: snapshot(cpuUsage: 0.84)).isEmpty)
+        XCTAssertEqual(engine.currentAlerts[.cpu]?.severity, .warn)
+
+        let changes = engine.process(snapshot: snapshot(cpuUsage: 0.80))
+        XCTAssertTrue(changes.contains { change in
+            if case let .cleared(metric) = change, metric == .cpu {
+                return true
+            }
+            return false
+        })
+        XCTAssertNil(engine.currentAlerts[.cpu])
+    }
+
     func testRuleStaysFiringWhileValueRemainsAboveThresholdWithNoChange() {
         let clock = MutableClock(start: Date(timeIntervalSince1970: 0))
         let rule = SystemMonitorAlertRule(

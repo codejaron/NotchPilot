@@ -30,6 +30,7 @@ public final class SoundManager: ObservableObject {
     private let loader: SoundPackLoader
     private let store: SettingsStore
     private let bundleLookup: () -> URL?
+    private let installedPacksRoot: () -> URL?
     private let logger = Logger(subsystem: "com.notchpilot.sound", category: "SoundManager")
 
     /// AVAudioPlayer instances must live for the duration of playback or they
@@ -47,10 +48,11 @@ public final class SoundManager: ObservableObject {
             bundleLookup: {
                 Bundle.module.url(
                     forResource: "openpeon",
-                    withExtension: "json",
-                    subdirectory: "Sounds/builtin"
-                )
-            }
+                        withExtension: "json",
+                        subdirectory: "Sounds/builtin"
+                    )
+            },
+            installedPacksRoot: { SoundPackLoader.defaultSearchRoots().first }
         )
     }
 
@@ -58,11 +60,13 @@ public final class SoundManager: ObservableObject {
     public init(
         loader: SoundPackLoader,
         store: SettingsStore,
-        bundleLookup: @escaping () -> URL?
+        bundleLookup: @escaping () -> URL?,
+        installedPacksRoot: @escaping () -> URL? = { SoundPackLoader.defaultSearchRoots().first }
     ) {
         self.loader = loader
         self.store = store
         self.bundleLookup = bundleLookup
+        self.installedPacksRoot = installedPacksRoot
         refreshInstalledPacks()
         observeStoreChanges()
     }
@@ -75,7 +79,12 @@ public final class SoundManager: ObservableObject {
         if let builtIn = loadBuiltInPack() {
             packs.append(builtIn)
         }
-        let disk = loader.discoverPacks()
+        let disk: [LoadedSoundPack]
+        if let root = installedPacksRoot() {
+            disk = loader.discoverPacks(in: [root])
+        } else {
+            disk = []
+        }
         // De-duplicate by id; built-in wins if the user installed a pack with
         // the same name under ~/.openpeon/packs.
         let existingIDs = Set(packs.map(\.id))
@@ -108,20 +117,94 @@ public final class SoundManager: ObservableObject {
     public func importPack(from sourceURL: URL) throws -> LoadedSoundPack {
         let validated = try loader.loadPack(at: sourceURL)
         let fm = FileManager.default
-        guard let packsRoot = SoundPackLoader.defaultSearchRoots().first else {
+        guard let packsRoot = installedPacksRoot() else {
             throw SoundPackLoaderError.manifestNotFound(sourceURL)
         }
 
         try fm.createDirectory(at: packsRoot, withIntermediateDirectories: true)
 
         let target = packsRoot.appendingPathComponent(validated.id, isDirectory: true)
+        let staging = packsRoot.appendingPathComponent(
+            ".\(validated.id).import-\(UUID().uuidString)",
+            isDirectory: true
+        )
+
+        do {
+            try copyValidatedPack(validated, from: sourceURL, to: staging)
+            _ = try loader.loadPack(at: staging)
+
+            if fm.fileExists(atPath: target.path) {
+                try fm.removeItem(at: target)
+            }
+            try fm.moveItem(at: staging, to: target)
+        } catch {
+            try? fm.removeItem(at: staging)
+            throw error
+        }
+
+        let installed = try loader.loadPack(at: target)
+        refreshInstalledPacks()
+        return installed
+    }
+
+    private func copyValidatedPack(
+        _ validated: LoadedSoundPack,
+        from sourceURL: URL,
+        to target: URL
+    ) throws {
+        let fm = FileManager.default
         if fm.fileExists(atPath: target.path) {
             try fm.removeItem(at: target)
         }
-        try fm.copyItem(at: sourceURL, to: target)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
 
-        refreshInstalledPacks()
-        return validated
+        let sourceManifest = sourceURL.appendingPathComponent(SoundPackLoader.manifestFileName)
+        try fm.copyItem(
+            at: sourceManifest,
+            to: target.appendingPathComponent(SoundPackLoader.manifestFileName)
+        )
+
+        var copiedRelativePaths = Set<String>()
+        for soundURL in validated.soundsByCategory.values.flatMap({ $0 }) {
+            let relativePath = try relativeSoundPath(for: soundURL, packRoot: sourceURL)
+            guard copiedRelativePaths.insert(relativePath).inserted else {
+                continue
+            }
+
+            let targetURL = target.appendingPathComponent(relativePath)
+            try fm.createDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try readCappedAudioFile(at: soundURL)
+            try data.write(to: targetURL, options: .atomic)
+        }
+    }
+
+    private func relativeSoundPath(for soundURL: URL, packRoot: URL) throws -> String {
+        let rootPath = packRoot.standardizedFileURL.path
+        let boundary = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let soundPath = soundURL.standardizedFileURL.path
+        guard soundPath.hasPrefix(boundary) else {
+            throw SoundPackLoaderError.pathEscapesRoot(soundURL.path)
+        }
+        return String(soundPath.dropFirst(boundary.count))
+    }
+
+    private func readCappedAudioFile(at url: URL) throws -> Data {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            throw SoundPackLoaderError.fileMissing(url.lastPathComponent)
+        }
+        defer { try? handle.close() }
+
+        let data = try handle.read(upToCount: SoundPackLoader.maxFileBytes + 1) ?? Data()
+        if data.count > SoundPackLoader.maxFileBytes {
+            throw SoundPackLoaderError.fileTooLarge(url.lastPathComponent, bytes: data.count)
+        }
+        return data
     }
 
     /// Plays a CESP category. No-ops if sound is disabled, no pack is active,

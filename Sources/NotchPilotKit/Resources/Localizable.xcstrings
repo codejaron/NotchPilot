@@ -337,6 +337,38 @@
         }
       }
     },
+    "blockHTTPLyricsSources": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Block HTTP Lyrics Sources"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不使用 HTTP 歌词源"
+          }
+        }
+      }
+    },
+    "blockHTTPLyricsSourcesDetail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When enabled, searches use HTTPS-only providers. Leave it off to include more lyric sources, some of which use HTTP."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后只使用 HTTPS 歌词源；关闭时会使用更多歌词源，其中部分通过 HTTP 查询。"
+          }
+        }
+      }
+    },
     "devinIntegration": {
       "localizations": {
         "en": {

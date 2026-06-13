@@ -28,8 +28,8 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
             snapshotScriptRunner: { _ in
                 [
                     "playing",
-                    "12",
-                    "180000",
+                    "12.5",
+                    "180",
                     "Song",
                     "Artist",
                     "Album",
@@ -45,7 +45,7 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
         XCTAssertEqual(snapshot?.source.bundleIdentifier, "com.spotify.client")
         XCTAssertEqual(snapshot?.title, "Song")
         XCTAssertEqual(snapshot?.artist, "Artist")
-        XCTAssertEqual(snapshot?.currentTime, 12)
+        XCTAssertEqual(snapshot?.currentTime, 12.5)
         XCTAssertEqual(snapshot?.duration, 180)
         XCTAssertEqual(snapshot?.isPlaying, true)
         XCTAssertEqual(snapshot?.lastUpdated, date)
@@ -59,8 +59,8 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
             snapshotScriptRunner: { _ in
                 [
                     "playing",
-                    "12",
-                    "180000",
+                    "12.5",
+                    "180",
                     "Song",
                     "Artist",
                     "Album",
@@ -110,6 +110,25 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
             "tell application \"Spotify\" to previous track",
             "tell application \"Spotify\" to set player position to 42.5",
         ])
+    }
+
+    func testSpotifySnapshotScriptReturnsPositionInSeconds() async {
+        var script = ""
+        let player = AppleScriptSpotifyPlaybackPlayer(
+            snapshotScriptRunner: {
+                script = $0
+                return nil
+            },
+            commandScriptRunner: { _ in false },
+            playbackTimeScriptRunner: { _ in nil },
+            isSpotifyRunning: { true }
+        )
+
+        _ = await player.currentSpotifyPlaybackSnapshot(at: Date(timeIntervalSince1970: 20))
+
+        XCTAssertTrue(script.contains("set trackPosition to player position"))
+        XCTAssertTrue(script.contains("trackPosition & sep"))
+        XCTAssertFalse(script.contains("trackPositionMilliseconds"))
     }
 
     func testSpotifyPlayerDoesNotRunPlaybackCommandWhenSpotifyIsNotRunning() {
@@ -286,7 +305,7 @@ final class SpotifyPlaybackStateInputTests: XCTestCase {
         let result = [
             "playing",
             "31.25",
-            "188000",
+            "188",
             "Song",
             "Artist",
             "Album",

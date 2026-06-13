@@ -4,6 +4,25 @@ import XCTest
 @testable import NotchPilotKit
 
 final class LyricsProviderTests: XCTestCase {
+    func testDefaultLyricsKitServicesExcludeKnownHTTPProviders() {
+        let serviceNames = LyricsKitServiceConfiguration.services(allowInsecureHTTP: false)
+            .map(\.displayName)
+
+        XCTAssertTrue(serviceNames.contains("QQMusic"))
+        XCTAssertTrue(serviceNames.contains("Musixmatch"))
+        XCTAssertTrue(serviceNames.contains("LRCLIB"))
+        XCTAssertFalse(serviceNames.contains("Kugou"))
+        XCTAssertFalse(serviceNames.contains("Netease"))
+    }
+
+    func testLyricsKitServicesCanIncludeKnownHTTPProvidersWhenAllowed() {
+        let serviceNames = LyricsKitServiceConfiguration.services(allowInsecureHTTP: true)
+            .map(\.displayName)
+
+        XCTAssertTrue(serviceNames.contains("Kugou"))
+        XCTAssertTrue(serviceNames.contains("Netease"))
+    }
+
     func testTimedLyricsInitializesFromLyricsKitLyrics() throws {
         let lyrics = Lyrics(
             lines: [
@@ -76,6 +95,58 @@ final class LyricsProviderTests: XCTestCase {
         )
 
         XCTAssertNil(TimedLyrics(lyricsKitLyrics: lyrics, service: "QQMusic"))
+    }
+
+    func testTimedLyricsTruncatesOverlongLines() throws {
+        let lyrics = Lyrics(
+            lines: [
+                LyricsLine(
+                    content: String(repeating: "a", count: TimedLyrics.maxLineCharacterCount + 25),
+                    position: 1
+                ),
+            ],
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+
+        let timedLyrics = try XCTUnwrap(TimedLyrics(lyricsKitLyrics: lyrics, service: "LRCLIB"))
+        XCTAssertEqual(timedLyrics.lines.first?.text.count, TimedLyrics.maxLineCharacterCount)
+    }
+
+    func testTimedLyricsLimitsExternalLineCount() throws {
+        let lines = (0..<(TimedLyrics.maxLineCount + 25)).map { index in
+            LyricsLine(content: "line \(index)", position: TimeInterval(index))
+        }
+        let lyrics = Lyrics(
+            lines: lines,
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+
+        let timedLyrics = try XCTUnwrap(TimedLyrics(lyricsKitLyrics: lyrics, service: "LRCLIB"))
+        XCTAssertEqual(timedLyrics.lines.count, TimedLyrics.maxLineCount)
+    }
+
+    func testTimedLyricsRejectsOversizedExternalPayload() {
+        let lines = (0..<300).map { index in
+            LyricsLine(
+                content: String(repeating: "x", count: 1_000),
+                position: TimeInterval(index)
+            )
+        }
+        let lyrics = Lyrics(
+            lines: lines,
+            idTags: [
+                .title: "Song",
+                .artist: "Artist",
+            ]
+        )
+
+        XCTAssertNil(TimedLyrics(lyricsKitLyrics: lyrics, service: "LRCLIB"))
     }
 
     func testTimedLyricsInitializesWhenArtistMetadataIsMissing() throws {

@@ -306,11 +306,24 @@ public struct HookInstaller {
 
     private func writeJSONObject(_ object: [String: Any], to url: URL) throws {
         do {
+            try backupExistingFileIfPresent(at: url)
             let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: url)
+            try data.write(to: url, options: .atomic)
         } catch {
             throw HookInstallError.writeError(error.localizedDescription)
         }
+    }
+
+    private func backupExistingFileIfPresent(at url: URL) throws {
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        let backupURL = url.appendingPathExtension("bak")
+        if fileManager.fileExists(atPath: backupURL.path) {
+            try fileManager.removeItem(at: backupURL)
+        }
+        try fileManager.copyItem(at: url, to: backupURL)
     }
 
     private func removingManagedEntries(from entries: [[String: Any]], bridgeScript: String?) -> [[String: Any]] {

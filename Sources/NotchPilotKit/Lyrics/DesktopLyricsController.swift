@@ -260,7 +260,7 @@ final class DesktopLyricsController: ObservableObject {
         }
 
         guard snapshot.isPlaying else {
-            resetPresentation(clearLyrics: false)
+            hidePresentationForPausedPlayback()
             return
         }
 
@@ -335,6 +335,11 @@ final class DesktopLyricsController: ObservableObject {
             currentLyrics = nil
             currentTrackKey = nil
         }
+        assignPresentation(.hidden)
+    }
+
+    private func hidePresentationForPausedPlayback() {
+        cancelPendingPresentationRefresh()
         assignPresentation(.hidden)
     }
 }

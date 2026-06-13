@@ -253,6 +253,44 @@ final class DesktopLyricsControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testLyricsLoadedWhilePausedAppearWhenPlaybackResumes() async {
+        let store = makeSettingsStore()
+        store.mediaPlaybackEnabled = true
+        store.desktopLyricsEnabled = true
+        let ignoredTrackStore = TestIgnoredLyricsStore()
+        let cache = TestControllerLyricsCache()
+        let provider = StreamingDesktopLyricsControllerTestProvider()
+        let lyrics = TimedLyrics(
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            duration: 200,
+            service: "cache",
+            lines: [TimedLyricLine(timestamp: 0, text: "line while paused")]
+        )
+        let controller = DesktopLyricsController(
+            settingsStore: store,
+            provider: provider,
+            cache: cache,
+            ignoredTrackStore: ignoredTrackStore
+        )
+
+        controller.handlePlaybackState(Self.snapshot(currentTime: 5, isPlaying: true))
+        await Self.waitForStreamingProviderRequest(provider)
+        controller.handlePlaybackState(Self.snapshot(currentTime: 5, isPlaying: false))
+        await provider.yield(lyrics)
+        await Self.flushMainActorTasks()
+
+        XCTAssertFalse(controller.presentation.isVisible)
+
+        controller.handlePlaybackState(Self.snapshot(currentTime: 5, isPlaying: true))
+        await Self.waitForCurrentLine("line while paused", controller: controller)
+
+        XCTAssertEqual(controller.presentation.currentLine, "line while paused")
+        XCTAssertEqual(provider.requestedSnapshots.count, 1)
+    }
+
+    @MainActor
     func testControllerKeepsLyricsHiddenWhenPlaybackSwitchesToIneligibleSource() async {
         let store = makeSettingsStore()
         store.mediaPlaybackEnabled = true

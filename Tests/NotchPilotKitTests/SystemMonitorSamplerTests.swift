@@ -248,6 +248,33 @@ final class SystemMonitorSamplerTests: XCTestCase {
         )
     }
 
+    func testSMCTemperatureBridgeCachesFirstWorkingKnownKey() {
+        let smc = RecordingSMCReader(values: ["TC0P": 49])
+        let bridge = SystemMonitorSMCSensorBridge(smc: smc)
+
+        XCTAssertEqual(bridge.cpuTemperatureCelsius(), 49)
+        smc.resetCounts()
+        XCTAssertEqual(bridge.cpuTemperatureCelsius(), 49)
+
+        XCTAssertEqual(smc.valueCounts, ["TC0P": 1])
+        XCTAssertEqual(smc.allKeysCallCount, 0)
+    }
+
+    func testSMCTemperatureBridgeCachesDiscoveredTemperatureKeys() {
+        let smc = RecordingSMCReader(
+            values: ["Tcustom": 42],
+            allKeys: ["Tcustom", "Vcore"]
+        )
+        let bridge = SystemMonitorSMCSensorBridge(smc: smc)
+
+        XCTAssertEqual(bridge.cpuTemperatureCelsius(), 42)
+        smc.resetCounts()
+        XCTAssertEqual(bridge.cpuTemperatureCelsius(), 42)
+
+        XCTAssertEqual(smc.valueCounts["Tcustom"], 1)
+        XCTAssertEqual(smc.allKeysCallCount, 0)
+    }
+
     func testByteRateRequiresRealPreviousCounter() {
         XCTAssertNil(SystemMonitorSampleMath.bytesPerSecond(previous: nil, current: 1_000, interval: 1))
         XCTAssertNil(SystemMonitorSampleMath.bytesPerSecond(previous: 1_000, current: 500, interval: 1))
@@ -535,5 +562,32 @@ final class SystemMonitorSamplerTests: XCTestCase {
         XCTAssertEqual(activities[0].downloadBytesPerSecond, 2_000, accuracy: 0.001)
         XCTAssertEqual(activities[0].uploadBytesPerSecond, 500, accuracy: 0.001)
         XCTAssertEqual(activities[0].totalBytesPerSecond, 2_500, accuracy: 0.001)
+    }
+}
+
+private final class RecordingSMCReader: SystemMonitorSMCReading, @unchecked Sendable {
+    private let values: [String: Double]
+    private let keys: [String]
+    private(set) var valueCounts: [String: Int] = [:]
+    private(set) var allKeysCallCount = 0
+
+    init(values: [String: Double], allKeys: [String] = []) {
+        self.values = values
+        self.keys = allKeys
+    }
+
+    func value(forKey key: String) -> Double? {
+        valueCounts[key, default: 0] += 1
+        return values[key]
+    }
+
+    func allKeys() -> [String] {
+        allKeysCallCount += 1
+        return keys
+    }
+
+    func resetCounts() {
+        valueCounts = [:]
+        allKeysCallCount = 0
     }
 }

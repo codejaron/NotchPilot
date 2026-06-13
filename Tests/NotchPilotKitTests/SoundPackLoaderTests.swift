@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 
 @testable import NotchPilotKit
@@ -175,6 +176,35 @@ final class SoundPackLoaderTests: XCTestCase {
         }
     }
 
+    func testRejectsSoundWithMismatchedSHA256() throws {
+        let pack = try writePackWithChecksums(
+            name: "bad-checksum",
+            categories: [
+                "task.complete": [("done.wav", validRIFFBytes(), String(repeating: "0", count: 64))],
+            ]
+        )
+
+        XCTAssertThrowsError(try SoundPackLoader().loadPack(at: pack)) { error in
+            guard case let SoundPackLoaderError.checksumMismatch(fileName) = error else {
+                XCTFail("Expected checksumMismatch, got \(error)"); return
+            }
+            XCTAssertEqual(fileName, "done.wav")
+        }
+    }
+
+    func testAcceptsSoundWithMatchingSHA256() throws {
+        let bytes = validRIFFBytes()
+        let pack = try writePackWithChecksums(
+            name: "good-checksum",
+            categories: [
+                "task.complete": [("done.wav", bytes, sha256Hex(bytes))],
+            ]
+        )
+
+        let loaded = try SoundPackLoader().loadPack(at: pack)
+        XCTAssertEqual(loaded.soundURLs(for: .taskComplete).first?.lastPathComponent, "done.wav")
+    }
+
     func testRejectsFileWithSpacesInName() throws {
         let pack = try writePack(
             name: "spaces",
@@ -263,6 +293,43 @@ final class SoundPackLoaderTests: XCTestCase {
         return pack
     }
 
+    @discardableResult
+    private func writePackWithChecksums(
+        name: String,
+        categories: [String: [(String, Data, String?)]]
+    ) throws -> URL {
+        let pack = tempRoot.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
+
+        let soundsDir = pack.appendingPathComponent("sounds", isDirectory: true)
+        try FileManager.default.createDirectory(at: soundsDir, withIntermediateDirectories: true)
+
+        var manifestCategories: [String: [[String: String]]] = [:]
+        for (category, sounds) in categories {
+            var entries: [[String: String]] = []
+            for (fileName, data, checksum) in sounds {
+                try data.write(to: soundsDir.appendingPathComponent(fileName))
+                var entry = ["file": "sounds/\(fileName)", "label": fileName]
+                entry["sha256"] = checksum
+                entries.append(entry)
+            }
+            manifestCategories[category] = entries
+        }
+
+        let manifestObject: [String: Any] = [
+            "cesp_version": "1.0",
+            "name": name,
+            "display_name": name,
+            "version": "1.0.0",
+            "categories": manifestCategories.mapValues { ["sounds": $0] },
+        ]
+
+        let manifestURL = pack.appendingPathComponent(SoundPackLoader.manifestFileName)
+        let data = try JSONSerialization.data(withJSONObject: manifestObject, options: [.prettyPrinted])
+        try data.write(to: manifestURL)
+        return pack
+    }
+
     /// 12-byte minimal RIFF/WAVE header. Enough to pass magic-byte sniffing
     /// without bothering to be a playable file.
     private func validRIFFBytes() -> Data {
@@ -271,5 +338,11 @@ final class SoundPackLoaderTests: XCTestCase {
             0x24, 0x00, 0x00, 0x00, // chunk size (placeholder)
             0x57, 0x41, 0x56, 0x45, // "WAVE"
         ])
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }

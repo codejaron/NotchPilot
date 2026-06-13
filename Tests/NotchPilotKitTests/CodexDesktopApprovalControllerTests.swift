@@ -172,6 +172,64 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
         XCTAssertNil(controller.currentSurface)
     }
 
+    func testSecondApprovalDoesNotMakeFirstApprovalUnperformable() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handle(
+            request: commandApprovalRequest(
+                requestID: "approval-first",
+                threadID: "thread-first",
+                command: "date"
+            )
+        )
+        _ = controller.handle(
+            request: commandApprovalRequest(
+                requestID: "approval-second",
+                threadID: "thread-second",
+                command: "pwd"
+            )
+        )
+
+        XCTAssertEqual(controller.currentSurface?.id, "codex-ipc-approval-second")
+
+        let response = controller.perform(action: .primary, on: "codex-ipc-approval-first")
+
+        XCTAssertEqual(
+            response,
+            CodexDesktopApprovalResponse(
+                requestID: "approval-first",
+                method: "item/commandExecution/requestApproval",
+                result: .object([
+                    "decision": .string("accept"),
+                ]),
+                submission: .response
+            )
+        )
+        XCTAssertEqual(controller.currentSurface?.id, "codex-ipc-approval-second")
+    }
+
+    func testResetForConversationOnlyClearsMatchingApproval() {
+        let controller = CodexDesktopApprovalController()
+        _ = controller.handle(
+            request: commandApprovalRequest(
+                requestID: "approval-still-pending",
+                threadID: "thread-still-pending",
+                command: "pwd"
+            )
+        )
+        _ = controller.handle(
+            request: commandApprovalRequest(
+                requestID: "approval-cleared",
+                threadID: "thread-cleared",
+                command: "date"
+            )
+        )
+
+        controller.reset(conversationID: "thread-cleared")
+
+        XCTAssertEqual(controller.currentSurface?.id, "codex-ipc-approval-still-pending")
+        XCTAssertNotNil(controller.perform(action: .primary, on: "codex-ipc-approval-still-pending"))
+    }
+
     func testSubmittingTypedCommandApprovalFeedbackDeclinesAndBuildsSteerWithStartTurnFallback() {
         let controller = CodexDesktopApprovalController(
             followUpCreatedAtMillisecondsProvider: { 123 }
@@ -1235,5 +1293,27 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
             )
         )
         XCTAssertNil(controller.currentSurface)
+    }
+
+    private func commandApprovalRequest(
+        requestID: String,
+        threadID: String,
+        command: String
+    ) -> CodexDesktopIPCRequestFrame {
+        CodexDesktopIPCRequestFrame(
+            requestID: requestID,
+            method: "item/commandExecution/requestApproval",
+            params: [
+                "threadId": .string(threadID),
+                "command": .string(command),
+                "availableDecisions": .array([
+                    .string("accept"),
+                    .string("decline"),
+                ]),
+            ],
+            sourceClientID: "desktop-client",
+            targetClientID: nil,
+            version: 1
+        )
     }
 }

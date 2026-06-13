@@ -33,6 +33,7 @@ public final class SettingsStore: ObservableObject {
         static let desktopLyricsEnabled = "media.desktopLyricsEnabled"
         static let desktopLyricsHighlightColorHex = "media.desktopLyricsHighlightColorHex"
         static let desktopLyricsFontSize = "media.desktopLyricsFontSize"
+        static let desktopLyricsAllowInsecureSources = "media.desktopLyricsAllowInsecureSources"
         static let systemMonitorEnabled = "systemMonitor.enabled"
         static let systemMonitorSneakPreviewEnabled = "systemMonitor.sneakPreviewEnabled"
         static let systemMonitorSneakLeftMetrics = "systemMonitor.sneak.leftMetrics"
@@ -140,6 +141,12 @@ public final class SettingsStore: ObservableObject {
     @Published var desktopLyricsFontSize: Double {
         didSet {
             defaults.set(desktopLyricsFontSize, forKey: Key.desktopLyricsFontSize)
+        }
+    }
+
+    @Published var desktopLyricsAllowInsecureSources: Bool {
+        didSet {
+            defaults.set(desktopLyricsAllowInsecureSources, forKey: Key.desktopLyricsAllowInsecureSources)
         }
     }
 
@@ -264,6 +271,8 @@ public final class SettingsStore: ObservableObject {
             defaults.string(forKey: Key.desktopLyricsHighlightColorHex) ?? "#4ADE80"
         self.desktopLyricsFontSize =
             defaults.object(forKey: Key.desktopLyricsFontSize) as? Double ?? 28
+        self.desktopLyricsAllowInsecureSources =
+            defaults.object(forKey: Key.desktopLyricsAllowInsecureSources) as? Bool ?? true
         self.systemMonitorEnabled =
             defaults.object(forKey: Key.systemMonitorEnabled) as? Bool ?? true
         self.systemMonitorSneakPreviewEnabled =

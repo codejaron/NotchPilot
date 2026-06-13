@@ -296,6 +296,27 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDesktopLyricsHTTPSourceSettingDefaultsToAllowedAndPersistsChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.lyrics.desktopLyricsAllowInsecureSources)
+
+        store.lyrics.desktopLyricsAllowInsecureSources = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(reloadedStore.lyrics.desktopLyricsAllowInsecureSources)
+    }
+
+    @MainActor
     func testFeatureNamespacesForwardToPersistedSettings() {
         let store = SettingsStore(
             defaults: defaults,
@@ -308,6 +329,7 @@ final class SettingsStoreTests: XCTestCase {
         store.lyrics.desktopLyricsEnabled = true
         store.lyrics.desktopLyricsHighlightColorHex = "#FF00AA"
         store.lyrics.desktopLyricsFontSize = 34
+        store.lyrics.desktopLyricsAllowInsecureSources = true
         store.ai.claudePluginEnabled = false
         store.ai.codexPluginEnabled = false
         store.systemMonitor.systemMonitorEnabled = false
@@ -328,6 +350,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(reloadedStore.lyrics.desktopLyricsEnabled)
         XCTAssertEqual(reloadedStore.lyrics.desktopLyricsHighlightColorHex, "#FF00AA")
         XCTAssertEqual(reloadedStore.lyrics.desktopLyricsFontSize, 34)
+        XCTAssertTrue(reloadedStore.lyrics.desktopLyricsAllowInsecureSources)
         XCTAssertFalse(reloadedStore.ai.claudePluginEnabled)
         XCTAssertFalse(reloadedStore.ai.codexPluginEnabled)
         XCTAssertFalse(reloadedStore.systemMonitor.systemMonitorEnabled)

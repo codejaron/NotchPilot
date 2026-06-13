@@ -1,20 +1,9 @@
 import Foundation
 
 public struct HookResponseEncoder {
-    private let permissionRuleStore: PermissionRuleWriting?
-
-    public init(permissionRuleStore: PermissionRuleWriting? = nil) {
-        self.permissionRuleStore = permissionRuleStore
-    }
+    public init() {}
 
     public func encode(decision: ApprovalDecision, for host: AIHost, eventType: AIBridgeEventType) throws -> Data {
-        // Persistent allow-rules are written to the Claude Code permissions file.
-        // Devin Local imports the same `~/.claude/settings.json`, so a rule
-        // appended for either host is honored by both — we treat them identically.
-        if host.isClaudeFamily, decision.permissionUpdates.isEmpty, let rule = decision.persistRule {
-            try? permissionRuleStore?.appendAllowRule(rule)
-        }
-
         let reason = defaultReason(behavior: decision.behavior, feedback: decision.feedbackText)
 
         let response: String
@@ -133,8 +122,4 @@ public struct HookResponseEncoder {
         }
         return escaped
     }
-}
-
-public protocol PermissionRuleWriting: Sendable {
-    func appendAllowRule(_ rule: ClaudePermissionRule) throws
 }

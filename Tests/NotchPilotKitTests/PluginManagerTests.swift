@@ -120,6 +120,26 @@ final class PluginManagerTests: XCTestCase {
         cancellable.cancel()
     }
 
+    func testRuntimePluginChangesBroadcastManagerObjectWillChangeWithoutInvalidatingLayout() async {
+        let manager = PluginManager()
+        let plugin = PluginManagerTestPlugin(id: "runtime", title: "Runtime", dockOrder: 1)
+        var changeCount = 0
+        var invalidationCount = 0
+        let changeCancellable = manager.objectWillChange.sink { changeCount += 1 }
+        let invalidationCancellable = manager.layoutInvalidated.sink { invalidationCount += 1 }
+
+        manager.register(plugin)
+        changeCount = 0
+        invalidationCount = 0
+        plugin.emitRuntimeChange()
+        await Task.yield()
+
+        XCTAssertEqual(changeCount, 1)
+        XCTAssertEqual(invalidationCount, 0)
+        changeCancellable.cancel()
+        invalidationCancellable.cancel()
+    }
+
     func testPluginAvailabilityChangesInvalidateLayout() async {
         let manager = PluginManager()
         let plugin = PluginManagerTestPlugin(id: "runtime", title: "Runtime", dockOrder: 1)

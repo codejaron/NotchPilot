@@ -766,33 +766,15 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
     }
 
     private func runProcess(executable: String, arguments: [String], timeout: TimeInterval = 2) -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            let watchdog = DispatchWorkItem {
-                if process.isRunning {
-                    process.terminate()
-                }
-            }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
-            process.waitUntilExit()
-            watchdog.cancel()
-        } catch {
+        guard let output = ProcessOutputCapture.run(
+            executableURL: URL(fileURLWithPath: executable),
+            arguments: arguments,
+            timeout: timeout
+        ), output.terminationStatus == 0 else {
             return nil
         }
 
-        guard process.terminationStatus == 0 else {
-            return nil
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        return String(data: output.standardOutput, encoding: .utf8)
     }
 
     private func blocks(

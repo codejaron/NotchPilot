@@ -14,7 +14,7 @@ enum ScreenDescriptorFactory {
             id: id,
             frame: screen.frame,
             visibleFrame: screen.visibleFrame,
-            isPrimary: screen == NSScreen.main,
+            isPrimary: screen == NSScreen.screens.first,
             includeClosedNotchSize: includeClosedNotchSize,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,

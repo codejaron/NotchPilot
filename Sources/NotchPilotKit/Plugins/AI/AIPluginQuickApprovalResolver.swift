@@ -47,9 +47,7 @@ enum AIPluginQuickApprovalResolver {
             guard action.id == "claude-allow",
                   case let .claude(decision) = action.payload,
                   decision.behavior == .allow,
-                  decision.permissionUpdates.isEmpty,
-                  decision.persistRule == nil,
-                  decision.sessionRule == nil
+                  decision.permissionUpdates.isEmpty
             else {
                 return false
             }

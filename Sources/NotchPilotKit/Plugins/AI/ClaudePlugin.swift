@@ -28,7 +28,6 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     private let runtime = AIAgentRuntime()
     private let parser = HookEventParser()
     private let encoder: HookResponseEncoder
-    private let sessionScopedApprovalStore: SessionScopedRuleStoring
     private let settingsStore: SettingsStore
     private let nowProvider: @Sendable () -> Date
     private let sessionFocuser: any AISessionFocusing
@@ -44,16 +43,13 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
 
     public init(
         settingsStore: SettingsStore = .shared,
-        permissionRuleStore: PermissionRuleWriting = PermissionRuleStore(),
-        sessionScopedApprovalStore: SessionScopedRuleStoring = SessionScopedApprovalStore(),
         sessionFocuser: any AISessionFocusing = SystemAISessionFocuser(),
         transcriptReader: any ClaudeTranscriptReading = ClaudeTranscriptReader(),
         soundPlayer: any SoundPlaying = SoundManager.shared,
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.settingsStore = settingsStore
-        self.encoder = HookResponseEncoder(permissionRuleStore: permissionRuleStore)
-        self.sessionScopedApprovalStore = sessionScopedApprovalStore
+        self.encoder = HookResponseEncoder()
         self.sessionFocuser = sessionFocuser
         self.transcriptReader = transcriptReader
         self.soundPlayer = soundPlayer
@@ -126,7 +122,7 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     }
 
     public func deactivate() {
-        responders.removeAll()
+        releasePendingResponders()
         sneakPeekIDs.removeAll()
         toolUseCorrelator.removeAll()
         sessions = []
@@ -173,7 +169,6 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
 
             if envelope.eventType == .stop {
                 clearCachedToolUseIDs(forSessionID: envelope.sessionID)
-                sessionScopedApprovalStore.clearSession(envelope.sessionID)
                 expirePendingApprovals(forSessionID: envelope.sessionID)
             }
 
@@ -183,26 +178,6 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
                 syncSneakPeek()
                 scheduleTranscriptUsageRefresh(for: envelope)
                 respond(Data("{}".utf8))
-                return
-            }
-
-            if envelope.needsResponse,
-               case let .permissionRequest(payload) = envelope.payload,
-               sessionScopedApprovalStore.matches(sessionID: envelope.sessionID, payload: payload) {
-                _ = runtime.handle(envelope: bypass(envelope: envelope))
-                syncState()
-                syncSneakPeek()
-                scheduleTranscriptUsageRefresh(for: envelope)
-                do {
-                    let data = try encoder.encode(
-                        decision: .allowOnce,
-                        for: envelope.host,
-                        eventType: envelope.eventType
-                    )
-                    respond(data)
-                } catch {
-                    respond(Data("{}".utf8))
-                }
                 return
             }
 
@@ -261,6 +236,18 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     }
 
     private func correlateCachedToolUseIDIfNeeded(in envelope: AIBridgeEnvelope) -> AIBridgeEnvelope {
+        if envelope.eventType == .permissionRequest,
+           case let .permissionRequest(payload) = envelope.payload,
+           let explicitToolUseID = payload.toolUseID {
+            toolUseCorrelator.consume(
+                sessionID: envelope.sessionID,
+                toolName: payload.toolName,
+                toolInput: payload.toolInput,
+                toolUseID: explicitToolUseID
+            )
+            return envelope
+        }
+
         guard envelope.eventType == .permissionRequest,
               envelope.toolUseID == nil,
               case let .permissionRequest(payload) = envelope.payload,
@@ -292,6 +279,13 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
 
     private func clearCachedToolUseIDs(forSessionID sessionID: String) {
         toolUseCorrelator.clear(sessionID: sessionID)
+    }
+
+    private func releasePendingResponders() {
+        for responder in responders.values {
+            responder(Data("{}".utf8))
+        }
+        responders.removeAll()
     }
 
     private func scheduleTranscriptUsageRefresh(for envelope: AIBridgeEnvelope) {
@@ -359,6 +353,15 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
             return false
         }
 
+        if envelope.eventType == .postToolUse {
+            toolUseCorrelator.consume(
+                sessionID: envelope.sessionID,
+                toolName: envelope.toolName,
+                toolInput: envelope.toolInput,
+                toolUseID: toolUseID
+            )
+        }
+
         let requestIDs = runtime.pendingApprovals
             .filter { approval in
                 approval.sessionID == envelope.sessionID
@@ -420,10 +423,6 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
             decision = actionDecision
         case .claudeDenyWithFeedback:
             decision = .denyOnce
-        }
-
-        if let sessionRule = decision.sessionRule {
-            sessionScopedApprovalStore.addRule(sessionRule, sessionID: approval.sessionID)
         }
 
         do {

@@ -31,4 +31,62 @@ final class NotchWindowTests: XCTestCase {
         XCTAssertTrue(plan.needsWindowFrameUpdate)
         XCTAssertEqual(plan.targetFrame, targetFrame)
     }
+
+    func testInteractionFrameCacheReusesFrameUntilInvalidated() {
+        var cache = NotchWindowInteractionFrameCache()
+        var resolveCount = 0
+        let first = cache.frame {
+            resolveCount += 1
+            return CGRect(x: 10, y: 20, width: 30, height: 40)
+        }
+        let second = cache.frame {
+            resolveCount += 1
+            return CGRect(x: 50, y: 60, width: 70, height: 80)
+        }
+
+        XCTAssertEqual(first, CGRect(x: 10, y: 20, width: 30, height: 40))
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(resolveCount, 1)
+
+        cache.invalidate()
+        let third = cache.frame {
+            resolveCount += 1
+            return CGRect(x: 50, y: 60, width: 70, height: 80)
+        }
+
+        XCTAssertEqual(third, CGRect(x: 50, y: 60, width: 70, height: 80))
+        XCTAssertEqual(resolveCount, 2)
+    }
+
+    @MainActor
+    func testWindowCloseDoesNotReleaseARCManagedInstance() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let pluginManager = PluginManager()
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: NotchWindowTestMouseActivityMonitor()
+        )
+
+        XCTAssertFalse(window.isReleasedWhenClosed)
+
+        window.close()
+    }
+}
+
+@MainActor
+private final class NotchWindowTestMouseActivityMonitor: MouseActivityMonitoring {
+    func addSubscriber(
+        _ handler: @escaping @MainActor (MouseActivityEvent) -> MouseActivityHandlingResult
+    ) -> UUID {
+        UUID()
+    }
+
+    func removeSubscriber(_ token: UUID) {}
 }

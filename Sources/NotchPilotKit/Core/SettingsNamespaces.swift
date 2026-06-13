@@ -145,6 +145,11 @@ final class SettingsLyricsNamespace: SettingsNamespace {
         get { store.desktopLyricsFontSize }
         set { store.desktopLyricsFontSize = newValue }
     }
+
+    var desktopLyricsAllowInsecureSources: Bool {
+        get { store.desktopLyricsAllowInsecureSources }
+        set { store.desktopLyricsAllowInsecureSources = newValue }
+    }
 }
 
 @MainActor

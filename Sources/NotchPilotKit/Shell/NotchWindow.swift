@@ -14,6 +14,24 @@ struct NotchWindowFrameRefreshPlan: Equatable {
     }
 }
 
+struct NotchWindowInteractionFrameCache {
+    private var cachedFrame: CGRect?
+
+    mutating func frame(resolve: () -> CGRect) -> CGRect {
+        if let cachedFrame {
+            return cachedFrame
+        }
+
+        let frame = resolve()
+        cachedFrame = frame
+        return frame
+    }
+
+    mutating func invalidate() {
+        cachedFrame = nil
+    }
+}
+
 enum NotchWindowStyle {
     static let defaultStyleMask: NSWindow.StyleMask = [
         .borderless,
@@ -32,6 +50,7 @@ public final class NotchWindow: NSPanel {
     private var pluginObserver: AnyCancellable?
     private var accumulatedTabScrollDelta = CGSize.zero
     private var tabScrollGestureLocked = false
+    private var interactionFrameCache = NotchWindowInteractionFrameCache()
 
     public convenience init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.init(
@@ -57,6 +76,7 @@ public final class NotchWindow: NSPanel {
         )
 
         isFloatingPanel = true
+        isReleasedWhenClosed = false
         becomesKeyOnlyIfNeeded = true
         level = .statusBar
         animationBehavior = .utilityWindow
@@ -91,6 +111,7 @@ public final class NotchWindow: NSPanel {
     }
 
     public func refreshFrame(animated: Bool) {
+        interactionFrameCache.invalidate()
         let refreshPlan = NotchWindowFrameRefreshPlan.resolve(
             currentFrame: frame,
             targetFrame: session.windowFrame
@@ -161,8 +182,10 @@ public final class NotchWindow: NSPanel {
     }
 
     private func updateMouseInteraction() {
-        let metrics = NotchLayoutMetrics.resolve(session: session, plugins: pluginManager.enabledPlugins)
-        let interactionFrame = session.interactionFrame(for: metrics.interactionSize)
+        let interactionFrame = interactionFrameCache.frame { [session, pluginManager] in
+            let metrics = NotchLayoutMetrics.resolve(session: session, plugins: pluginManager.enabledPlugins)
+            return session.interactionFrame(for: metrics.interactionSize)
+        }
         let hovering = interactionFrame.contains(NSEvent.mouseLocation)
 
         guard hovering != lastHoverState else {

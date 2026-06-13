@@ -222,7 +222,7 @@ final class CodexDesktopIPCFramingTests: XCTestCase {
             return XCTFail("expected approval request output")
         }
 
-        guard case let .approvalRequestChanged(request) = approvalOutput else {
+        guard case let .approvalRequestChanged(_, request) = approvalOutput else {
             return XCTFail("expected approval request output")
         }
 

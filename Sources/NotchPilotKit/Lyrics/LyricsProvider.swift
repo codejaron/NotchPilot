@@ -265,8 +265,8 @@ private final class ConcurrentLyricsProvider: LyricsService.LyricsProvider {
 
 @MainActor
 final class LyricsKitProvider: LyricsProviding, LyricsSearching {
-    private let providerBox: ConcurrentLyricsProviderBox
-    private let searchServices: [any LyricsSearchServicing]
+    private let providerFactory: @MainActor () -> LyricsService.LyricsProvider
+    private let searchServicesFactory: @MainActor () -> [any LyricsSearchServicing]
     nonisolated private static let immediateSelectionScore = 0.75
 
     private struct SelectedLyricsUpdate {
@@ -276,11 +276,30 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
 
     init(
         provider: LyricsService.LyricsProvider? = nil,
-        searchServices: [any LyricsSearchServicing]? = nil
+        searchServices: [any LyricsSearchServicing]? = nil,
+        settingsStore: SettingsStore = .shared
     ) {
-        let provider = provider ?? ConcurrentLyricsProvider(services: LyricsKitServiceConfiguration.defaultServices)
-        self.providerBox = ConcurrentLyricsProviderBox(provider: provider)
-        self.searchServices = searchServices ?? LyricsKitSearchServices.default()
+        if let provider {
+            self.providerFactory = { provider }
+        } else {
+            self.providerFactory = {
+                ConcurrentLyricsProvider(
+                    services: LyricsKitServiceConfiguration.services(
+                        allowInsecureHTTP: settingsStore.desktopLyricsAllowInsecureSources
+                    )
+                )
+            }
+        }
+
+        if let searchServices {
+            self.searchServicesFactory = { searchServices }
+        } else {
+            self.searchServicesFactory = {
+                LyricsKitSearchServices.default(
+                    allowInsecureHTTP: settingsStore.desktopLyricsAllowInsecureSources
+                )
+            }
+        }
     }
 
     func lyrics(for snapshot: MediaPlaybackSnapshot) async -> TimedLyrics? {
@@ -302,8 +321,8 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
         }
 
         return AsyncStream { continuation in
-            let providerBox = providerBox
-            let searchServices = searchServices
+            let providerBox = ConcurrentLyricsProviderBox(provider: providerFactory())
+            let searchServices = searchServicesFactory()
             let task = Task.detached {
                 var bestPreference: LyricsCandidatePreference?
                 var deferredUpdate: SelectedLyricsUpdate?
@@ -577,7 +596,7 @@ final class LyricsKitProvider: LyricsProviding, LyricsSearching {
             artist: artist,
             duration: duration,
             limit: limit,
-            searchServices: searchServices
+            searchServices: searchServicesFactory()
         )
     }
 

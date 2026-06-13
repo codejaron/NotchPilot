@@ -520,8 +520,8 @@ private final class LyricsProviderSearchAdapter: @unchecked Sendable {
 }
 
 enum LyricsKitSearchServices {
-    static func `default`() -> [any LyricsSearchServicing] {
-        LyricsKitServiceConfiguration.defaultServices.map { service in
+    static func `default`(allowInsecureHTTP: Bool = false) -> [any LyricsSearchServicing] {
+        LyricsKitServiceConfiguration.services(allowInsecureHTTP: allowInsecureHTTP).map { service in
             makeSearchService(
                 provider: service.create(),
                 service: service.displayName
@@ -541,11 +541,26 @@ enum LyricsKitSearchServices {
 }
 
 enum LyricsKitServiceConfiguration {
-    static let defaultServices: [LyricsProviders.Service] = [
+    private static let allDefaultServices: [LyricsProviders.Service] = [
         .qq,
         .kugou,
         .netease,
         .musixmatch,
         .lrclib,
     ]
+
+    private static let knownHTTPServices: Set<LyricsProviders.Service> = [
+        .kugou,
+        .netease,
+    ]
+
+    static let defaultServices: [LyricsProviders.Service] = services(allowInsecureHTTP: false)
+
+    static func services(allowInsecureHTTP: Bool) -> [LyricsProviders.Service] {
+        guard allowInsecureHTTP == false else {
+            return allDefaultServices
+        }
+
+        return allDefaultServices.filter { knownHTTPServices.contains($0) == false }
+    }
 }

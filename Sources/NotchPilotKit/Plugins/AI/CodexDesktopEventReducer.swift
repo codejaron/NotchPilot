@@ -2,7 +2,7 @@ import Foundation
 
 public enum CodexDesktopReducerOutput: Equatable, Sendable {
     case threadContextUpsert(CodexThreadContext, marksActivity: Bool)
-    case approvalRequestChanged(CodexDesktopIPCRequestFrame?)
+    case approvalRequestChanged(conversationID: String, request: CodexDesktopIPCRequestFrame?)
 }
 
 public struct CodexDesktopEventReducer {
@@ -36,8 +36,12 @@ public struct CodexDesktopEventReducer {
     private var conversationApprovalRequests: [String: CodexDesktopIPCRequestFrame] = [:]
     private var conversationOwnerClientIDs: [String: String] = [:]
     private var lastKnownConversationTitles: [String: String] = [:]
+    private var conversationRecency: [String] = []
+    private let maxTrackedConversations: Int
 
-    public init() {}
+    public init(maxTrackedConversations: Int = 100) {
+        self.maxTrackedConversations = max(1, maxTrackedConversations)
+    }
 
     func isLatestTurnInProgress(for conversationID: String) -> Bool? {
         guard let state = conversationStates[conversationID]?.objectValue,
@@ -109,6 +113,7 @@ public struct CodexDesktopEventReducer {
            sourceClientID.isEmpty == false {
             conversationOwnerClientIDs[conversationID] = sourceClientID
         }
+        touchConversation(conversationID)
 
         switch changeType {
         case "snapshot":
@@ -196,6 +201,22 @@ public struct CodexDesktopEventReducer {
         }
     }
 
+    private mutating func touchConversation(_ conversationID: String) {
+        conversationRecency.removeAll { $0 == conversationID }
+        conversationRecency.append(conversationID)
+        pruneTrackedConversationsIfNeeded()
+    }
+
+    private mutating func pruneTrackedConversationsIfNeeded() {
+        while conversationRecency.count > maxTrackedConversations {
+            let evictedConversationID = conversationRecency.removeFirst()
+            conversationStates.removeValue(forKey: evictedConversationID)
+            conversationApprovalRequests.removeValue(forKey: evictedConversationID)
+            conversationOwnerClientIDs.removeValue(forKey: evictedConversationID)
+            lastKnownConversationTitles.removeValue(forKey: evictedConversationID)
+        }
+    }
+
     private mutating func outputForConversationState(
         conversationID: String,
         marksActivity: Bool
@@ -225,7 +246,7 @@ public struct CodexDesktopEventReducer {
         ]
 
         if currentApproval != previousApproval {
-            outputs.append(.approvalRequestChanged(currentApproval))
+            outputs.append(.approvalRequestChanged(conversationID: conversationID, request: currentApproval))
         }
 
         return outputs

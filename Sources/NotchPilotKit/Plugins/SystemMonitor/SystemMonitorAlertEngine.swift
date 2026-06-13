@@ -312,8 +312,10 @@ final class SystemMonitorAlertEngine {
 
         for rule in rules {
             let value = Self.metricValue(for: rule.metric, snapshot: snapshot)
-            let isCrossed = Self.evaluate(rule: rule, value: value)
             var state = ruleStates[rule.id] ?? RuleState(pendingSince: nil, firing: false)
+            let isCrossed = state.firing
+                ? Self.evaluateForClearing(rule: rule, value: value)
+                : Self.evaluate(rule: rule, value: value)
 
             if isCrossed {
                 if state.firing {
@@ -398,6 +400,40 @@ final class SystemMonitorAlertEngine {
             return value > rule.threshold
         case .lessThan:
             return value < rule.threshold
+        }
+    }
+
+    static func evaluateForClearing(rule: SystemMonitorAlertRule, value: Double?) -> Bool {
+        guard let value else { return false }
+        let threshold = hysteresisThreshold(for: rule)
+        switch rule.comparison {
+        case .greaterThan:
+            return value > threshold
+        case .lessThan:
+            return value < threshold
+        }
+    }
+
+    private static func hysteresisThreshold(for rule: SystemMonitorAlertRule) -> Double {
+        let gap = hysteresisGap(for: rule)
+        switch rule.comparison {
+        case .greaterThan:
+            return rule.threshold - gap
+        case .lessThan:
+            return rule.threshold + gap
+        }
+    }
+
+    private static func hysteresisGap(for rule: SystemMonitorAlertRule) -> Double {
+        switch rule.metric {
+        case .cpu, .memory, .battery:
+            return 5
+        case .temperature:
+            return 3
+        case .disk:
+            return max(1, rule.threshold * 0.1)
+        case .network:
+            return max(1_000_000, rule.threshold * 0.1)
         }
     }
 

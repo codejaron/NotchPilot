@@ -48,6 +48,32 @@ final class ClaudeToolUseCorrelatorTests: XCTestCase {
         )
     }
 
+    func testObservingPermissionRequestWithExplicitToolUseIDConsumesMatchingCachedID() {
+        var correlator = ClaudeToolUseCorrelator()
+
+        correlator.observe(
+            sessionID: "session-1",
+            toolName: "Bash",
+            toolInput: .object(["command": .string("swift test")]),
+            toolUseID: "toolu-1"
+        )
+
+        correlator.consume(
+            sessionID: "session-1",
+            toolName: "Bash",
+            toolInput: .object(["command": .string("swift test")]),
+            toolUseID: "toolu-1"
+        )
+
+        XCTAssertNil(
+            correlator.correlatedToolUseID(
+                sessionID: "session-1",
+                toolName: "Bash",
+                toolInput: .object(["command": .string("swift test")])
+            )
+        )
+    }
+
     func testClearsToolUseIDsForStoppedSessionOnly() {
         var correlator = ClaudeToolUseCorrelator()
 

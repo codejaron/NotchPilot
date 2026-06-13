@@ -30,8 +30,6 @@ final class ApprovalActionTests: XCTestCase {
         }
 
         XCTAssertEqual(decision.permissionUpdates, [suggestion])
-        XCTAssertNil(decision.sessionRule)
-        XCTAssertNil(decision.persistRule)
         XCTAssertEqual(actions.map(\.title), [
             "No",
             "Yes",

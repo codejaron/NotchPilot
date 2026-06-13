@@ -12,7 +12,7 @@ import uuid
 
 
 NOTCHPILOT_BRIDGE_VERSION = 5
-DEFAULT_SOCKET_PATH = "/tmp/notchpilot.sock"
+DEFAULT_SOCKET_PATH = os.path.expanduser("~/.notchpilot/notchpilot.sock")
 TERMINAL_BUNDLE_IDS = {
     "Apple_Terminal": "com.apple.Terminal",
     "iTerm.app": "com.googlecode.iterm2",
