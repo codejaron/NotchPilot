@@ -68,6 +68,37 @@ final class MediaPlaybackPlayerSelectorTests: XCTestCase {
         XCTAssertEqual(snapshot.currentTime, 23, accuracy: 0.01)
     }
 
+    func testHigherPriorityPlayingPlayerDisplacesLowerPriorityPlayingPlayer() {
+        let date = Date(timeIntervalSince1970: 250)
+        var selector = MediaPlaybackPlayerSelector(players: [.spotify, .system])
+        let chrome = Self.snapshot(
+            bundleIdentifier: "com.google.Chrome",
+            title: "Live Stream",
+            artist: "Chrome",
+            currentTime: 40,
+            isPlaying: true,
+            lastUpdated: date
+        )
+        let spotify = Self.snapshot(
+            bundleIdentifier: "com.spotify.client",
+            title: "Spotify Song",
+            artist: "Spotify Artist",
+            currentTime: 5,
+            isPlaying: true,
+            lastUpdated: date.addingTimeInterval(2)
+        )
+
+        _ = selector.update(.active(chrome), for: .system, at: date)
+        let selected = selector.update(.active(spotify), for: .spotify, at: date.addingTimeInterval(2))
+
+        guard case let .active(snapshot) = selected else {
+            return XCTFail("Expected Spotify to displace lower-priority system playback")
+        }
+        XCTAssertEqual(snapshot.source.bundleIdentifier, "com.spotify.client")
+        XCTAssertEqual(snapshot.title, "Spotify Song")
+        XCTAssertEqual(snapshot.currentTime, 5, accuracy: 0.01)
+    }
+
     func testAggregatePlayerIsUsedWhenConcretePlayerStops() {
         let date = Date(timeIntervalSince1970: 300)
         var selector = MediaPlaybackPlayerSelector(players: [.spotify, .system])

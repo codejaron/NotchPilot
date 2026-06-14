@@ -264,6 +264,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     private let playbackTimeProvider: any PlaybackTimeProviding
     private let spotifyPlayer: any SpotifyPlaybackPlayerOperating
     private let streamProcessReaper: MediaStreamProcessReaper
+    private let systemStateFetcher: (@MainActor () async -> MediaPlaybackState?)?
     private var streamProcess: (any MediaStreamProcessHandling)?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
@@ -293,11 +294,13 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     init(
         playbackTimeProvider: any PlaybackTimeProviding = AppleScriptPlaybackTimeProvider(),
         spotifyPlayer: any SpotifyPlaybackPlayerOperating = AppleScriptSpotifyPlaybackPlayer(),
-        streamProcessReaper: MediaStreamProcessReaper = MediaStreamProcessReaper()
+        streamProcessReaper: MediaStreamProcessReaper = MediaStreamProcessReaper(),
+        systemStateFetcher: (@MainActor () async -> MediaPlaybackState?)? = nil
     ) {
         self.playbackTimeProvider = playbackTimeProvider
         self.spotifyPlayer = spotifyPlayer
         self.streamProcessReaper = streamProcessReaper
+        self.systemStateFetcher = systemStateFetcher
     }
 
     func start() {
@@ -413,9 +416,19 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     func reconcilePlaybackTime(at date: Date = Date(), requiresMonitoring: Bool = false) async {
         guard requiresMonitoring == false || isMonitoring,
               case let .active(snapshot) = currentState,
-              snapshot.isPlaying,
-              let playbackTime = await currentPlaybackTime(for: snapshot.source)
+              snapshot.isPlaying
         else {
+            return
+        }
+
+        guard let playbackTime = await currentPlaybackTime(for: snapshot.source) else {
+            guard requiresMonitoring == false || isMonitoring else {
+                return
+            }
+
+            if playerID(for: snapshot.source) == .system {
+                await refreshCurrentSystemState(at: date)
+            }
             return
         }
 
@@ -447,7 +460,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
     }
 
     private func handleAdapterUpdate(_ update: AdapterUpdate) {
-        let state = playbackStateSelector.update(update.payload.normalizedState, for: .system)
+        let state = playbackStateSelector.update(update.normalizedState, for: .system)
         updateState(state)
     }
 
@@ -582,6 +595,28 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
         }
     }
 
+    @discardableResult
+    private func refreshCurrentSystemState(at date: Date = Date()) async -> Bool {
+        guard let state = await currentSystemState() else {
+            return false
+        }
+
+        updateState(playbackStateSelector.update(state, for: .system, at: date))
+        return true
+    }
+
+    private func currentSystemState() async -> MediaPlaybackState? {
+        if let systemStateFetcher {
+            return await systemStateFetcher()
+        }
+
+        guard let resource = mediaRemoteAdapterResource else {
+            return nil
+        }
+
+        return await Self.fetchCurrentState(using: resource)
+    }
+
     private func requestSpotifyPlaybackSnapshot(after delay: TimeInterval) {
         Task.detached(priority: .utility) { [weak self] in
             let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
@@ -653,7 +688,7 @@ final class NowPlayingSessionMonitor: NowPlayingSessionMonitoring {
                 return nil
             }
 
-            return try? JSONDecoder().decode(AdapterPayload.self, from: output.standardOutput).normalizedState
+            return MediaRemoteAdapterCurrentStateDecoder.state(from: output.standardOutput)
         }.value
     }
 }
@@ -664,7 +699,20 @@ private struct MediaRemoteAdapterResource {
 }
 
 private struct AdapterUpdate: Decodable, Sendable {
-    let payload: AdapterPayload
+    let normalizedState: MediaPlaybackState
+
+    private enum CodingKeys: String, CodingKey {
+        case payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if try container.decodeNil(forKey: .payload) {
+            normalizedState = .idle
+        } else {
+            normalizedState = try container.decode(AdapterPayload.self, forKey: .payload).normalizedState
+        }
+    }
 }
 
 private struct AdapterPayload: Decodable, Sendable {
@@ -698,6 +746,23 @@ private struct AdapterPayload: Decodable, Sendable {
             bundleIdentifier: bundleIdentifier,
             volume: volume
         ).normalizedState
+    }
+}
+
+enum MediaRemoteAdapterCurrentStateDecoder {
+    static func state(from data: Data) -> MediaPlaybackState? {
+        let trimmedOutput = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let trimmedOutput, trimmedOutput.isEmpty == false else {
+            return nil
+        }
+
+        guard trimmedOutput != "null" else {
+            return .idle
+        }
+
+        return try? JSONDecoder().decode(AdapterPayload.self, from: data).normalizedState
     }
 }
 

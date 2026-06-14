@@ -103,12 +103,6 @@ struct MediaPlaybackPlayerSelector {
     private mutating func selectedState(at date: Date) -> MediaPlaybackState {
         let projectedStates = states.mapValues { Self.projected($0, at: date) }
 
-        if let selectedPlayer,
-           let currentSnapshot = Self.snapshot(from: projectedStates[selectedPlayer]),
-           currentSnapshot.isPlaying {
-            return .active(currentSnapshot)
-        }
-
         if let player = players.first(where: {
             Self.snapshot(from: projectedStates[$0])?.isPlaying == true
         }),

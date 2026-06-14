@@ -276,6 +276,42 @@ final class NowPlayingSessionMonitorRoutingTests: XCTestCase {
         }
         XCTAssertEqual(current.currentTime, 75)
     }
+
+    func testPlaybackTimeReconciliationClearsStaleSystemPlaybackWhenCurrentStateIsIdle() async {
+        let date = Date(timeIntervalSince1970: 700)
+        var refreshRequestCount = 0
+        let monitor = NowPlayingSessionMonitor(
+            playbackTimeProvider: RecordingPlaybackTimeProvider(playbackTime: nil),
+            spotifyPlayer: TestSpotifyPlaybackPlayer(playbackTime: nil),
+            systemStateFetcher: {
+                refreshRequestCount += 1
+                return .idle
+            }
+        )
+        monitor.updateState(.active(MediaPlaybackSnapshot(
+            source: .fromBundleIdentifier("com.google.Chrome"),
+            title: "Live Stream",
+            artist: "Chrome",
+            album: "",
+            artworkData: nil,
+            currentTime: 69 * 60 + 20,
+            duration: nil,
+            playbackRate: 1,
+            isPlaying: true,
+            lastUpdated: date
+        )))
+
+        await monitor.reconcilePlaybackTime(at: date.addingTimeInterval(1))
+
+        XCTAssertEqual(refreshRequestCount, 1)
+        XCTAssertEqual(monitor.currentState, .idle)
+    }
+
+    func testMediaRemoteAdapterCurrentStateDecoderTreatsNullAsIdle() {
+        let state = MediaRemoteAdapterCurrentStateDecoder.state(from: Data("null".utf8))
+
+        XCTAssertEqual(state, .idle)
+    }
 }
 
 private final class TestSpotifyPlaybackPlayer: SpotifyPlaybackPlayerOperating {
