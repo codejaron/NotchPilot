@@ -27,6 +27,10 @@ protocol SystemMonitorSampling: Sendable {
     func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot
 }
 
+protocol SystemMonitorAsyncSampling: Sendable {
+    func snapshotAsync(demand: SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot
+}
+
 extension SystemMonitorSampling {
     func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
         snapshot()
@@ -53,8 +57,9 @@ struct SystemMonitorStaticSampler: SystemMonitorSampling {
     }
 }
 
-struct SystemMonitorDefaultSampler: SystemMonitorSampling {
+struct SystemMonitorDefaultSampler: SystemMonitorSampling, SystemMonitorAsyncSampling {
     private let collector: @Sendable (SystemMonitorSamplingDemand) -> SystemMonitorSnapshot?
+    private let asyncCollector: (@Sendable (SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot?)?
     private let fallback: any SystemMonitorSampling
 
     init(fallback: any SystemMonitorSampling = SystemMonitorUnavailableSampler()) {
@@ -63,15 +68,20 @@ struct SystemMonitorDefaultSampler: SystemMonitorSampling {
             collector: { demand in
                 bestEffortSampler.snapshot(demand: demand)
             },
+            asyncCollector: { demand in
+                await bestEffortSampler.snapshotAsync(demand: demand)
+            },
             fallback: fallback
         )
     }
 
     init(
         collector: @escaping @Sendable (SystemMonitorSamplingDemand) -> SystemMonitorSnapshot?,
+        asyncCollector: (@Sendable (SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot?)? = nil,
         fallback: any SystemMonitorSampling = SystemMonitorUnavailableSampler()
     ) {
         self.collector = collector
+        self.asyncCollector = asyncCollector
         self.fallback = fallback
     }
 
@@ -81,5 +91,18 @@ struct SystemMonitorDefaultSampler: SystemMonitorSampling {
 
     func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
         collector(demand) ?? fallback.snapshot(demand: demand)
+    }
+
+    func snapshotAsync(demand: SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot {
+        if let asyncCollector, let snapshot = await asyncCollector(demand) {
+            return snapshot
+        }
+        if asyncCollector == nil, let snapshot = collector(demand) {
+            return snapshot
+        }
+        if let asyncFallback = fallback as? any SystemMonitorAsyncSampling {
+            return await asyncFallback.snapshotAsync(demand: demand)
+        }
+        return fallback.snapshot(demand: demand)
     }
 }

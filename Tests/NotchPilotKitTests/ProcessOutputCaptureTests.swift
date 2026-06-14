@@ -23,4 +23,17 @@ final class ProcessOutputCaptureTests: XCTestCase {
         XCTAssertEqual(output.terminationStatus, 0)
         XCTAssertEqual(String(data: output.standardOutput, encoding: .utf8), "ok")
     }
+
+    func testRunAsyncCapturesStandardOutputAndErrorWithoutBlockingCaller() async throws {
+        let capturedOutput = await ProcessOutputCapture.runAsync(
+            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+            arguments: ["-e", "print 'ok'; print STDERR 'warn'"],
+            timeout: 2
+        )
+        let output = try XCTUnwrap(capturedOutput)
+
+        XCTAssertEqual(output.terminationStatus, 0)
+        XCTAssertEqual(String(data: output.standardOutput, encoding: .utf8), "ok")
+        XCTAssertEqual(String(data: output.standardError, encoding: .utf8), "warn")
+    }
 }

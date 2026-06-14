@@ -156,16 +156,47 @@ final class SystemMonitorPluginTests: XCTestCase {
         XCTAssertTrue(sampler.demands.allSatisfy { $0 == .basic })
     }
 
-    func testDashboardRefreshUsesDetailedSamplingDemand() async {
+    func testDashboardManualRefreshUsesDetailedSamplingDemand() async {
         let sampler = DemandRecordingSystemMonitorSampler(snapshot: Self.calmSnapshot)
         let plugin = SystemMonitorPlugin(sampler: sampler)
 
         plugin.dashboardDidAppear()
+        await waitForDemandCount(2, sampler: sampler)
+        sampler.reset()
         await plugin.refresh()
         plugin.dashboardDidDisappear()
 
-        XCTAssertFalse(sampler.demands.isEmpty)
-        XCTAssertTrue(sampler.demands.allSatisfy { $0 == .detailed })
+        XCTAssertEqual(sampler.demands, [.detailed])
+    }
+
+    func testDashboardScheduledRefreshSamplesBasicBeforeDetailed() async {
+        let sampler = DemandRecordingSystemMonitorSampler(snapshot: Self.calmSnapshot)
+        let plugin = SystemMonitorPlugin(sampler: sampler)
+
+        plugin.dashboardDidAppear()
+        await waitForDemandCount(2, sampler: sampler)
+        plugin.dashboardDidDisappear()
+
+        XCTAssertGreaterThanOrEqual(sampler.demands.count, 2)
+        XCTAssertEqual(Array(sampler.demands.prefix(2)), [.basic, .detailed])
+    }
+
+    func testDashboardScheduledRefreshUsesDetailedDemandAfterWarmStart() async {
+        let sampler = DemandRecordingSystemMonitorSampler(snapshot: Self.calmSnapshot)
+        let plugin = SystemMonitorPlugin(sampler: sampler)
+        let bus = EventBus()
+
+        plugin.activate(bus: bus)
+        await waitForDemandCount(1, sampler: sampler)
+        sampler.reset()
+
+        plugin.dashboardDidAppear()
+        await waitForDemandCount(3, sampler: sampler, timeout: 1.5)
+        plugin.dashboardDidDisappear()
+        plugin.deactivate()
+
+        XCTAssertGreaterThanOrEqual(sampler.demands.count, 3)
+        XCTAssertEqual(Array(sampler.demands.prefix(3)), [.basic, .detailed, .detailed])
     }
 
     func testActivateDoesNotBlockMainActorWhenSamplerIsSlow() {
@@ -792,6 +823,20 @@ final class SystemMonitorPluginTests: XCTestCase {
             fileManager: .default,
             homeDirectoryURL: FileManager.default.temporaryDirectory
         )
+    }
+
+    private func waitForDemandCount(
+        _ count: Int,
+        sampler: DemandRecordingSystemMonitorSampler,
+        timeout: TimeInterval = 1
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if sampler.demands.count >= count {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 }
 

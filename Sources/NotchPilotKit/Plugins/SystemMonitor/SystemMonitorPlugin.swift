@@ -8,8 +8,11 @@ private actor SystemMonitorSamplerWorker {
         self.sampler = sampler
     }
 
-    func snapshot(demand: SystemMonitorSamplingDemand) -> SystemMonitorSnapshot {
-        sampler.snapshot(demand: demand)
+    func snapshot(demand: SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot {
+        if let asyncSampler = sampler as? any SystemMonitorAsyncSampling {
+            return await asyncSampler.snapshotAsync(demand: demand)
+        }
+        return sampler.snapshot(demand: demand)
     }
 }
 
@@ -43,6 +46,7 @@ public final class SystemMonitorPlugin: NotchPlugin {
     private var sneakPeekRequestID: UUID?
     private var sneakPeekRequestPriority: Int?
     private var dashboardMountCount: Int = 0
+    private var dashboardWarmStartPending = false
 
     public convenience init() {
         self.init(sampler: SystemMonitorDefaultSampler())
@@ -155,7 +159,11 @@ public final class SystemMonitorPlugin: NotchPlugin {
     }
 
     func dashboardDidAppear() {
+        let wasHidden = dashboardMountCount == 0
         dashboardMountCount += 1
+        if wasHidden {
+            dashboardWarmStartPending = true
+        }
         restartScheduledRefresh()
     }
 
@@ -163,12 +171,26 @@ public final class SystemMonitorPlugin: NotchPlugin {
         let wasVisible = dashboardMountCount > 0
         dashboardMountCount = max(0, dashboardMountCount - 1)
         if wasVisible, dashboardMountCount == 0 {
+            dashboardWarmStartPending = false
             restartScheduledRefresh()
         }
     }
 
     private func currentSamplingDemand() -> SystemMonitorSamplingDemand {
         dashboardMountCount > 0 ? .detailed : .basic
+    }
+
+    private func scheduledSamplingDemands() -> [SystemMonitorSamplingDemand] {
+        guard dashboardMountCount > 0 else {
+            return [.basic]
+        }
+
+        guard dashboardWarmStartPending else {
+            return [.detailed]
+        }
+
+        dashboardWarmStartPending = false
+        return [.basic, .detailed]
     }
 
     public func activate(bus: EventBus) {
@@ -215,9 +237,9 @@ public final class SystemMonitorPlugin: NotchPlugin {
         }
 
         let generation = refreshGeneration
-        let demand = currentSamplingDemand()
-        refreshTask = Task { [weak self] in
-            await self?.completeScheduledRefresh(generation: generation, demand: demand)
+        let demands = scheduledSamplingDemands()
+        refreshTask = Task(priority: .utility) { [weak self] in
+            await self?.completeScheduledRefresh(generation: generation, demands: demands)
         }
     }
 
@@ -228,19 +250,27 @@ public final class SystemMonitorPlugin: NotchPlugin {
         scheduleRefresh()
     }
 
-    private func completeScheduledRefresh(generation: UInt64, demand: SystemMonitorSamplingDemand) async {
-        let latestSnapshot = await samplerWorker.snapshot(demand: demand)
-        let wasCancelled = Task.isCancelled
+    private func completeScheduledRefresh(generation: UInt64, demands: [SystemMonitorSamplingDemand]) async {
+        for demand in demands {
+            let latestSnapshot = await samplerWorker.snapshot(demand: demand)
+            let wasCancelled = Task.isCancelled
+
+            guard refreshGeneration == generation else {
+                return
+            }
+
+            guard wasCancelled == false else {
+                refreshTask = nil
+                return
+            }
+
+            applySnapshot(latestSnapshot)
+        }
 
         guard refreshGeneration == generation else {
             return
         }
-
         refreshTask = nil
-        guard wasCancelled == false else {
-            return
-        }
-        applySnapshot(latestSnapshot)
     }
 
     private func applySnapshot(_ snapshot: SystemMonitorSnapshot) {

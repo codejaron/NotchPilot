@@ -4,7 +4,7 @@ import Foundation
 import IOKit.ps
 import SystemConfiguration
 
-final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Sendable {
+final class SystemMonitorBestEffortSampler: SystemMonitorSampling, SystemMonitorAsyncSampling, @unchecked Sendable {
     private struct ProcessRusage {
         let cpuTimeNanoseconds: UInt64
         let physicalFootprintBytes: UInt64
@@ -106,6 +106,82 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
         )
     }
 
+    func snapshotAsync(demand: SystemMonitorSamplingDemand) async -> SystemMonitorSnapshot {
+        let date = Date()
+        let currentCPUTicks = systemCPUTicks()
+        let cpuUsage = SystemMonitorSampleMath.cpuUsage(from: previousSystemCPUTicks, to: currentCPUTicks)
+        if let currentCPUTicks {
+            previousSystemCPUTicks = currentCPUTicks
+        }
+
+        let memoryCounters = memoryCounters()
+        let totalMemoryBytes = physicalMemoryBytes()
+        let memoryUsage = SystemMonitorSampleMath.memoryUsage(
+            counters: memoryCounters,
+            physicalMemoryBytes: totalMemoryBytes
+        )
+        let memoryPressure = SystemMonitorSampleMath.memoryPressure(
+            rawPercent: memorystatusFreePercent()
+        )
+
+        let processActivities: [SystemMonitorProcessActivity]
+        let statsTopItems: [SystemMonitorTopItem]
+        if demand.includesProcessDetails {
+            let processInterval = previousProcessDate.map { date.timeIntervalSince($0) }
+            let processCounters = processCounters()
+            processActivities = SystemMonitorSampleMath.processActivities(
+                previous: previousProcessCounters,
+                current: processCounters,
+                interval: processInterval,
+                processorCount: ProcessInfo.processInfo.activeProcessorCount
+            )
+            statsTopItems = await statsCPUTopItemsAsync()
+            previousProcessCounters = processCounters.reduce(into: [:]) { result, counter in
+                result[counter.pid] = counter
+            }
+            previousProcessDate = date
+        } else {
+            processActivities = []
+            statsTopItems = []
+            previousProcessCounters.removeAll()
+            previousProcessDate = nil
+        }
+
+        let networkRates = networkByteRates()
+        let networkProcessActivities = await refreshNetworkProcessActivitiesIfNeededAsync(
+            demand: demand,
+            date: date
+        )
+
+        let diskFreeBytes = diskFreeBytes()
+        let batteryPercent = batteryPercent()
+        let temperatureCelsius = sensorBridge.cpuTemperatureCelsius()
+
+        return SystemMonitorSnapshot(
+            cpuUsage: cpuUsage,
+            memoryPressure: memoryPressure,
+            memoryUsage: memoryUsage,
+            downloadBytesPerSecond: networkRates.download,
+            uploadBytesPerSecond: networkRates.upload,
+            temperatureCelsius: temperatureCelsius,
+            diskFreeBytes: diskFreeBytes,
+            batteryPercent: batteryPercent,
+            blocks: blocks(
+                cpuUsage: cpuUsage,
+                memoryPressure: memoryPressure,
+                memoryUsage: memoryUsage,
+                downloadBytesPerSecond: networkRates.download,
+                uploadBytesPerSecond: networkRates.upload,
+                temperatureCelsius: temperatureCelsius,
+                diskFreeBytes: diskFreeBytes,
+                batteryPercent: batteryPercent,
+                statsCPUTopItems: statsTopItems,
+                processActivities: processActivities,
+                networkProcessActivities: networkProcessActivities
+            )
+        )
+    }
+
     private func refreshNetworkProcessActivitiesIfNeeded(
         demand: SystemMonitorSamplingDemand,
         date: Date
@@ -119,6 +195,32 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
         let interval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
         let currentCounters = networkProcessCounters()
+        let activities = SystemMonitorSampleMath.networkProcessActivities(
+            previous: previousNetworkProcessCounters,
+            current: currentCounters,
+            interval: interval
+        )
+        previousNetworkProcessCounters = currentCounters.reduce(into: [:]) { result, counter in
+            result[counter.key] = counter
+        }
+        previousNetworkProcessDate = date
+        cachedNetworkProcessActivities = activities
+        return activities
+    }
+
+    private func refreshNetworkProcessActivitiesIfNeededAsync(
+        demand: SystemMonitorSamplingDemand,
+        date: Date
+    ) async -> [SystemMonitorNetworkProcessActivity] {
+        guard demand.includesPerProcessNetwork else {
+            previousNetworkProcessCounters.removeAll()
+            previousNetworkProcessDate = nil
+            cachedNetworkProcessActivities = []
+            return []
+        }
+
+        let interval = previousNetworkProcessDate.map { date.timeIntervalSince($0) }
+        let currentCounters = await networkProcessCountersAsync()
         let activities = SystemMonitorSampleMath.networkProcessActivities(
             previous: previousNetworkProcessCounters,
             current: currentCounters,
@@ -256,6 +358,21 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             return []
         }
 
+        return statsCPUTopItems(fromPSOutput: output)
+    }
+
+    private func statsCPUTopItemsAsync() async -> [SystemMonitorTopItem] {
+        guard let output = await runProcessAsync(
+            executable: "/bin/ps",
+            arguments: ["-Aceo", "pid,pcpu,comm", "-r"]
+        ) else {
+            return []
+        }
+
+        return statsCPUTopItems(fromPSOutput: output)
+    }
+
+    private func statsCPUTopItems(fromPSOutput output: String) -> [SystemMonitorTopItem] {
         let groupedRows = Dictionary(grouping: Self.cpuProcessRows(fromPSOutput: output)) { row in
             processDisplayName(pid: row.pid, command: row.command)
         }
@@ -573,6 +690,21 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
             return []
         }
 
+        return networkProcessCounters(fromNettopOutput: output)
+    }
+
+    private func networkProcessCountersAsync() async -> [SystemMonitorNetworkProcessCounter] {
+        guard let output = await runProcessAsync(
+            executable: "/usr/bin/nettop",
+            arguments: ["-P", "-L", "1", "-n", "-x", "-J", "bytes_in,bytes_out"]
+        ) else {
+            return []
+        }
+
+        return networkProcessCounters(fromNettopOutput: output)
+    }
+
+    private func networkProcessCounters(fromNettopOutput output: String) -> [SystemMonitorNetworkProcessCounter] {
         let parsed = Self.networkProcessCounters(fromNettopCSV: output)
         let resolved = parsed.map { counter -> SystemMonitorNetworkProcessCounter in
             guard let resolvedName = resolvedNetworkProcessName(forNettopIdentifier: counter.key),
@@ -767,6 +899,18 @@ final class SystemMonitorBestEffortSampler: SystemMonitorSampling, @unchecked Se
 
     private func runProcess(executable: String, arguments: [String], timeout: TimeInterval = 2) -> String? {
         guard let output = ProcessOutputCapture.run(
+            executableURL: URL(fileURLWithPath: executable),
+            arguments: arguments,
+            timeout: timeout
+        ), output.terminationStatus == 0 else {
+            return nil
+        }
+
+        return String(data: output.standardOutput, encoding: .utf8)
+    }
+
+    private func runProcessAsync(executable: String, arguments: [String], timeout: TimeInterval = 2) async -> String? {
+        guard let output = await ProcessOutputCapture.runAsync(
             executableURL: URL(fileURLWithPath: executable),
             arguments: arguments,
             timeout: timeout
