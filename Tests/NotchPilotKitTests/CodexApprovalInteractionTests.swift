@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import NotchPilotKit
 
@@ -21,6 +22,37 @@ private final class CodexApprovalBoundaryRecorder: NSObject, CodexApprovalNSText
 
     func textViewDidMoveWithinText() {
         moveWithinTextCount += 1
+    }
+}
+
+@MainActor
+private final class CodexTextEditorBindingBox: ObservableObject {
+    @Published
+    var text: String
+
+    init(text: String) {
+        self.text = text
+    }
+}
+
+private struct CodexTextEditorHost: View {
+    @ObservedObject var box: CodexTextEditorBindingBox
+
+    var body: some View {
+        CodexApprovalTextEditor(
+            text: Binding(
+                get: { box.text },
+                set: { box.text = $0 }
+            ),
+            isEditable: true,
+            isFocused: true,
+            font: .systemFont(ofSize: 13),
+            onFocus: {},
+            onSubmit: {},
+            onMoveUpBoundary: {},
+            onMoveDownBoundary: {},
+            onContentHeightChange: { _ in }
+        )
     }
 }
 
@@ -215,6 +247,56 @@ final class CodexApprovalInteractionTests: XCTestCase {
         textView.setSelectedRange(NSRange(location: 15, length: 0))
         textView.moveDown(nil)
         XCTAssertEqual(recorder.moveDownBoundaryCount, 1)
+    }
+
+    @MainActor
+    func testTextEditorDoesNotPublishMarkedTextDuringIMEComposition() throws {
+        let box = CodexTextEditorBindingBox(text: "")
+        let hostingView = NSHostingView(rootView: CodexTextEditorHost(box: box))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        hostingView.layoutSubtreeIfNeeded()
+        let textView = try XCTUnwrap(findCodexTextView(in: hostingView))
+        window.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        textView.setMarkedText(
+            "pin",
+            selectedRange: NSRange(location: 3, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        XCTAssertTrue(textView.hasMarkedText())
+        XCTAssertEqual(textView.string, "pin")
+        XCTAssertEqual(box.text, "")
+    }
+
+    @MainActor
+    func testTextViewDoesNotLeaveInputWhenMovingThroughMarkedText() {
+        let textView = makeTextView(text: "")
+        let recorder = CodexApprovalBoundaryRecorder()
+        textView.boundaryDelegate = recorder
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        textView.setMarkedText(
+            "pin",
+            selectedRange: NSRange(location: 3, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        textView.moveDown(nil)
+        textView.moveUp(nil)
+
+        XCTAssertTrue(textView.hasMarkedText())
+        XCTAssertEqual(recorder.moveDownBoundaryCount, 0)
+        XCTAssertEqual(recorder.moveUpBoundaryCount, 0)
+        XCTAssertEqual(recorder.moveWithinTextCount, 0)
     }
 
     func testDownArrowResolvesToMoveDownInsteadOfSubmit() {
@@ -443,5 +525,20 @@ final class CodexApprovalInteractionTests: XCTestCase {
         textView.textContainer?.widthTracksTextView = true
         textView.layoutManager?.ensureLayout(for: textView.textContainer!)
         return textView
+    }
+
+    @MainActor
+    private func findCodexTextView(in view: NSView) -> CodexApprovalNSTextView? {
+        if let textView = view as? CodexApprovalNSTextView {
+            return textView
+        }
+
+        for subview in view.subviews {
+            if let textView = findCodexTextView(in: subview) {
+                return textView
+            }
+        }
+
+        return nil
     }
 }

@@ -326,17 +326,34 @@ struct CodexApprovalTextEditor: NSViewRepresentable {
         textView.isEditable = isEditable
         textView.font = font
 
-        if textView.string != text {
+        if textView.hasMarkedText() == false, textView.string != text {
             textView.string = text
             context.coordinator.reportContentHeight()
         }
 
         if isFocused {
+            guard textView.hasMarkedText() == false else {
+                return
+            }
+
             activateWindowForKeyboardInput(scrollView.window)
             if scrollView.window?.firstResponder !== textView {
                 scrollView.window?.makeFirstResponder(textView)
             }
+
+            guard scrollView.window?.firstResponder !== textView else {
+                return
+            }
+
             DispatchQueue.main.async {
+                guard scrollView.window?.firstResponder !== textView else {
+                    return
+                }
+
+                guard textView.hasMarkedText() == false else {
+                    return
+                }
+
                 activateWindowForKeyboardInput(scrollView.window)
                 if scrollView.window?.firstResponder !== textView {
                     scrollView.window?.makeFirstResponder(textView)
@@ -492,6 +509,11 @@ final class CodexApprovalNSTextView: NSTextView {
     }
 
     override func moveUp(_ sender: Any?) {
+        if hasMarkedText() {
+            super.moveUp(sender)
+            return
+        }
+
         if shouldMoveOutOfTextView(towardStart: true) {
             boundaryDelegate?.textViewDidRequestMoveUpBoundary()
             return
@@ -502,6 +524,11 @@ final class CodexApprovalNSTextView: NSTextView {
     }
 
     override func moveDown(_ sender: Any?) {
+        if hasMarkedText() {
+            super.moveDown(sender)
+            return
+        }
+
         if shouldMoveOutOfTextView(towardStart: false) {
             boundaryDelegate?.textViewDidRequestMoveDownBoundary()
             return
