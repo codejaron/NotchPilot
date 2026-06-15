@@ -25,11 +25,12 @@ final class SettingsSidebarStateTests: XCTestCase {
     }
 
     func testSettingsPluginIDsIncludeSystemMonitor() {
-        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .claude, .devin, .codex, .media])
+        XCTAssertEqual(SettingsPluginID.allCases, [.systemMonitor, .claude, .devin, .codex, .media, .notes])
     }
 
     func testPluginSidebarSubtitlesMatchNativeLayoutLabels() {
         XCTAssertEqual(SettingsPluginID.media.sidebarSubtitle, "媒体播放")
+        XCTAssertEqual(SettingsPluginID.notes.sidebarSubtitle, "Markdown 小本")
         XCTAssertEqual(SettingsPluginID.systemMonitor.sidebarSubtitle, "系统监控")
         XCTAssertEqual(SettingsPluginID.claude.sidebarSubtitle, "Claude 集成")
         XCTAssertEqual(SettingsPluginID.devin.sidebarSubtitle, "Devin 集成")
@@ -40,8 +41,10 @@ final class SettingsSidebarStateTests: XCTestCase {
     func testSidebarUsesFixedPluginIconsAndBrandGlyphsForAIPlugins() {
         XCTAssertEqual(SettingsPluginID.systemMonitor.iconSystemName, "cpu")
         XCTAssertEqual(SettingsPluginID.media.iconSystemName, "music.note")
+        XCTAssertEqual(SettingsPluginID.notes.iconSystemName, "note.text")
         XCTAssertNil(SettingsPluginID.systemMonitor.brandGlyph)
         XCTAssertNil(SettingsPluginID.media.brandGlyph)
+        XCTAssertNil(SettingsPluginID.notes.brandGlyph)
         XCTAssertEqual(SettingsPluginID.claude.brandGlyph, .claude)
         XCTAssertEqual(SettingsPluginID.codex.brandGlyph, .codex)
         XCTAssertEqual(SettingsPluginID.devin.brandGlyph, .devin)

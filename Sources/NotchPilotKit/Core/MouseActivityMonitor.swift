@@ -66,6 +66,9 @@ final class MouseActivityMonitor: MouseActivityMonitoring {
         .leftMouseDragged,
         .rightMouseDragged,
         .otherMouseDragged,
+        .leftMouseUp,
+        .rightMouseUp,
+        .otherMouseUp,
         .scrollWheel,
         .swipe,
     ]

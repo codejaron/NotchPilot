@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct NotchContentView: View {
     private static let expandedContentTransition: AnyTransition = .asymmetric(
@@ -12,6 +13,7 @@ public struct NotchContentView: View {
     @ObservedObject private var session: ScreenSessionModel
     @ObservedObject private var pluginManager: PluginManager
     @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @State private var globalDropResultClearTask: Task<Void, Never>?
 
     public init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.session = session
@@ -29,6 +31,8 @@ public struct NotchContentView: View {
         )
         let layoutMetrics = NotchLayoutMetrics.resolve(session: session, plugins: plugins)
         let displaySize = visualDisplaySize(layoutMetrics.displaySize)
+        let dropStripHeight = NotchExpandedLayout.dropStripHeight(for: session.globalDropStripState)
+        let contentHeight = max(0, displaySize.height - dropStripHeight)
         let interactionSize = layoutMetrics.interactionSize
         let previewPlugin = pluginManager.previewPlugin(for: session.currentSneakPeek, context: context)
 
@@ -40,6 +44,7 @@ public struct NotchContentView: View {
 
                 chromeSurface(
                     displaySize: displaySize,
+                    contentHeight: contentHeight,
                     plugins: plugins,
                     context: context,
                     previewPlugin: previewPlugin
@@ -47,9 +52,18 @@ public struct NotchContentView: View {
             }
             .frame(width: interactionSize.width, height: interactionSize.height, alignment: .top)
             .contentShape(Rectangle())
+            .onDrop(
+                of: [.fileURL],
+                delegate: NotchGlobalFileDropDelegate(
+                    handler: globalDropHandler,
+                    onStateChange: handleGlobalDropStateChange,
+                    onDropCompleted: handleGlobalDropCompleted
+                )
+            )
         }
         .frame(width: session.windowSize.width, height: session.windowSize.height, alignment: .top)
         .animation(ScreenSessionModel.sneakAnimation, value: previewPlugin?.id)
+        .animation(ScreenSessionModel.sneakAnimation, value: session.globalDropStripState)
         .sensoryFeedback(.alignment, trigger: session.hoverFeedbackTrigger)
     }
 
@@ -76,6 +90,7 @@ public struct NotchContentView: View {
 
     private func chromeSurface(
         displaySize: CGSize,
+        contentHeight: CGFloat,
         plugins: [any NotchPlugin],
         context: NotchContext,
         previewPlugin: (any NotchPlugin)?
@@ -83,16 +98,26 @@ public struct NotchContentView: View {
         ZStack(alignment: .topLeading) {
             background
 
-            if session.notchState == .open {
-                expandedBody(plugins: plugins, context: context)
-                    .transition(Self.expandedContentTransition)
-            } else if session.notchState == .previewClosed,
-                      let previewPlugin {
-                previewClosedBody(previewPlugin: previewPlugin, context: context)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            } else {
-                idleBody
-                    .transition(.opacity)
+            ZStack(alignment: .topLeading) {
+                if session.notchState == .open {
+                    expandedBody(plugins: plugins, context: context)
+                        .transition(Self.expandedContentTransition)
+                } else if session.notchState == .previewClosed,
+                          let previewPlugin {
+                    previewClosedBody(previewPlugin: previewPlugin, context: context)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                } else {
+                    idleBody
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: displaySize.width, height: contentHeight, alignment: .topLeading)
+
+            if session.globalDropStripState.isVisible {
+                globalDropStripView
+                    .frame(width: displaySize.width, height: NotchExpandedLayout.globalDropStripHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .frame(width: displaySize.width, height: displaySize.height)
@@ -119,6 +144,58 @@ public struct NotchContentView: View {
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    private var globalDropHandler: NotchGlobalDropHandler {
+        NotchGlobalDropHandler(
+            notesPlugin: {
+                pluginManager.registeredPlugin(id: SettingsPluginID.notes.rawValue) as? NotesPlugin
+            },
+            selectNotes: {
+                session.activePluginID = SettingsPluginID.notes.rawValue
+            }
+        )
+    }
+
+    private var globalDropStripView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "note.text")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(dropStripTint)
+
+            Text(session.globalDropStripState.message(language: language))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            if let accessoryText = session.globalDropStripState.accessoryText(language: language) {
+                Text(accessoryText)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(NotchPilotTheme.islandTextMuted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, expandedSafeHorizontalPadding)
+        .frame(height: NotchExpandedLayout.globalDropStripHeight)
+        .background(Color.white.opacity(0.045))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(NotchPilotTheme.islandDivider)
+                .frame(height: 1)
+        }
+    }
+
+    private var dropStripTint: Color {
+        switch session.globalDropStripState {
+        case .hovering, .accepted:
+            return NotchPilotTheme.notes
+        case .failed, .rejected:
+            return NotchPilotTheme.warning
+        case .inactive:
+            return NotchPilotTheme.islandTextMuted
+        }
     }
 
     private var currentNotchShape: NotchShape {
@@ -167,7 +244,8 @@ public struct NotchContentView: View {
         return VStack(alignment: .leading, spacing: 12) {
             headerRow(
                 tabs: tabs,
-                activeTabID: activeSelection.id
+                activeSelection: activeSelection,
+                context: context
             )
 
             switch activeSelection {
@@ -227,9 +305,11 @@ public struct NotchContentView: View {
 
     private func headerRow(
         tabs: NotchPluginTabCollection,
-        activeTabID: String?
+        activeSelection: ActiveTabSelection,
+        context: NotchContext
     ) -> some View {
         return HStack(spacing: 8) {
+            let activeTabID = activeSelection.id
             HStack(spacing: 6) {
                 ForEach(headerTabs(tabs: tabs), id: \.id) { tab in
                     switch tab {
@@ -249,8 +329,7 @@ public struct NotchContentView: View {
 
             Spacer(minLength: 0)
 
-            if let activeTabID,
-               let accessory = tabs.group(id: activeTabID)?.headerAccessory() {
+            if let accessory = headerAccessory(for: activeSelection, context: context) {
                 accessory
                     .layoutPriority(1)
             }
@@ -259,6 +338,50 @@ public struct NotchContentView: View {
         }
         .frame(height: NotchExpandedLayout.headerHeight)
         .padding(.horizontal, expandedSafeHorizontalPadding)
+    }
+
+    private func headerAccessory(
+        for activeSelection: ActiveTabSelection,
+        context: NotchContext
+    ) -> AnyView? {
+        switch activeSelection {
+        case .group(let group):
+            return group.headerAccessory()
+        case .plugin(let plugin):
+            return (plugin as? any NotchPluginHeaderAccessoryRendering)?
+                .headerAccessory(context: context, isOpenPinned: session.isOpenPinned)
+        case .none:
+            return nil
+        }
+    }
+
+    private func handleGlobalDropStateChange(_ state: NotchGlobalDropStripState) {
+        globalDropResultClearTask?.cancel()
+        globalDropResultClearTask = nil
+        withAnimation(ScreenSessionModel.sneakAnimation) {
+            session.setGlobalDropStripState(state)
+        }
+    }
+
+    private func handleGlobalDropCompleted(_ state: NotchGlobalDropStripState) {
+        withAnimation(ScreenSessionModel.sneakAnimation) {
+            session.setGlobalDropStripState(state)
+        }
+        scheduleGlobalDropResultClear()
+    }
+
+    private func scheduleGlobalDropResultClear() {
+        globalDropResultClearTask?.cancel()
+        globalDropResultClearTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard Task.isCancelled == false else {
+                return
+            }
+            withAnimation(ScreenSessionModel.sneakAnimation) {
+                session.setGlobalDropStripState(.inactive)
+            }
+            globalDropResultClearTask = nil
+        }
     }
 
     @MainActor
@@ -408,6 +531,8 @@ public struct NotchContentView: View {
         switch plugin.id {
         case SettingsPluginID.media.rawValue:
             return AppStrings.text(.media, language: language)
+        case SettingsPluginID.notes.rawValue:
+            return AppStrings.text(.notes, language: language)
         case SettingsPluginID.systemMonitor.rawValue:
             return AppStrings.text(.system, language: language)
         default:

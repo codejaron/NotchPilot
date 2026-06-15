@@ -10,11 +10,16 @@ enum NotchExpandedLayout {
     static let pluginTabIconSize: CGFloat = 13
     static let settingsButtonSize: CGFloat = 24
     static let settingsIconSize: CGFloat = 10
+    static let globalDropStripHeight: CGFloat = 38
 
     static func pluginViewportHeight(forDisplayHeight displayHeight: CGFloat) -> CGFloat {
         max(
             0,
             displayHeight - topPadding - headerHeight - headerContentSpacing - bottomPadding
         )
+    }
+
+    static func dropStripHeight(for state: NotchGlobalDropStripState) -> CGFloat {
+        state.isVisible ? globalDropStripHeight : 0
     }
 }

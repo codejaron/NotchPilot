@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifiable {
@@ -6,6 +7,7 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
     case devin
     case codex
     case media = "media-playback"
+    case notes
 
     public var id: String { rawValue }
 
@@ -17,6 +19,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         switch self {
         case .media:
             return AppStrings.text(.media, language: language)
+        case .notes:
+            return AppStrings.text(.notes, language: language)
         case .claude:
             return "Claude"
         case .devin:
@@ -32,6 +36,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         switch self {
         case .media:
             return "music.note"
+        case .notes:
+            return "note.text"
         case .claude:
             return "sparkles"
         case .devin:
@@ -51,7 +57,7 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
             return .devin
         case .codex:
             return .codex
-        case .media, .systemMonitor:
+        case .media, .notes, .systemMonitor:
             return nil
         }
     }
@@ -64,6 +70,8 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         switch self {
         case .media:
             return language == .zhHans ? "媒体播放" : "Media Playback"
+        case .notes:
+            return AppStrings.text(.notesSidebarSubtitle, language: language)
         case .claude:
             return language == .zhHans ? "Claude 集成" : "Claude Integration"
         case .devin:
@@ -73,6 +81,91 @@ public enum SettingsPluginID: String, CaseIterable, Hashable, Sendable, Identifi
         case .systemMonitor:
             return language == .zhHans ? "系统监控" : "System Monitor"
         }
+    }
+}
+
+struct NotesPluginSettingsView: View {
+    @ObservedObject private var generalSettings = SettingsStore.shared.general
+    @ObservedObject private var notesSettings = SettingsStore.shared.notes
+    private let store = ScratchpadStore()
+
+    @State private var isMigrationPromptPresented = false
+    @State private var migrationMessage: String?
+
+    var body: some View {
+        SettingsPage(title: AppStrings.text(.notes, language: language)) {
+            SettingsGroupSection(title: AppStrings.text(.plugin, language: language)) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.enableNotesPlugin, language: language),
+                    detail: AppStrings.text(.enableNotesPluginDetail, language: language),
+                    isOn: $notesSettings.notesEnabled
+                )
+            }
+
+            SettingsGroupSection(title: AppStrings.text(.notesFiles, language: language)) {
+                SettingsToggleRow(
+                    title: AppStrings.text(.copyDroppedFilesToScratchpad, language: language),
+                    detail: AppStrings.text(.copyDroppedFilesToScratchpadDetail, language: language),
+                    isEnabled: notesSettings.notesEnabled,
+                    isOn: copyDraggedFilesBinding
+                )
+
+                SettingsRowDivider()
+
+                SettingsActionRow(
+                    title: AppStrings.text(.scratchpadRoot, language: language),
+                    detail: store.rootURL.path,
+                    buttonTitle: AppStrings.text(.open, language: language),
+                    isEnabled: notesSettings.notesEnabled
+                ) {
+                    try? FileManager.default.createDirectory(at: store.rootURL, withIntermediateDirectories: true)
+                    NSWorkspace.shared.activateFileViewerSelecting([store.rootURL])
+                }
+            }
+
+            if let migrationMessage {
+                SettingsInlineMessage(text: migrationMessage, color: .secondary)
+            }
+        }
+        .confirmationDialog(
+            AppStrings.text(.migrateExistingExternalFiles, language: language),
+            isPresented: $isMigrationPromptPresented
+        ) {
+            Button(AppStrings.text(.migrateNow, language: language)) {
+                migrateExistingExternalLinks()
+            }
+            Button(AppStrings.text(.skip, language: language), role: .cancel) {}
+        }
+    }
+
+    private var copyDraggedFilesBinding: Binding<Bool> {
+        Binding(
+            get: { notesSettings.notesCopyDraggedFilesToScratchpad },
+            set: { newValue in
+                let wasEnabled = notesSettings.notesCopyDraggedFilesToScratchpad
+                notesSettings.notesCopyDraggedFilesToScratchpad = newValue
+                if newValue, wasEnabled == false {
+                    isMigrationPromptPresented = true
+                }
+            }
+        )
+    }
+
+    private func migrateExistingExternalLinks() {
+        do {
+            let result = try store.migrateExternalMarkdownLinks()
+            migrationMessage = AppStrings.notesMigrationResult(
+                migratedCount: result.migratedCount,
+                failedCount: result.failedCount,
+                language: language
+            )
+        } catch {
+            migrationMessage = error.localizedDescription
+        }
+    }
+
+    private var language: AppLanguage {
+        generalSettings.interfaceLanguage
     }
 }
 

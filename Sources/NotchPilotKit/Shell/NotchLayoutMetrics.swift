@@ -17,9 +17,17 @@ struct NotchLayoutMetrics {
             currentSneakPeek: session.currentSneakPeek
         )
         let displaySize = preferredDisplaySize(session: session, plugins: plugins, context: context)
-        let interactionSize = preferredInteractionSize(for: displaySize, notchState: session.notchState)
+        let dropStripHeight = NotchExpandedLayout.dropStripHeight(for: session.globalDropStripState)
+        let displaySizeWithDropStrip = CGSize(
+            width: displaySize.width,
+            height: displaySize.height + dropStripHeight
+        )
+        let interactionSize = preferredInteractionSize(
+            for: displaySizeWithDropStrip,
+            notchState: session.notchState
+        )
 
-        return NotchLayoutMetrics(displaySize: displaySize, interactionSize: interactionSize)
+        return NotchLayoutMetrics(displaySize: displaySizeWithDropStrip, interactionSize: interactionSize)
     }
 
     private static func preferredDisplaySize(

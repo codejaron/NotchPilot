@@ -6,6 +6,7 @@ public enum NotchEvent: Equatable, Sendable {
     case dismissSneakPeek(requestID: UUID?, target: PresentationTarget)
     case openRequested(pluginID: String, target: PresentationTarget)
     case closeRequested(target: PresentationTarget)
+    case setOpenPinned(Bool, target: PresentationTarget)
 }
 
 @MainActor

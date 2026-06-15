@@ -37,10 +37,35 @@ enum AppTextKey: String, CaseIterable {
     case quitAppDetail
     case quitAppButton
     case media
+    case notes
+    case notesSidebarSubtitle
     case system
     case playback
     case enableMediaPlugin
     case enableMediaPluginDetail
+    case enableNotesPlugin
+    case enableNotesPluginDetail
+    case notesFiles
+    case copyDroppedFilesToScratchpad
+    case copyDroppedFilesToScratchpadDetail
+    case migrateExistingExternalFiles
+    case migrateNow
+    case scratchpadRoot
+    case open
+    case cancel
+    case searchNotes
+    case newNote
+    case allNotes
+    case noteTitle
+    case pinNotch
+    case popOutNote
+    case renameNote
+    case openNoteFolder
+    case deleteNote
+    case deleteNoteQuestion
+    case noContent
+    case keepOnTop
+    case missingExternalFiles
     case showPlaybackPreview
     case showPlaybackPreviewDetail
     case desktopLyricsCard
@@ -218,6 +243,24 @@ enum AppStrings {
             return "\(intValue) GB"
         case .network:
             return "\(intValue) MB/s"
+        }
+    }
+
+    static func notesMigrationResult(migratedCount: Int, failedCount: Int, language: AppLanguage) -> String {
+        switch language {
+        case .zhHans:
+            return "已迁移 \(migratedCount) 个文件，\(failedCount) 个失败项已保留原链接。"
+        case .english:
+            return "Migrated \(migratedCount) files. \(failedCount) failed links were left unchanged."
+        }
+    }
+
+    static func missingExternalFiles(count: Int, language: AppLanguage) -> String {
+        switch language {
+        case .zhHans:
+            return "\(count) 个外部文件失效。"
+        case .english:
+            return count == 1 ? "1 external file is missing." : "\(count) external files are missing."
         }
     }
 

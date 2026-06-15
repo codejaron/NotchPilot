@@ -60,6 +60,10 @@ public final class PluginManager: ObservableObject {
         enabledPlugins.first(where: { $0.id == id })
     }
 
+    public func registeredPlugin(id: String) -> (any NotchPlugin)? {
+        plugins.first(where: { $0.id == id })
+    }
+
     public func resolvedTabID(_ rawID: String?) -> String? {
         NotchPluginTabCollection(plugins: enabledPlugins).resolvedTabID(rawID)
     }

@@ -265,6 +265,29 @@ final class ScreenSessionModelTests: XCTestCase {
         XCTAssertEqual(session.notchState, .open)
     }
 
+    func testPinnedHoverOpenDoesNotCloseOnHoverExitUntilPluginChanges() async {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+
+        session.openForHover(pluginID: "notes")
+        session.setOpenPinned(true)
+        session.setHover(false, fallbackPluginID: "notes")
+
+        try? await Task.sleep(for: .milliseconds(160))
+
+        XCTAssertEqual(session.notchState, .open)
+        XCTAssertTrue(session.isOpenPinned)
+
+        session.activePluginID = "media-playback"
+
+        XCTAssertFalse(session.isOpenPinned)
+    }
+
     func testHoverOpenClosesAfterExitDelay() async {
         let session = ScreenSessionModel(
             descriptor: ScreenDescriptor(

@@ -30,6 +30,17 @@ final class NotchLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.interactionSize.height, 240, accuracy: 0.1)
     }
 
+    func testGlobalDropStripAddsHeightToOpenMetrics() {
+        let session = makeSession(closedNotchSize: CGSize(width: 236, height: 38))
+        session.open(pluginID: "ai")
+        session.setGlobalDropStripState(.hovering(fileCount: 1))
+
+        let metrics = NotchLayoutMetrics.resolve(session: session, plugins: [LayoutTestPlugin()])
+
+        XCTAssertEqual(metrics.displaySize.height, 240 + NotchExpandedLayout.globalDropStripHeight, accuracy: 0.1)
+        XCTAssertEqual(metrics.interactionSize.height, 240 + NotchExpandedLayout.globalDropStripHeight, accuracy: 0.1)
+    }
+
     func testExpandedPluginViewportIsOwnedByShellChrome() {
         let viewportHeight = NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: 240)
 

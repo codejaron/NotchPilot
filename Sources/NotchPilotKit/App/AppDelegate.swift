@@ -11,6 +11,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     private let generalSettings = SettingsStore.shared.general
     private let bridgeSettings = SettingsStore.shared.bridge
     private lazy var mediaPlaybackPlugin = MediaPlaybackPlugin(monitor: nowPlayingController)
+    private let notesPlugin = NotesPlugin()
     private let claudePlugin = ClaudePlugin()
     private let codexPlugin = CodexPlugin()
     private let systemMonitorPlugin = SystemMonitorPlugin()
@@ -169,7 +170,7 @@ public final class NotchPilotAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func initialPlugins() -> [any NotchPlugin] {
-        [systemMonitorPlugin, claudePlugin, codexPlugin, mediaPlaybackPlugin]
+        [systemMonitorPlugin, claudePlugin, codexPlugin, mediaPlaybackPlugin, notesPlugin]
     }
 
     var registeredPluginIDsForTesting: [String] {

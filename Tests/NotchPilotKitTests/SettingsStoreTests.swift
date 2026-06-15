@@ -296,6 +296,30 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testNotesSettingsDefaultToEnabledCopyingAndPersistChanges() {
+        let store = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertTrue(store.notesEnabled)
+        XCTAssertTrue(store.notesCopyDraggedFilesToScratchpad)
+
+        store.notesEnabled = false
+        store.notesCopyDraggedFilesToScratchpad = false
+
+        let reloadedStore = SettingsStore(
+            defaults: defaults,
+            fileManager: .default,
+            homeDirectoryURL: tempHomeURL
+        )
+
+        XCTAssertFalse(reloadedStore.notesEnabled)
+        XCTAssertFalse(reloadedStore.notesCopyDraggedFilesToScratchpad)
+    }
+
+    @MainActor
     func testDesktopLyricsHTTPSourceSettingDefaultsToAllowedAndPersistsChanges() {
         let store = SettingsStore(
             defaults: defaults,
@@ -334,6 +358,8 @@ final class SettingsStoreTests: XCTestCase {
         store.ai.codexPluginEnabled = false
         store.systemMonitor.systemMonitorEnabled = false
         store.systemMonitor.systemMonitorSneakPreviewEnabled = false
+        store.notes.notesEnabled = false
+        store.notes.notesCopyDraggedFilesToScratchpad = false
         store.sound.soundEnabled = false
         store.sound.soundTaskCompleteVolume = 0.25
         store.general.interfaceLanguage = .english
@@ -355,6 +381,8 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloadedStore.ai.codexPluginEnabled)
         XCTAssertFalse(reloadedStore.systemMonitor.systemMonitorEnabled)
         XCTAssertFalse(reloadedStore.systemMonitor.systemMonitorSneakPreviewEnabled)
+        XCTAssertFalse(reloadedStore.notes.notesEnabled)
+        XCTAssertFalse(reloadedStore.notes.notesCopyDraggedFilesToScratchpad)
         XCTAssertFalse(reloadedStore.sound.soundEnabled)
         XCTAssertEqual(reloadedStore.sound.soundTaskCompleteVolume, 0.25)
         XCTAssertEqual(reloadedStore.general.interfaceLanguage, .english)
@@ -413,12 +441,14 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.codexPluginEnabled)
         XCTAssertTrue(store.devinPluginEnabled)
         XCTAssertTrue(store.mediaPlaybackEnabled)
+        XCTAssertTrue(store.notesEnabled)
 
         store.systemMonitorEnabled = false
         store.claudePluginEnabled = false
         store.codexPluginEnabled = false
         store.devinPluginEnabled = false
         store.mediaPlaybackEnabled = false
+        store.notesEnabled = false
 
         let reloadedStore = SettingsStore(
             defaults: defaults,
@@ -431,6 +461,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloadedStore.codexPluginEnabled)
         XCTAssertFalse(reloadedStore.devinPluginEnabled)
         XCTAssertFalse(reloadedStore.mediaPlaybackEnabled)
+        XCTAssertFalse(reloadedStore.notesEnabled)
     }
 
     @MainActor

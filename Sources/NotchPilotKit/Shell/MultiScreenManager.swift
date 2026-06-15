@@ -141,6 +141,10 @@ public final class MultiScreenManager {
             for id in PresentationTargetResolver.resolve(target, in: context) {
                 sessions[id]?.close()
             }
+        case let .setOpenPinned(isPinned, target):
+            for id in PresentationTargetResolver.resolve(target, in: context) {
+                sessions[id]?.setOpenPinned(isPinned)
+            }
         }
     }
 

@@ -106,6 +106,8 @@ public struct SettingsView: View {
                 switch plugin {
                 case .media:
                     MediaPluginSettingsView()
+                case .notes:
+                    NotesPluginSettingsView()
                 case .claude:
                     ClaudePluginSettingsView()
                 case .devin:

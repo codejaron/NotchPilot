@@ -176,6 +176,19 @@ final class SettingsSystemMonitorNamespace: SettingsNamespace {
 }
 
 @MainActor
+final class SettingsNotesNamespace: SettingsNamespace {
+    var notesEnabled: Bool {
+        get { store.notesEnabled }
+        set { store.notesEnabled = newValue }
+    }
+
+    var notesCopyDraggedFilesToScratchpad: Bool {
+        get { store.notesCopyDraggedFilesToScratchpad }
+        set { store.notesCopyDraggedFilesToScratchpad = newValue }
+    }
+}
+
+@MainActor
 final class SettingsSoundNamespace: SettingsNamespace {
     var soundEnabled: Bool {
         get { store.soundEnabled }

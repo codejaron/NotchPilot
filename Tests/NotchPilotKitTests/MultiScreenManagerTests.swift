@@ -88,6 +88,24 @@ final class MultiScreenManagerTests: XCTestCase {
         XCTAssertNil(manager.sessions["secondary"]?.currentSneakPeek)
     }
 
+    func testPinnedOpenEventTargetsOnlyResolvedScreen() {
+        let source = ScreenDescriptorSource([
+            screen(id: "primary", isPrimary: true),
+            screen(id: "secondary", x: 1512),
+        ])
+        let manager = makeManager(
+            descriptors: { source.descriptors },
+            activeScreenID: { "secondary" },
+            primaryScreenID: { "primary" }
+        )
+        manager.synchronizeScreens()
+
+        manager.handle(event: .setOpenPinned(true, target: .activeScreen))
+
+        XCTAssertFalse(manager.sessions["primary"]?.isOpenPinned ?? true)
+        XCTAssertTrue(manager.sessions["secondary"]?.isOpenPinned ?? false)
+    }
+
     private func makeManager(
         descriptors: @escaping @MainActor () -> [ScreenDescriptor],
         activeScreenID: @escaping @MainActor () -> String?,

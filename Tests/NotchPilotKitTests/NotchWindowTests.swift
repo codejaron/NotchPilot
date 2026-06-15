@@ -78,15 +78,273 @@ final class NotchWindowTests: XCTestCase {
 
         window.close()
     }
+
+    @MainActor
+    func testGlobalFileDragShowsDropStripBeforePointerReachesNotch() throws {
+        let tempHomeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchWindowTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHomeURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHomeURL) }
+
+        let suiteName = "NotchWindowTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settingsStore = SettingsStore(defaults: defaults, fileManager: .default, homeDirectoryURL: tempHomeURL)
+        let pluginManager = PluginManager()
+        pluginManager.register(
+            NotesPlugin(
+                settingsStore: settingsStore,
+                store: ScratchpadStore(rootURL: tempHomeURL.appendingPathComponent("Scratchpad", isDirectory: true))
+            )
+        )
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let monitor = NotchWindowTestMouseActivityMonitor()
+        let dragReader = NotchWindowTestGlobalDragReader(count: 0, changeCount: 10)
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: monitor,
+            globalDragPasteboardReader: dragReader
+        )
+        defer { window.close() }
+        dragReader.snapshotValue = NotchGlobalDragPasteboardSnapshot(changeCount: 11, supportedFileURLCount: 1)
+
+        let event = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDragged,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0
+            )
+        )
+
+        _ = monitor.emit(scope: .global, event: event)
+
+        XCTAssertEqual(session.globalDropStripState, .hovering(fileCount: 1))
+    }
+
+    @MainActor
+    func testGlobalFileDragKeepsDropStripVisibleForRepeatedFramesWithSamePasteboardChangeCount() throws {
+        let tempHomeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchWindowTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHomeURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHomeURL) }
+
+        let suiteName = "NotchWindowTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settingsStore = SettingsStore(defaults: defaults, fileManager: .default, homeDirectoryURL: tempHomeURL)
+        let pluginManager = PluginManager()
+        pluginManager.register(
+            NotesPlugin(
+                settingsStore: settingsStore,
+                store: ScratchpadStore(rootURL: tempHomeURL.appendingPathComponent("Scratchpad", isDirectory: true))
+            )
+        )
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let monitor = NotchWindowTestMouseActivityMonitor()
+        let dragReader = NotchWindowTestGlobalDragReader(count: 0, changeCount: 40)
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: monitor,
+            globalDragPasteboardReader: dragReader
+        )
+        defer { window.close() }
+        dragReader.snapshotValue = NotchGlobalDragPasteboardSnapshot(changeCount: 41, supportedFileURLCount: 2)
+
+        let event = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDragged,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0
+            )
+        )
+
+        _ = monitor.emit(scope: .global, event: event)
+        _ = monitor.emit(scope: .global, event: event)
+
+        XCTAssertEqual(session.globalDropStripState, .hovering(fileCount: 2))
+    }
+
+    @MainActor
+    func testGlobalMouseDragIgnoresStaleFileDragPasteboard() throws {
+        let tempHomeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchWindowTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHomeURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHomeURL) }
+
+        let suiteName = "NotchWindowTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settingsStore = SettingsStore(defaults: defaults, fileManager: .default, homeDirectoryURL: tempHomeURL)
+        let pluginManager = PluginManager()
+        pluginManager.register(
+            NotesPlugin(
+                settingsStore: settingsStore,
+                store: ScratchpadStore(rootURL: tempHomeURL.appendingPathComponent("Scratchpad", isDirectory: true))
+            )
+        )
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let monitor = NotchWindowTestMouseActivityMonitor()
+        let dragReader = NotchWindowTestGlobalDragReader(count: 1, changeCount: 20)
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: monitor,
+            globalDragPasteboardReader: dragReader
+        )
+        defer { window.close() }
+
+        let event = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDragged,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0
+            )
+        )
+
+        _ = monitor.emit(scope: .global, event: event)
+
+        XCTAssertEqual(session.globalDropStripState, .inactive)
+    }
+
+    @MainActor
+    func testGlobalMouseDragIgnoresFilePasteboardAfterDragEnded() throws {
+        let tempHomeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchWindowTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHomeURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHomeURL) }
+
+        let suiteName = "NotchWindowTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settingsStore = SettingsStore(defaults: defaults, fileManager: .default, homeDirectoryURL: tempHomeURL)
+        let pluginManager = PluginManager()
+        pluginManager.register(
+            NotesPlugin(
+                settingsStore: settingsStore,
+                store: ScratchpadStore(rootURL: tempHomeURL.appendingPathComponent("Scratchpad", isDirectory: true))
+            )
+        )
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let monitor = NotchWindowTestMouseActivityMonitor()
+        let dragReader = NotchWindowTestGlobalDragReader(count: 0, changeCount: 30)
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: monitor,
+            globalDragPasteboardReader: dragReader
+        )
+        defer { window.close() }
+        let dragEvent = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDragged,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0
+            )
+        )
+        let mouseUpEvent = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseUp,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0
+            )
+        )
+
+        dragReader.snapshotValue = NotchGlobalDragPasteboardSnapshot(changeCount: 31, supportedFileURLCount: 1)
+        _ = monitor.emit(scope: .global, event: dragEvent)
+        _ = monitor.emit(scope: .global, event: mouseUpEvent)
+        _ = monitor.emit(scope: .global, event: dragEvent)
+
+        XCTAssertEqual(session.globalDropStripState, .inactive)
+    }
 }
 
 @MainActor
 private final class NotchWindowTestMouseActivityMonitor: MouseActivityMonitoring {
+    private var handler: (@MainActor (MouseActivityEvent) -> MouseActivityHandlingResult)?
+
     func addSubscriber(
         _ handler: @escaping @MainActor (MouseActivityEvent) -> MouseActivityHandlingResult
     ) -> UUID {
-        UUID()
+        self.handler = handler
+        return UUID()
     }
 
-    func removeSubscriber(_ token: UUID) {}
+    func removeSubscriber(_ token: UUID) {
+        handler = nil
+    }
+
+    func emit(scope: MouseActivityScope, event: NSEvent) -> MouseActivityHandlingResult? {
+        handler?(MouseActivityEvent(scope: scope, event: event))
+    }
+}
+
+private final class NotchWindowTestGlobalDragReader: NotchGlobalDragPasteboardReading {
+    var snapshotValue: NotchGlobalDragPasteboardSnapshot
+
+    init(count: Int, changeCount: Int) {
+        self.snapshotValue = NotchGlobalDragPasteboardSnapshot(
+            changeCount: changeCount,
+            supportedFileURLCount: count
+        )
+    }
+
+    func snapshot() -> NotchGlobalDragPasteboardSnapshot {
+        snapshotValue
+    }
 }

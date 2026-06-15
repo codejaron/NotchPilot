@@ -20,6 +20,7 @@ public final class SettingsStore: ObservableObject {
     private(set) lazy var media = SettingsMediaNamespace(store: self)
     private(set) lazy var lyrics = SettingsLyricsNamespace(store: self)
     private(set) lazy var systemMonitor = SettingsSystemMonitorNamespace(store: self)
+    private(set) lazy var notes = SettingsNotesNamespace(store: self)
     private(set) lazy var sound = SettingsSoundNamespace(store: self)
 
     private enum Key {
@@ -46,6 +47,8 @@ public final class SettingsStore: ObservableObject {
         static let systemMonitorAlertBatteryPercent = "systemMonitor.alertThreshold.battery"
         static let systemMonitorAlertDiskFreeGB = "systemMonitor.alertThreshold.disk"
         static let systemMonitorAlertNetworkMBps = "systemMonitor.alertThreshold.network"
+        static let notesEnabled = "notes.enabled"
+        static let notesCopyDraggedFilesToScratchpad = "notes.copyDraggedFilesToScratchpad"
         static let claudePluginEnabled = "claude.enabled"
         static let codexPluginEnabled = "codex.enabled"
         static let devinPluginEnabled = "devin.enabled"
@@ -174,6 +177,18 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var notesEnabled: Bool {
+        didSet {
+            defaults.set(notesEnabled, forKey: Key.notesEnabled)
+        }
+    }
+
+    @Published var notesCopyDraggedFilesToScratchpad: Bool {
+        didSet {
+            defaults.set(notesCopyDraggedFilesToScratchpad, forKey: Key.notesCopyDraggedFilesToScratchpad)
+        }
+    }
+
     @Published var claudePluginEnabled: Bool {
         didSet {
             defaults.set(claudePluginEnabled, forKey: Key.claudePluginEnabled)
@@ -279,6 +294,10 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.systemMonitorSneakPreviewEnabled) as? Bool ?? true
         self.systemMonitorSneakConfiguration = Self.systemMonitorSneakConfiguration(from: defaults)
         self.systemMonitorAlertThresholds = Self.systemMonitorAlertThresholds(from: defaults)
+        self.notesEnabled =
+            defaults.object(forKey: Key.notesEnabled) as? Bool ?? true
+        self.notesCopyDraggedFilesToScratchpad =
+            defaults.object(forKey: Key.notesCopyDraggedFilesToScratchpad) as? Bool ?? true
         self.claudePluginEnabled =
             defaults.object(forKey: Key.claudePluginEnabled) as? Bool ?? true
         self.codexPluginEnabled =

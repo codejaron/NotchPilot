@@ -43,6 +43,15 @@ extension NotchPluginTabGroupRendering {
 }
 
 @MainActor
+protocol NotchPluginHeaderAccessoryRendering: AnyObject {
+    func headerAccessory(context: NotchContext, isOpenPinned: Bool) -> AnyView?
+}
+
+extension NotchPluginHeaderAccessoryRendering {
+    func headerAccessory(context: NotchContext, isOpenPinned: Bool) -> AnyView? { nil }
+}
+
+@MainActor
 public protocol NotchPlugin: AnyObject, Identifiable, ObservableObject where ObjectWillChangePublisher == ObservableObjectPublisher {
     var id: String { get }
     var title: String { get }

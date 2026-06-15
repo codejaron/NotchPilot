@@ -3,6 +3,7 @@ import SwiftUI
 
 enum NotchPilotTheme {
     static let mediaPlayback = Color(red: 0.24, green: 0.84, blue: 0.47)
+    static let notes = Color(red: 0.98, green: 0.72, blue: 0.24)
     static let claude = Color(red: 0.80, green: 0.51, blue: 0.38)
     static let codex = Color(red: 0.37, green: 0.53, blue: 0.86)
     static let systemMonitor = Color(red: 0.36, green: 0.82, blue: 1.0)
@@ -33,6 +34,8 @@ enum NotchPilotTheme {
         switch plugin {
         case .media:
             return mediaPlayback
+        case .notes:
+            return notes
         case .claude, .devin:
             // Devin is a member of the Claude family and shares the same brand
             // accent at the UI layer.
@@ -47,6 +50,7 @@ enum NotchPilotTheme {
     static func brand(for pluginID: String?) -> Color {
         switch pluginID {
         case "media-playback": return mediaPlayback
+        case "notes":          return notes
         case "system-monitor": return systemMonitor
         case "claude", "devin": return claude
         default:               return codex

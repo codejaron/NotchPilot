@@ -45,29 +45,35 @@ public final class NotchWindow: NSPanel {
     private unowned let session: ScreenSessionModel
     private let pluginManager: PluginManager
     private let mouseActivityMonitor: any MouseActivityMonitoring
+    private let globalDragPasteboardReader: any NotchGlobalDragPasteboardReading
     private var mouseActivityToken: UUID?
     private var lastHoverState: Bool?
     private var pluginObserver: AnyCancellable?
     private var accumulatedTabScrollDelta = CGSize.zero
     private var tabScrollGestureLocked = false
     private var interactionFrameCache = NotchWindowInteractionFrameCache()
+    private var observedGlobalDragPasteboardChangeCount: Int?
+    private var activeGlobalFileDragPasteboardChangeCount: Int?
 
     public convenience init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.init(
             session: session,
             pluginManager: pluginManager,
-            mouseActivityMonitor: MouseActivityMonitor.shared
+            mouseActivityMonitor: MouseActivityMonitor.shared,
+            globalDragPasteboardReader: NotchGlobalDragPasteboardReader()
         )
     }
 
     init(
         session: ScreenSessionModel,
         pluginManager: PluginManager,
-        mouseActivityMonitor: any MouseActivityMonitoring
+        mouseActivityMonitor: any MouseActivityMonitoring,
+        globalDragPasteboardReader: any NotchGlobalDragPasteboardReading = NotchGlobalDragPasteboardReader()
     ) {
         self.session = session
         self.pluginManager = pluginManager
         self.mouseActivityMonitor = mouseActivityMonitor
+        self.globalDragPasteboardReader = globalDragPasteboardReader
         super.init(
             contentRect: session.windowFrame,
             styleMask: NotchWindowStyle.defaultStyleMask,
@@ -75,6 +81,7 @@ public final class NotchWindow: NSPanel {
             defer: false
         )
 
+        observedGlobalDragPasteboardChangeCount = globalDragPasteboardReader.snapshot().changeCount
         isFloatingPanel = true
         isReleasedWhenClosed = false
         becomesKeyOnlyIfNeeded = true
@@ -156,6 +163,7 @@ public final class NotchWindow: NSPanel {
                 return .passThrough
             }
 
+            self.updateGlobalFileDragState(for: activity.event)
             self.updateMouseInteraction()
             guard activity.scope == .local,
                   self.handleTabGesture(activity.event) else {
@@ -195,6 +203,64 @@ public final class NotchWindow: NSPanel {
         lastHoverState = hovering
         ignoresMouseEvents = !hovering
         session.setHover(hovering, fallbackPluginID: pluginManager.enabledPlugins.first?.id)
+    }
+
+    private func updateGlobalFileDragState(for event: NSEvent) {
+        guard NotchGlobalDragReducer.shouldInspectPasteboard(for: event.type) else {
+            return
+        }
+
+        let snapshot = globalDragPasteboardReader.snapshot()
+        let nextState = NotchGlobalDragReducer.state(
+            eventType: event.type,
+            fileURLCount: globalDragFileURLCount(eventType: event.type, snapshot: snapshot),
+            currentState: session.globalDropStripState,
+            handler: NotchGlobalDropHandler(
+                notesPlugin: { [pluginManager] in
+                    pluginManager.registeredPlugin(id: SettingsPluginID.notes.rawValue) as? NotesPlugin
+                },
+                selectNotes: { [session] in
+                    session.activePluginID = SettingsPluginID.notes.rawValue
+                }
+            )
+        )
+
+        guard let nextState else {
+            return
+        }
+        session.setGlobalDropStripState(nextState)
+    }
+
+    private func globalDragFileURLCount(
+        eventType: NSEvent.EventType,
+        snapshot: NotchGlobalDragPasteboardSnapshot
+    ) -> Int {
+        switch eventType {
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            guard snapshot.supportedFileURLCount > 0 else {
+                observedGlobalDragPasteboardChangeCount = snapshot.changeCount
+                activeGlobalFileDragPasteboardChangeCount = nil
+                return 0
+            }
+
+            if activeGlobalFileDragPasteboardChangeCount == snapshot.changeCount {
+                return snapshot.supportedFileURLCount
+            }
+
+            guard observedGlobalDragPasteboardChangeCount != snapshot.changeCount else {
+                return 0
+            }
+
+            observedGlobalDragPasteboardChangeCount = snapshot.changeCount
+            activeGlobalFileDragPasteboardChangeCount = snapshot.changeCount
+            return snapshot.supportedFileURLCount
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            observedGlobalDragPasteboardChangeCount = snapshot.changeCount
+            activeGlobalFileDragPasteboardChangeCount = nil
+            return 0
+        default:
+            return 0
+        }
     }
 
     private func handleTabGesture(_ event: NSEvent) -> Bool {

@@ -83,6 +83,15 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertEqual(manager.enabledPlugins.map(\.id), ["enabled"])
     }
 
+    func testRegisteredPluginLookupIncludesDisabledPlugins() {
+        let manager = PluginManager()
+        let disabled = PluginManagerTestPlugin(id: "notes", title: "Notes", dockOrder: 130, isEnabled: false)
+        manager.register(disabled)
+
+        XCTAssertNil(manager.plugin(id: "notes"))
+        XCTAssertTrue(manager.registeredPlugin(id: "notes") === disabled)
+    }
+
     func testPluginAvailabilityChangesActivateAndDeactivateRuntime() async {
         let manager = PluginManager()
         let plugin = PluginManagerTestPlugin(id: "runtime", title: "Runtime", dockOrder: 1)

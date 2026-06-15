@@ -28,11 +28,17 @@ public final class ScreenSessionModel: ObservableObject {
     @Published public private(set) var hoverState = false
     @Published public private(set) var hoverFeedbackTrigger = false
     @Published public private(set) var currentSneakPeek: SneakPeekRequest?
+    @Published public private(set) var isOpenPinned = false
+    @Published private(set) var globalDropStripState: NotchGlobalDropStripState = .inactive
     @Published public var activePluginID: String? {
         didSet {
             let resolvedID = activePluginIDResolver(activePluginID)
             if activePluginID != resolvedID {
                 activePluginID = resolvedID
+                return
+            }
+            if oldValue != activePluginID {
+                isOpenPinned = false
             }
         }
     }
@@ -190,11 +196,30 @@ public final class ScreenSessionModel: ObservableObject {
     public func close() {
         hoverOpenTask?.cancel()
         hoverCloseTask?.cancel()
+        isOpenPinned = false
+        setGlobalDropStripState(.inactive)
         openReason = nil
         withAnimation(Self.closeAnimation) {
             updatePresentationState()
         }
         layoutDidChange?()
+    }
+
+    public func setOpenPinned(_ isPinned: Bool) {
+        isOpenPinned = isPinned
+    }
+
+    func setGlobalDropStripState(_ state: NotchGlobalDropStripState) {
+        let oldHeight = NotchExpandedLayout.dropStripHeight(for: globalDropStripState)
+        let newHeight = NotchExpandedLayout.dropStripHeight(for: state)
+        guard globalDropStripState != state else {
+            return
+        }
+
+        globalDropStripState = state
+        if oldHeight != newHeight {
+            layoutDidChange?()
+        }
     }
 
     public func enqueue(_ request: SneakPeekRequest) {
@@ -266,6 +291,7 @@ public final class ScreenSessionModel: ObservableObject {
                 !Task.isCancelled,
                 self.hoverState == false,
                 self.openReason == .hover,
+                self.isOpenPinned == false,
                 self.notchState == .open
             else {
                 return
