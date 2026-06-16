@@ -11,16 +11,14 @@ public final class SettingsWindowController {
         if let window {
             Self.configure(window: window)
             window.contentView = NSHostingView(rootView: SettingsView(selectedPane: selectedPane))
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            NotchPilotWindowForegroundPresenter.present(window)
             return
         }
 
         let window = Self.makeWindow(rootView: SettingsView(selectedPane: selectedPane))
         window.center()
         window.isReleasedWhenClosed = false
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NotchPilotWindowForegroundPresenter.present(window)
 
         self.window = window
     }
