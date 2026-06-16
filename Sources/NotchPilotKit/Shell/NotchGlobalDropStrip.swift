@@ -121,6 +121,7 @@ struct NotchGlobalDropHandler {
             return .rejected(reason: .notesDisabled)
         }
 
+        selectNotes()
         return .hovering(fileCount: fileCount)
     }
 

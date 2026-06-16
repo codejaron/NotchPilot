@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import NotchPilotKit
 
@@ -167,10 +169,110 @@ final class ScratchpadNotesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedNote?.body, "[document.pdf](\(source.path))")
     }
 
+    @MainActor
+    func testRootViewSyncsEditorWhenSelectedNoteBodyChangesExternally() throws {
+        let store = ScratchpadStore(rootURL: rootURL)
+        try store.createNote(now: Date(timeIntervalSince1970: 10))
+        let source = rootURL.appendingPathComponent("document.pdf")
+        try Data("pdf".utf8).write(to: source)
+        let viewModel = ScratchpadNotesViewModel(
+            store: store,
+            copyDraggedFilesToScratchpad: { false }
+        )
+        let hostingView = NSHostingView(rootView: ScratchpadNotesRootView(viewModel: viewModel))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
+        hostingView.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        let textView = try XCTUnwrap(findMarkdownTextView(in: hostingView))
+
+        try viewModel.insertAttachment(
+            from: source,
+            isImage: false,
+            now: Date(timeIntervalSince1970: 20)
+        )
+        hostingView.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(textView.string, "[document.pdf](\(source.path))")
+    }
+
+    @MainActor
+    func testMarkdownTextViewRoutesFileDropsToAttachmentHandler() throws {
+        let source = rootURL.appendingPathComponent("image.gif")
+        try Data("gif".utf8).write(to: source)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("ScratchpadTextViewDrop.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([source as NSURL])
+        let draggingInfo = ScratchpadTestDraggingInfo(pasteboard: pasteboard)
+        let textView = ScratchpadMarkdownTextView()
+        textView.string = "hello"
+        var droppedURLs: [URL] = []
+        textView.onDroppedFiles = { droppedURLs = $0 }
+
+        XCTAssertEqual(textView.draggingEntered(draggingInfo), .copy)
+        XCTAssertTrue(textView.performDragOperation(draggingInfo))
+
+        XCTAssertEqual(droppedURLs, [source])
+        XCTAssertEqual(textView.string, "hello")
+    }
+
     @discardableResult
     private func makeNote(store: ScratchpadStore, body: String, now: TimeInterval) throws -> ScratchpadNote {
         var note = try store.createNote(now: Date(timeIntervalSince1970: now))
         note.body = body
         return try store.saveNote(note, now: Date(timeIntervalSince1970: now))
     }
+
+    @MainActor
+    private func findMarkdownTextView(in view: NSView) -> ScratchpadMarkdownTextView? {
+        if let textView = view as? ScratchpadMarkdownTextView {
+            return textView
+        }
+
+        for subview in view.subviews {
+            if let textView = findMarkdownTextView(in: subview) {
+                return textView
+            }
+        }
+
+        return nil
+    }
+}
+
+@MainActor
+private final class ScratchpadTestDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+
+    init(pasteboard: NSPasteboard) {
+        self.draggingPasteboard = pasteboard
+    }
+
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 0 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 0
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+
+    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? {
+        nil
+    }
+
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions = [],
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
+
+    func resetSpringLoading() {}
 }

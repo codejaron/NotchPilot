@@ -65,6 +65,9 @@ struct ScratchpadNotesRootView: View {
         .onChange(of: viewModel.selectedNote?.id) { _, _ in
             syncEditorText()
         }
+        .onChange(of: viewModel.selectedNote?.body) { _, _ in
+            syncEditorText()
+        }
         .confirmationDialog(
             AppStrings.text(.deleteNoteQuestion, language: language),
             isPresented: Binding(

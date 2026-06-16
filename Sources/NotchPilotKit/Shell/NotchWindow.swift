@@ -40,6 +40,25 @@ enum NotchWindowStyle {
     ]
 }
 
+enum NotchWindowMouseEventPolicy {
+    static func ignoresMouseEvents(
+        notchState: NotchState,
+        isHoveringInteractionFrame: Bool,
+        isGlobalFileDragActive: Bool,
+        isGlobalDropStripVisible: Bool
+    ) -> Bool {
+        if isGlobalFileDragActive || isGlobalDropStripVisible {
+            return false
+        }
+
+        guard notchState == .open else {
+            return true
+        }
+
+        return isHoveringInteractionFrame == false
+    }
+}
+
 @MainActor
 public final class NotchWindow: NSPanel {
     private unowned let session: ScreenSessionModel
@@ -54,6 +73,7 @@ public final class NotchWindow: NSPanel {
     private var interactionFrameCache = NotchWindowInteractionFrameCache()
     private var observedGlobalDragPasteboardChangeCount: Int?
     private var activeGlobalFileDragPasteboardChangeCount: Int?
+    private var isGlobalFileDragActive = false
 
     public convenience init(session: ScreenSessionModel, pluginManager: PluginManager) {
         self.init(
@@ -95,7 +115,7 @@ public final class NotchWindow: NSPanel {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         isMovable = false
-        ignoresMouseEvents = false
+        ignoresMouseEvents = true
         acceptsMouseMovedEvents = true
 
         contentView = NSHostingView(rootView: NotchContentView(session: session, pluginManager: pluginManager))
@@ -195,13 +215,18 @@ public final class NotchWindow: NSPanel {
             return session.interactionFrame(for: metrics.interactionSize)
         }
         let hovering = interactionFrame.contains(NSEvent.mouseLocation)
+        ignoresMouseEvents = NotchWindowMouseEventPolicy.ignoresMouseEvents(
+            notchState: session.notchState,
+            isHoveringInteractionFrame: hovering,
+            isGlobalFileDragActive: isGlobalFileDragActive,
+            isGlobalDropStripVisible: session.globalDropStripState.isVisible
+        )
 
         guard hovering != lastHoverState else {
             return
         }
 
         lastHoverState = hovering
-        ignoresMouseEvents = !hovering
         session.setHover(hovering, fallbackPluginID: pluginManager.enabledPlugins.first?.id)
     }
 
@@ -240,23 +265,28 @@ public final class NotchWindow: NSPanel {
             guard snapshot.supportedFileURLCount > 0 else {
                 observedGlobalDragPasteboardChangeCount = snapshot.changeCount
                 activeGlobalFileDragPasteboardChangeCount = nil
+                isGlobalFileDragActive = false
                 return 0
             }
 
             if activeGlobalFileDragPasteboardChangeCount == snapshot.changeCount {
+                isGlobalFileDragActive = true
                 return snapshot.supportedFileURLCount
             }
 
             guard observedGlobalDragPasteboardChangeCount != snapshot.changeCount else {
+                isGlobalFileDragActive = false
                 return 0
             }
 
             observedGlobalDragPasteboardChangeCount = snapshot.changeCount
             activeGlobalFileDragPasteboardChangeCount = snapshot.changeCount
+            isGlobalFileDragActive = true
             return snapshot.supportedFileURLCount
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             observedGlobalDragPasteboardChangeCount = snapshot.changeCount
             activeGlobalFileDragPasteboardChangeCount = nil
+            isGlobalFileDragActive = false
             return 0
         default:
             return 0

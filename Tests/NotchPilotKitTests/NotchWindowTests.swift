@@ -58,6 +58,57 @@ final class NotchWindowTests: XCTestCase {
         XCTAssertEqual(resolveCount, 2)
     }
 
+    func testMouseEventsStayIgnoredWhenClosedEvenWhileHoveringNotch() {
+        XCTAssertTrue(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .idleClosed,
+                isHoveringInteractionFrame: true,
+                isGlobalFileDragActive: false,
+                isGlobalDropStripVisible: false
+            )
+        )
+        XCTAssertTrue(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .previewClosed,
+                isHoveringInteractionFrame: true,
+                isGlobalFileDragActive: false,
+                isGlobalDropStripVisible: false
+            )
+        )
+        XCTAssertFalse(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .open,
+                isHoveringInteractionFrame: true,
+                isGlobalFileDragActive: false,
+                isGlobalDropStripVisible: false
+            )
+        )
+        XCTAssertTrue(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .open,
+                isHoveringInteractionFrame: false,
+                isGlobalFileDragActive: false,
+                isGlobalDropStripVisible: false
+            )
+        )
+        XCTAssertFalse(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .idleClosed,
+                isHoveringInteractionFrame: true,
+                isGlobalFileDragActive: true,
+                isGlobalDropStripVisible: false
+            )
+        )
+        XCTAssertFalse(
+            NotchWindowMouseEventPolicy.ignoresMouseEvents(
+                notchState: .idleClosed,
+                isHoveringInteractionFrame: true,
+                isGlobalFileDragActive: false,
+                isGlobalDropStripVisible: true
+            )
+        )
+    }
+
     @MainActor
     func testWindowCloseDoesNotReleaseARCManagedInstance() {
         let session = ScreenSessionModel(
@@ -77,6 +128,26 @@ final class NotchWindowTests: XCTestCase {
         XCTAssertFalse(window.isReleasedWhenClosed)
 
         window.close()
+    }
+
+    @MainActor
+    func testWindowRemainsAvailableToScreenCaptureAndWindowSharing() {
+        let session = ScreenSessionModel(
+            descriptor: ScreenDescriptor(
+                id: "primary",
+                frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                isPrimary: true
+            )
+        )
+        let pluginManager = PluginManager()
+        let window = NotchWindow(
+            session: session,
+            pluginManager: pluginManager,
+            mouseActivityMonitor: NotchWindowTestMouseActivityMonitor()
+        )
+        defer { window.close() }
+
+        XCTAssertNotEqual(window.sharingType, .none)
     }
 
     @MainActor
@@ -104,6 +175,7 @@ final class NotchWindowTests: XCTestCase {
                 isPrimary: true
             )
         )
+        session.activePluginID = "other"
         let monitor = NotchWindowTestMouseActivityMonitor()
         let dragReader = NotchWindowTestGlobalDragReader(count: 0, changeCount: 10)
         let window = NotchWindow(
@@ -132,6 +204,8 @@ final class NotchWindowTests: XCTestCase {
         _ = monitor.emit(scope: .global, event: event)
 
         XCTAssertEqual(session.globalDropStripState, .hovering(fileCount: 1))
+        XCTAssertEqual(session.activePluginID, SettingsPluginID.notes.rawValue)
+        XCTAssertFalse(window.ignoresMouseEvents)
     }
 
     @MainActor
@@ -311,6 +385,7 @@ final class NotchWindowTests: XCTestCase {
         _ = monitor.emit(scope: .global, event: dragEvent)
 
         XCTAssertEqual(session.globalDropStripState, .inactive)
+        XCTAssertTrue(window.ignoresMouseEvents)
     }
 }
 

@@ -22,6 +22,7 @@ struct ScratchpadMarkdownEditor: NSViewRepresentable {
         let textView = ScratchpadMarkdownTextView()
         textView.delegate = context.coordinator
         textView.onPastedImages = onPastedImages
+        textView.onDroppedFiles = onDroppedFiles
         textView.string = text
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textColor = NSColor.white.withAlphaComponent(0.92)
@@ -56,6 +57,7 @@ struct ScratchpadMarkdownEditor: NSViewRepresentable {
             return
         }
         textView.onPastedImages = onPastedImages
+        textView.onDroppedFiles = onDroppedFiles
         if textView.hasMarkedText() == false, textView.string != text {
             textView.string = text
         }
@@ -80,6 +82,7 @@ struct ScratchpadMarkdownEditor: NSViewRepresentable {
 
 final class ScratchpadMarkdownTextView: NSTextView {
     var onPastedImages: ([NSImage]) -> Void = { _ in }
+    var onDroppedFiles: ([URL]) -> Void = { _ in }
 
     override func paste(_ sender: Any?) {
         let images = NSPasteboard.general.readObjects(
@@ -101,6 +104,23 @@ final class ScratchpadMarkdownTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggedFileURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = draggedFileURLs(from: sender)
+        guard urls.isEmpty == false else {
+            return false
+        }
+        onDroppedFiles(urls)
+        return true
+    }
+
+    private func draggedFileURLs(from sender: NSDraggingInfo) -> [URL] {
+        NotchGlobalSupportedDropFile.supportedURLs(in: sender.draggingPasteboard)
     }
 }
 
