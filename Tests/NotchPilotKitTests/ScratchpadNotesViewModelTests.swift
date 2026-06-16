@@ -142,7 +142,7 @@ final class ScratchpadNotesViewModelTests: XCTestCase {
         try viewModel.flushPendingSave()
 
         XCTAssertEqual(viewModel.selectedNote?.body, "![image.png](attachments/image.png)")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(note.id)/attachments/image.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.noteDirectoryURL(forNoteID: note.id).appendingPathComponent("attachments/image.png").path))
     }
 
     @MainActor

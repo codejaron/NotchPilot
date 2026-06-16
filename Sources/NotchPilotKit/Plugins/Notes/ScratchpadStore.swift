@@ -12,6 +12,8 @@ public struct ScratchpadAttachment: Codable, Equatable, Identifiable, Sendable {
 public struct ScratchpadNoteRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
+    public var directoryName: String
+    public var markdownFileName: String
     public var createdAt: Date
     public var updatedAt: Date
     public var lastOpenedAt: Date?
@@ -110,18 +112,28 @@ public final class ScratchpadStore {
     @discardableResult
     public func createNote(now: Date = Date()) throws -> ScratchpadNote {
         try ensureRootDirectory()
+        var index = try loadIndex()
         let noteID = UUID().uuidString
-        let noteDirectory = directoryURL(forNoteID: noteID)
+        let storageNames = uniqueNoteStorageNames(
+            preferredTitle: ScratchpadNote.untitledTitle,
+            noteID: noteID,
+            index: index
+        )
+        let noteDirectory = directoryURL(forDirectoryName: storageNames.directoryName)
         try fileManager.createDirectory(
             at: noteDirectory.appendingPathComponent("attachments", isDirectory: true),
             withIntermediateDirectories: true
         )
-        try Data().write(to: noteFileURL(forNoteID: noteID), options: .atomic)
+        try Data().write(
+            to: noteDirectory.appendingPathComponent(storageNames.markdownFileName),
+            options: .atomic
+        )
 
-        var index = try loadIndex()
         let record = ScratchpadNoteRecord(
             id: noteID,
             title: ScratchpadNote.untitledTitle,
+            directoryName: storageNames.directoryName,
+            markdownFileName: storageNames.markdownFileName,
             createdAt: now,
             updatedAt: now,
             lastOpenedAt: now,
@@ -142,7 +154,7 @@ public final class ScratchpadStore {
         }
 
         let body: String
-        let noteURL = noteFileURL(forNoteID: noteID)
+        let noteURL = noteFileURL(for: record)
         if fileManager.fileExists(atPath: noteURL.path) {
             body = try String(contentsOf: noteURL)
         } else {
@@ -159,11 +171,10 @@ public final class ScratchpadStore {
             throw ScratchpadStoreError.noteNotFound(note.id)
         }
 
-        try ensureNoteDirectory(note.id)
-        try Data(note.body.utf8).write(to: noteFileURL(forNoteID: note.id), options: .atomic)
-
         var record = index.notes[recordIndex]
         record.title = record.isTitleManuallySet ? record.title : ScratchpadNote.derivedTitle(from: note.body)
+        record = try synchronizeStorage(for: record, in: index)
+        try Data(note.body.utf8).write(to: noteFileURL(for: record), options: .atomic)
         record.updatedAt = now
         index.notes[recordIndex] = record
         sortNotesInIndex(&index)
@@ -185,11 +196,12 @@ public final class ScratchpadStore {
             : title.trimmingCharacters(in: .whitespacesAndNewlines)
         record.updatedAt = now
         record.isTitleManuallySet = true
+        record = try synchronizeStorage(for: record, in: index)
         index.notes[recordIndex] = record
         sortNotesInIndex(&index)
         try saveIndex(index)
 
-        let body = try String(contentsOf: noteFileURL(forNoteID: noteID))
+        let body = try String(contentsOf: noteFileURL(for: record))
         return ScratchpadNote(record: record, body: body)
     }
 
@@ -223,13 +235,16 @@ public final class ScratchpadStore {
 
     public func deleteNote(noteID: String) throws {
         var index = try loadIndex()
+        let record = index.notes.first { $0.id == noteID }
         index.notes.removeAll { $0.id == noteID }
         if index.lastOpenedNoteID == noteID {
             index.lastOpenedNoteID = index.notes.max(by: { $0.updatedAt < $1.updatedAt })?.id
         }
-        let noteDirectory = directoryURL(forNoteID: noteID)
-        if fileManager.fileExists(atPath: noteDirectory.path) {
-            try fileManager.removeItem(at: noteDirectory)
+        if let record {
+            let noteDirectory = directoryURL(for: record)
+            if fileManager.fileExists(atPath: noteDirectory.path) {
+                try fileManager.removeItem(at: noteDirectory)
+            }
         }
         try saveIndex(index)
     }
@@ -244,8 +259,14 @@ public final class ScratchpadStore {
             throw ScratchpadStoreError.attachmentSourceMissing(sourceURL.path)
         }
 
-        try ensureNoteDirectory(noteID)
-        let attachmentsDirectory = attachmentsDirectoryURL(forNoteID: noteID)
+        var index = try loadIndex()
+        guard let recordIndex = index.notes.firstIndex(where: { $0.id == noteID }) else {
+            throw ScratchpadStoreError.noteNotFound(noteID)
+        }
+        let record = index.notes[recordIndex]
+
+        try ensureNoteDirectory(record)
+        let attachmentsDirectory = attachmentsDirectoryURL(for: record)
         try fileManager.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
 
         let destinationFileName = uniqueAttachmentFileName(
@@ -265,10 +286,6 @@ public final class ScratchpadStore {
             createdAt: now
         )
 
-        var index = try loadIndex()
-        guard let recordIndex = index.notes.firstIndex(where: { $0.id == noteID }) else {
-            throw ScratchpadStoreError.noteNotFound(noteID)
-        }
         index.notes[recordIndex].attachments.append(attachment)
         index.notes[recordIndex].updatedAt = now
         try saveIndex(index)
@@ -284,8 +301,14 @@ public final class ScratchpadStore {
         originalURLString: String? = nil,
         now: Date = Date()
     ) throws -> ScratchpadAttachment {
-        try ensureNoteDirectory(noteID)
-        let attachmentsDirectory = attachmentsDirectoryURL(forNoteID: noteID)
+        var index = try loadIndex()
+        guard let recordIndex = index.notes.firstIndex(where: { $0.id == noteID }) else {
+            throw ScratchpadStoreError.noteNotFound(noteID)
+        }
+        let record = index.notes[recordIndex]
+
+        try ensureNoteDirectory(record)
+        let attachmentsDirectory = attachmentsDirectoryURL(for: record)
         try fileManager.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
 
         let destinationFileName = uniqueAttachmentFileName(
@@ -304,10 +327,6 @@ public final class ScratchpadStore {
             createdAt: now
         )
 
-        var index = try loadIndex()
-        guard let recordIndex = index.notes.firstIndex(where: { $0.id == noteID }) else {
-            throw ScratchpadStoreError.noteNotFound(noteID)
-        }
         index.notes[recordIndex].attachments.append(attachment)
         index.notes[recordIndex].updatedAt = now
         try saveIndex(index)
@@ -316,7 +335,11 @@ public final class ScratchpadStore {
     }
 
     public func noteDirectoryURL(forNoteID noteID: String) -> URL {
-        directoryURL(forNoteID: noteID)
+        if let record = try? loadIndex().notes.first(where: { $0.id == noteID }) {
+            return directoryURL(for: record)
+        }
+
+        return directoryURL(forDirectoryName: noteID)
     }
 
     public static func externalMarkdownFileURLs(in body: String) -> [URL] {
@@ -425,10 +448,10 @@ public final class ScratchpadStore {
         )
     }
 
-    private func ensureNoteDirectory(_ noteID: String) throws {
+    private func ensureNoteDirectory(_ record: ScratchpadNoteRecord) throws {
         try ensureRootDirectory()
         try fileManager.createDirectory(
-            at: directoryURL(forNoteID: noteID).appendingPathComponent("attachments", isDirectory: true),
+            at: directoryURL(for: record).appendingPathComponent("attachments", isDirectory: true),
             withIntermediateDirectories: true
         )
     }
@@ -467,18 +490,124 @@ public final class ScratchpadStore {
         return candidate
     }
 
-    private func directoryURL(forNoteID noteID: String) -> URL {
+    private func synchronizeStorage(
+        for record: ScratchpadNoteRecord,
+        in index: ScratchpadIndex
+    ) throws -> ScratchpadNoteRecord {
+        var updated = record
+        let storageNames = uniqueNoteStorageNames(
+            preferredTitle: updated.title,
+            noteID: updated.id,
+            index: index
+        )
+        let currentDirectory = directoryURL(for: updated)
+        let targetDirectory = directoryURL(forDirectoryName: storageNames.directoryName)
+
+        try ensureRootDirectory()
+
+        if currentDirectory.path != targetDirectory.path {
+            if fileManager.fileExists(atPath: currentDirectory.path) {
+                try fileManager.moveItem(at: currentDirectory, to: targetDirectory)
+            } else {
+                try fileManager.createDirectory(
+                    at: targetDirectory.appendingPathComponent("attachments", isDirectory: true),
+                    withIntermediateDirectories: true
+                )
+            }
+        } else {
+            try fileManager.createDirectory(
+                at: targetDirectory.appendingPathComponent("attachments", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+
+        let currentMarkdownURL = targetDirectory.appendingPathComponent(updated.markdownFileName)
+        let targetMarkdownURL = targetDirectory.appendingPathComponent(storageNames.markdownFileName)
+        if currentMarkdownURL.path != targetMarkdownURL.path,
+           fileManager.fileExists(atPath: currentMarkdownURL.path) {
+            try fileManager.moveItem(at: currentMarkdownURL, to: targetMarkdownURL)
+        } else if fileManager.fileExists(atPath: targetMarkdownURL.path) == false {
+            try Data().write(to: targetMarkdownURL, options: .atomic)
+        }
+
+        updated.directoryName = storageNames.directoryName
+        updated.markdownFileName = storageNames.markdownFileName
+        return updated
+    }
+
+    private func uniqueNoteStorageNames(
+        preferredTitle: String,
+        noteID: String,
+        index: ScratchpadIndex
+    ) -> (directoryName: String, markdownFileName: String) {
+        let baseName = Self.fileSystemNameStem(for: preferredTitle)
+        let currentDirectoryName = index.notes.first(where: { $0.id == noteID })?.directoryName
+
+        func candidateName(forSuffix suffix: Int?) -> String {
+            suffix.map { "\(baseName) \($0)" } ?? baseName
+        }
+
+        var candidate = candidateName(forSuffix: nil)
+        var suffix = 2
+        while noteStorageNameExists(candidate, excludingNoteID: noteID, currentDirectoryName: currentDirectoryName, index: index) {
+            candidate = candidateName(forSuffix: suffix)
+            suffix += 1
+        }
+
+        return (candidate, "\(candidate).md")
+    }
+
+    private func noteStorageNameExists(
+        _ directoryName: String,
+        excludingNoteID noteID: String,
+        currentDirectoryName: String?,
+        index: ScratchpadIndex
+    ) -> Bool {
+        if index.notes.contains(where: { $0.id != noteID && $0.directoryName == directoryName }) {
+            return true
+        }
+
+        guard currentDirectoryName != directoryName else {
+            return false
+        }
+
+        return fileManager.fileExists(atPath: directoryURL(forDirectoryName: directoryName).path)
+    }
+
+    private static func fileSystemNameStem(for title: String) -> String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = trimmedTitle.isEmpty ? ScratchpadNote.untitledTitle : trimmedTitle
+        let sanitizedScalars = source.unicodeScalars.map { scalar -> Character in
+            if scalar.value < 32 || scalar == "/" || scalar == ":" {
+                return " "
+            }
+            return Character(scalar)
+        }
+        let sanitized = String(sanitizedScalars)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.isEmpty == false }
+            .joined(separator: " ")
+
+        let fallback = sanitized.isEmpty ? ScratchpadNote.untitledTitle : sanitized
+        return fallback.count <= 80 ? fallback : String(fallback.prefix(80))
+    }
+
+    private func directoryURL(for record: ScratchpadNoteRecord) -> URL {
+        directoryURL(forDirectoryName: record.directoryName)
+    }
+
+    private func directoryURL(forDirectoryName directoryName: String) -> URL {
         rootURL
             .appendingPathComponent("notes", isDirectory: true)
-            .appendingPathComponent(noteID, isDirectory: true)
+            .appendingPathComponent(directoryName, isDirectory: true)
     }
 
-    private func noteFileURL(forNoteID noteID: String) -> URL {
-        directoryURL(forNoteID: noteID).appendingPathComponent("note.md")
+    private func noteFileURL(for record: ScratchpadNoteRecord) -> URL {
+        directoryURL(for: record).appendingPathComponent(record.markdownFileName)
     }
 
-    private func attachmentsDirectoryURL(forNoteID noteID: String) -> URL {
-        directoryURL(forNoteID: noteID).appendingPathComponent("attachments", isDirectory: true)
+    private func attachmentsDirectoryURL(for record: ScratchpadNoteRecord) -> URL {
+        directoryURL(for: record).appendingPathComponent("attachments", isDirectory: true)
     }
 }
 

@@ -54,10 +54,14 @@ final class ScratchpadStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.updatedAt, updatedAt)
         XCTAssertEqual(reloaded.lastOpenedAt, openedAt)
         XCTAssertEqual(index.lastOpenedNoteID, note.id)
+        let record = try XCTUnwrap(index.notes.first(where: { $0.id == note.id }))
+        XCTAssertEqual(record.directoryName, "Project Plan")
+        XCTAssertEqual(record.markdownFileName, "Project Plan.md")
         XCTAssertEqual(
-            try String(contentsOf: rootURL.appendingPathComponent("notes/\(note.id)/note.md")),
+            try String(contentsOf: rootURL.appendingPathComponent("notes/Project Plan/Project Plan.md")),
             "# Project Plan\n\nShip the notes plugin."
         )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Untitled").path))
     }
 
     func testManualTitleSurvivesBodyEdits() throws {
@@ -70,15 +74,53 @@ final class ScratchpadStoreTests: XCTestCase {
 
         XCTAssertEqual(note.title, "Manual Name")
         XCTAssertTrue(note.isTitleManuallySet)
+        XCTAssertEqual(
+            try String(contentsOf: rootURL.appendingPathComponent("notes/Manual Name/Manual Name.md")),
+            "# Body Title\nContent"
+        )
+    }
+
+    func testDuplicateTitlesUseFinderStyleNumericSuffixes() throws {
+        let store = ScratchpadStore(rootURL: rootURL)
+        let first = try store.createNote(now: Date(timeIntervalSince1970: 10))
+        let second = try store.createNote(now: Date(timeIntervalSince1970: 20))
+
+        _ = try store.renameNote(noteID: first.id, title: "Project", now: Date(timeIntervalSince1970: 30))
+        _ = try store.renameNote(noteID: second.id, title: "Project", now: Date(timeIntervalSince1970: 40))
+
+        let index = try store.loadIndex()
+        let firstRecord = try XCTUnwrap(index.notes.first(where: { $0.id == first.id }))
+        let secondRecord = try XCTUnwrap(index.notes.first(where: { $0.id == second.id }))
+
+        XCTAssertEqual(firstRecord.directoryName, "Project")
+        XCTAssertEqual(firstRecord.markdownFileName, "Project.md")
+        XCTAssertEqual(secondRecord.directoryName, "Project 2")
+        XCTAssertEqual(secondRecord.markdownFileName, "Project 2.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Project/Project.md").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Project 2/Project 2.md").path))
+    }
+
+    func testTitleBackedPathsAreSanitizedForFileSystemNames() throws {
+        let store = ScratchpadStore(rootURL: rootURL)
+        let note = try store.createNote(now: Date(timeIntervalSince1970: 10))
+
+        _ = try store.renameNote(noteID: note.id, title: "  Plan/Ship:Now\nToday  ", now: Date(timeIntervalSince1970: 20))
+
+        let record = try XCTUnwrap(try store.loadIndex().notes.first(where: { $0.id == note.id }))
+        XCTAssertEqual(record.title, "Plan/Ship:Now\nToday")
+        XCTAssertEqual(record.directoryName, "Plan Ship Now Today")
+        XCTAssertEqual(record.markdownFileName, "Plan Ship Now Today.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Plan Ship Now Today/Plan Ship Now Today.md").path))
     }
 
     func testBlankUntitledNoteIsDiscardedWhenPristine() throws {
         let store = ScratchpadStore(rootURL: rootURL)
         let note = try store.createNote(now: Date(timeIntervalSince1970: 10))
+        let noteDirectory = store.noteDirectoryURL(forNoteID: note.id)
 
         XCTAssertTrue(try store.discardIfPristine(noteID: note.id))
         XCTAssertNil(try store.loadNote(id: note.id))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(note.id)").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: noteDirectory.path))
     }
 
     func testBlankManualTitleNoteIsNotDiscarded() throws {
@@ -110,8 +152,8 @@ final class ScratchpadStoreTests: XCTestCase {
 
         XCTAssertEqual(first.relativePath, "attachments/diagram.png")
         XCTAssertEqual(second.relativePath, "attachments/diagram 2.png")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(note.id)/attachments/diagram.png").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(note.id)/attachments/diagram 2.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.noteDirectoryURL(forNoteID: note.id).appendingPathComponent("attachments/diagram.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.noteDirectoryURL(forNoteID: note.id).appendingPathComponent("attachments/diagram 2.png").path))
         XCTAssertEqual(try store.loadNote(id: note.id)?.attachments.map(\.relativePath), [
             "attachments/diagram.png",
             "attachments/diagram 2.png",
@@ -133,7 +175,7 @@ final class ScratchpadStoreTests: XCTestCase {
         XCTAssertEqual(result.migratedCount, 1)
         XCTAssertEqual(result.failedCount, 1)
         XCTAssertEqual(migrated.body, "[Sample](attachments/sample file.txt)\n[Missing](\(missing.path))")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(note.id)/attachments/sample file.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.noteDirectoryURL(forNoteID: note.id).appendingPathComponent("attachments/sample file.txt").path))
     }
 
     func testExternalMarkdownFileLinkScannerReportsMissingAbsoluteFiles() throws {
