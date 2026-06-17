@@ -240,6 +240,11 @@ public struct NotchContentView: View {
         let tabs = NotchPluginTabCollection(plugins: plugins)
         let resolvedActiveID = tabs.resolvedTabID(session.activePluginID)
         let activeSelection = activeSelection(in: tabs, resolvedActiveID: resolvedActiveID)
+        let contentTopAccessory = headerAccessory(
+            for: activeSelection,
+            context: context,
+            placement: .contentTop
+        )
 
         return VStack(alignment: .leading, spacing: 12) {
             headerRow(
@@ -248,11 +253,19 @@ public struct NotchContentView: View {
                 context: context
             )
 
+            if let contentTopAccessory {
+                contentTopAccessoryRow(contentTopAccessory)
+            }
+
             switch activeSelection {
             case .group(let group):
                 groupContentViewport(group, context: context)
             case .plugin(let activePlugin):
-                pluginContentViewport(activePlugin, context: context)
+                pluginContentViewport(
+                    activePlugin,
+                    context: context,
+                    includesContentTopAccessory: contentTopAccessory != nil
+                )
             case .none:
                 NotchPilotHUDPanel(cornerRadius: 28) {
                     Text(AppStrings.text(.noPluginsEnabled, language: language))
@@ -271,7 +284,8 @@ public struct NotchContentView: View {
 
     private func pluginContentViewport(
         _ plugin: any NotchPlugin,
-        context: NotchContext
+        context: NotchContext,
+        includesContentTopAccessory: Bool = false
     ) -> some View {
         plugin.contentView(context: context)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -279,8 +293,14 @@ public struct NotchContentView: View {
             .padding(.horizontal, expandedSafeHorizontalPadding)
             .frame(
                 maxWidth: .infinity,
-                minHeight: NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: context.notchGeometry.expandedSize.height),
-                maxHeight: NotchExpandedLayout.pluginViewportHeight(forDisplayHeight: context.notchGeometry.expandedSize.height),
+                minHeight: NotchExpandedLayout.pluginViewportHeight(
+                    forDisplayHeight: context.notchGeometry.expandedSize.height,
+                    includesContentTopAccessory: includesContentTopAccessory
+                ),
+                maxHeight: NotchExpandedLayout.pluginViewportHeight(
+                    forDisplayHeight: context.notchGeometry.expandedSize.height,
+                    includesContentTopAccessory: includesContentTopAccessory
+                ),
                 alignment: .topLeading
             )
             .clipped()
@@ -329,7 +349,11 @@ public struct NotchContentView: View {
 
             Spacer(minLength: 0)
 
-            if let accessory = headerAccessory(for: activeSelection, context: context) {
+            if let accessory = headerAccessory(
+                for: activeSelection,
+                context: context,
+                placement: .headerRow
+            ) {
                 accessory
                     .layoutPriority(1)
             }
@@ -340,16 +364,40 @@ public struct NotchContentView: View {
         .padding(.horizontal, expandedSafeHorizontalPadding)
     }
 
+    private func contentTopAccessoryRow(_ accessory: AnyView) -> some View {
+        accessory
+            .layoutPriority(1)
+            .frame(maxWidth: .infinity, alignment: contentTopAccessoryFrameAlignment)
+            .frame(height: NotchExpandedLayout.contentTopAccessoryHeight)
+            .padding(.horizontal, expandedSafeHorizontalPadding)
+    }
+
+    private var contentTopAccessoryFrameAlignment: Alignment {
+        switch NotchExpandedLayout.contentTopAccessoryHorizontalAlignment {
+        case .leading:
+            return .leading
+        }
+    }
+
     private func headerAccessory(
         for activeSelection: ActiveTabSelection,
-        context: NotchContext
+        context: NotchContext,
+        placement: NotchPluginHeaderAccessoryPlacement
     ) -> AnyView? {
         switch activeSelection {
         case .group(let group):
+            guard placement == .headerRow else {
+                return nil
+            }
             return group.headerAccessory()
         case .plugin(let plugin):
-            return (plugin as? any NotchPluginHeaderAccessoryRendering)?
-                .headerAccessory(context: context, isOpenPinned: session.isOpenPinned)
+            guard let renderer = plugin as? any NotchPluginHeaderAccessoryRendering,
+                  renderer.headerAccessoryPlacement == placement
+            else {
+                return nil
+            }
+
+            return renderer.headerAccessory(context: context, isOpenPinned: session.isOpenPinned)
         case .none:
             return nil
         }

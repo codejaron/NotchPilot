@@ -87,9 +87,9 @@ final class ScratchpadNotesViewModelTests: XCTestCase {
         try viewModel.flushPendingSave()
         let reloaded = try XCTUnwrap(store.loadNote(id: note.id))
 
-        XCTAssertEqual(reloaded.title, "Fresh Title")
+        XCTAssertEqual(reloaded.title, "Fresh Ti")
         XCTAssertEqual(reloaded.body, "# Fresh Title\nBody")
-        XCTAssertEqual(viewModel.selectedNote?.title, "Fresh Title")
+        XCTAssertEqual(viewModel.selectedNote?.title, "Fresh Ti")
     }
 
     @MainActor

@@ -44,10 +44,17 @@ extension NotchPluginTabGroupRendering {
 
 @MainActor
 protocol NotchPluginHeaderAccessoryRendering: AnyObject {
+    var headerAccessoryPlacement: NotchPluginHeaderAccessoryPlacement { get }
     func headerAccessory(context: NotchContext, isOpenPinned: Bool) -> AnyView?
 }
 
+enum NotchPluginHeaderAccessoryPlacement: Equatable {
+    case headerRow
+    case contentTop
+}
+
 extension NotchPluginHeaderAccessoryRendering {
+    var headerAccessoryPlacement: NotchPluginHeaderAccessoryPlacement { .headerRow }
     func headerAccessory(context: NotchContext, isOpenPinned: Bool) -> AnyView? { nil }
 }
 

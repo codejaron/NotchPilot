@@ -279,6 +279,11 @@ private struct ScratchpadNoteDetailView: View {
     }
 }
 
+enum ScratchpadNotesHeaderLayout {
+    static let minWidth: CGFloat = 360
+    static let maxWidth: CGFloat = .infinity
+}
+
 struct ScratchpadNotesHeaderAccessory: View {
     @ObservedObject private var generalSettings = SettingsStore.shared.general
     @ObservedObject var viewModel: ScratchpadNotesViewModel
@@ -357,7 +362,10 @@ struct ScratchpadNotesHeaderAccessory: View {
             }
             .menuStyle(.borderlessButton)
         }
-        .frame(minWidth: 360, maxWidth: 620)
+        .frame(
+            minWidth: ScratchpadNotesHeaderLayout.minWidth,
+            maxWidth: ScratchpadNotesHeaderLayout.maxWidth
+        )
         .confirmationDialog(
             AppStrings.text(.deleteNoteQuestion, language: language),
             isPresented: Binding(

@@ -48,17 +48,17 @@ final class ScratchpadStoreTests: XCTestCase {
         let reloaded = try XCTUnwrap(reloadedStore.loadNote(id: note.id))
         let index = try reloadedStore.loadIndex()
 
-        XCTAssertEqual(reloaded.title, "Project Plan")
+        XCTAssertEqual(reloaded.title, "Project")
         XCTAssertEqual(reloaded.body, "# Project Plan\n\nShip the notes plugin.")
         XCTAssertEqual(reloaded.createdAt, createdAt)
         XCTAssertEqual(reloaded.updatedAt, updatedAt)
         XCTAssertEqual(reloaded.lastOpenedAt, openedAt)
         XCTAssertEqual(index.lastOpenedNoteID, note.id)
         let record = try XCTUnwrap(index.notes.first(where: { $0.id == note.id }))
-        XCTAssertEqual(record.directoryName, "Project Plan")
-        XCTAssertEqual(record.markdownFileName, "Project Plan.md")
+        XCTAssertEqual(record.directoryName, "Project")
+        XCTAssertEqual(record.markdownFileName, "Project.md")
         XCTAssertEqual(
-            try String(contentsOf: rootURL.appendingPathComponent("notes/Project Plan/Project Plan.md")),
+            try String(contentsOf: rootURL.appendingPathComponent("notes/Project/Project.md")),
             "# Project Plan\n\nShip the notes plugin."
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Untitled").path))
@@ -111,6 +111,25 @@ final class ScratchpadStoreTests: XCTestCase {
         XCTAssertEqual(record.directoryName, "Plan Ship Now Today")
         XCTAssertEqual(record.markdownFileName, "Plan Ship Now Today.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/Plan Ship Now Today/Plan Ship Now Today.md").path))
+    }
+
+    func testDerivedTitleBackedFileNamesAreLimitedToReadableLength() throws {
+        let store = ScratchpadStore(rootURL: rootURL)
+        var note = try store.createNote(now: Date(timeIntervalSince1970: 10))
+        let longFirstSentence = "This is a very long first sentence that should not become an equally long file name"
+        let expectedTitle = String(longFirstSentence.prefix(ScratchpadNote.maximumDerivedTitleLength))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        XCTAssertEqual(ScratchpadNote.maximumDerivedTitleLength, 8)
+
+        note.body = "# \(longFirstSentence)\n\nMore detail follows."
+        note = try store.saveNote(note, now: Date(timeIntervalSince1970: 20))
+
+        let record = try XCTUnwrap(try store.loadIndex().notes.first(where: { $0.id == note.id }))
+        XCTAssertEqual(note.title, expectedTitle)
+        XCTAssertEqual(record.directoryName, expectedTitle)
+        XCTAssertEqual(record.markdownFileName, "\(expectedTitle).md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("notes/\(expectedTitle)/\(expectedTitle).md").path))
     }
 
     func testBlankUntitledNoteIsDiscardedWhenPristine() throws {

@@ -48,6 +48,19 @@ final class NotchLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(NotchExpandedLayout.safeHorizontalPadding, 27, accuracy: 0.1)
     }
 
+    func testExpandedPluginViewportAccountsForContentTopAccessory() {
+        let viewportHeight = NotchExpandedLayout.pluginViewportHeight(
+            forDisplayHeight: 240,
+            includesContentTopAccessory: true
+        )
+
+        XCTAssertEqual(viewportHeight, 146, accuracy: 0.1)
+    }
+
+    func testContentTopAccessoryAlignsWithLeadingPluginContentEdge() {
+        XCTAssertEqual(NotchExpandedLayout.contentTopAccessoryHorizontalAlignment, .leading)
+    }
+
     func testExpandedPluginTabsUseCompactShellOwnedSize() {
         XCTAssertEqual(NotchExpandedLayout.pluginTabSize.width, 34, accuracy: 0.1)
         XCTAssertEqual(NotchExpandedLayout.pluginTabSize.height, 24, accuracy: 0.1)

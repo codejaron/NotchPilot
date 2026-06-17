@@ -79,6 +79,18 @@ final class NotesPluginTests: XCTestCase {
     }
 
     @MainActor
+    func testHeaderAccessoryRendersBelowTabRow() {
+        let plugin = NotesPlugin(settingsStore: makeSettingsStore())
+        let renderer = plugin as any NotchPluginHeaderAccessoryRendering
+
+        XCTAssertEqual(renderer.headerAccessoryPlacement, .contentTop)
+    }
+
+    func testHeaderAccessoryFillsAvailableContentWidth() {
+        XCTAssertEqual(ScratchpadNotesHeaderLayout.maxWidth, .infinity)
+    }
+
+    @MainActor
     func testIngestDroppedFilesCreatesNoteAndInsertsMarkdown() throws {
         let scratchpadStore = ScratchpadStore(rootURL: tempHomeURL.appendingPathComponent("Scratchpad", isDirectory: true))
         let plugin = NotesPlugin(settingsStore: makeSettingsStore(), store: scratchpadStore)

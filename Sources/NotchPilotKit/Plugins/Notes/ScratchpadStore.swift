@@ -23,6 +23,8 @@ public struct ScratchpadNoteRecord: Codable, Equatable, Identifiable, Sendable {
 
 public struct ScratchpadNote: Equatable, Identifiable, Sendable {
     public static let untitledTitle = "Untitled"
+    static let maximumDerivedTitleLength = 8
+    static let maximumFileSystemNameStemLength = 80
 
     public var id: String
     public var title: String
@@ -48,11 +50,12 @@ public struct ScratchpadNote: Equatable, Identifiable, Sendable {
             return untitledTitle
         }
 
-        if strippedHeading.count <= 80 {
+        if strippedHeading.count <= maximumDerivedTitleLength {
             return strippedHeading
         }
 
-        return String(strippedHeading.prefix(80))
+        return String(strippedHeading.prefix(maximumDerivedTitleLength))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -589,7 +592,9 @@ public final class ScratchpadStore {
             .joined(separator: " ")
 
         let fallback = sanitized.isEmpty ? ScratchpadNote.untitledTitle : sanitized
-        return fallback.count <= 80 ? fallback : String(fallback.prefix(80))
+        return fallback.count <= ScratchpadNote.maximumFileSystemNameStemLength
+            ? fallback
+            : String(fallback.prefix(ScratchpadNote.maximumFileSystemNameStemLength))
     }
 
     private func directoryURL(for record: ScratchpadNoteRecord) -> URL {

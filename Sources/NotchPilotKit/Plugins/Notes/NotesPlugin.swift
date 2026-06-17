@@ -52,6 +52,10 @@ public final class NotesPlugin: NotchPlugin, NotchPluginHeaderAccessoryRendering
         )
     }
 
+    var headerAccessoryPlacement: NotchPluginHeaderAccessoryPlacement {
+        .contentTop
+    }
+
     func headerAccessory(context: NotchContext, isOpenPinned: Bool) -> AnyView? {
         AnyView(
             ScratchpadNotesHeaderAccessory(
