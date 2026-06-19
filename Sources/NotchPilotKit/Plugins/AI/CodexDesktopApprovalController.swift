@@ -137,10 +137,6 @@ final class CodexDesktopApprovalController {
                 return nil
             }
             pendingApproval = makeMCPToolApprovalElicitation(from: request, delivery: delivery)
-        case .legacyExecCommand:
-            pendingApproval = makeLegacyCommandApproval(from: request, delivery: delivery)
-        case .legacyApplyPatch:
-            pendingApproval = makeLegacyPatchApproval(from: request, delivery: delivery)
         }
 
         store(pendingApproval)
@@ -514,85 +510,6 @@ final class CodexDesktopApprovalController {
         return makeStaticOptions(request: request, titlesAndResults: titlesAndResults)
     }
 
-    private func makeLegacyCommandApproval(
-        from request: CodexDesktopIPCRequestFrame,
-        delivery: Delivery
-    ) -> PendingApproval {
-        let decisions: [JSONValue] = [
-            .string("approved"),
-            .object([
-                "approved_execpolicy_amendment": .object([
-                    "proposed_execpolicy_amendment": .array(
-                        (request.params.arrayValue(at: ["command"]) ?? []).map { value in
-                            .string(value.stringValue ?? "")
-                        }
-                    ),
-                ]),
-            ]),
-            .string("approved_for_session"),
-            .string("denied"),
-        ]
-        let options = makeOptions(
-            decisions: decisions,
-            method: .legacyExecCommand,
-            request: request
-        )
-        return makePendingApproval(
-            request: request,
-            summary: request.params.stringValue(at: ["reason"]) ?? "Would you like to run the following command?",
-            preview: legacyCommandPreview(from: request.params),
-            threadID: request.params.stringValue(at: ["conversationId"]),
-            options: options,
-            textInput: nil,
-            selectionMode: .optionResults(
-                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
-            ),
-            cancelResult: .object([
-                "decision": .string("abort"),
-            ]),
-            delivery: delivery,
-            quickActions: CodexSurfaceQuickActions(
-                approveOptionID: optionID(in: options, matchingDecision: "approved"),
-                rejectOptionID: optionID(in: options, matchingDecision: "denied")
-            )
-        )
-    }
-
-    private func makeLegacyPatchApproval(
-        from request: CodexDesktopIPCRequestFrame,
-        delivery: Delivery
-    ) -> PendingApproval {
-        let decisions: [JSONValue] = [
-            .string("approved"),
-            .string("approved_for_session"),
-            .string("denied"),
-        ]
-        let options = makeOptions(
-            decisions: decisions,
-            method: .legacyApplyPatch,
-            request: request
-        )
-        return makePendingApproval(
-            request: request,
-            summary: request.params.stringValue(at: ["reason"]) ?? "Would you like to make the following edits?",
-            preview: legacyPatchPreview(from: request.params),
-            threadID: request.params.stringValue(at: ["conversationId"]),
-            options: options,
-            textInput: nil,
-            selectionMode: .optionResults(
-                Dictionary(uniqueKeysWithValues: options.map { ($0.option.id, $0.result) })
-            ),
-            cancelResult: .object([
-                "decision": .string("abort"),
-            ]),
-            delivery: delivery,
-            quickActions: CodexSurfaceQuickActions(
-                approveOptionID: optionID(in: options, matchingDecision: "approved"),
-                rejectOptionID: optionID(in: options, matchingDecision: "denied")
-            )
-        )
-    }
-
     private func makeOptions(
         decisions: [JSONValue],
         method: SupportedMethod,
@@ -792,8 +709,6 @@ final class CodexDesktopApprovalController {
             decision = .null
         case .mcpServerElicitation:
             return mcpElicitationResult(action: "decline")
-        case .legacyExecCommand, .legacyApplyPatch:
-            decision = .string("abort")
         }
 
         return .object([
@@ -863,19 +778,11 @@ final class CodexDesktopApprovalController {
                 return "Yes"
             case (.commandExecution, "acceptForSession"):
                 return "Yes, and don't ask again for this command in this session"
-            case (.legacyExecCommand, "approved_for_session"):
-                return "Yes, and don't ask again for this command in this session"
             case (.fileChange, "acceptForSession"):
-                return "Yes, and don't ask again for these files"
-            case (.legacyApplyPatch, "approved_for_session"):
                 return "Yes, and don't ask again for these files"
             case (.commandExecution, "decline"):
                 return "No, continue without running it"
-            case (.legacyExecCommand, "denied"):
-                return "No, continue without running it"
             case (.fileChange, "decline"):
-                return "No, continue without applying them"
-            case (.legacyApplyPatch, "denied"):
                 return "No, continue without applying them"
             case (_, "cancel"), (_, "abort"):
                 return nil
@@ -1026,8 +933,6 @@ final class CodexDesktopApprovalController {
             return false
         case .mcpServerElicitation:
             return false
-        case .legacyExecCommand, .legacyApplyPatch:
-            return rawDecision == "denied" || rawDecision == "abort"
         }
     }
 
@@ -1428,29 +1333,4 @@ final class CodexDesktopApprovalController {
         ])
     }
 
-    private func legacyCommandPreview(from params: [String: JSONValue]) -> String? {
-        let components = params.arrayValue(at: ["command"])?.compactMap(\.stringValue) ?? []
-        return components.isEmpty ? nil : components.joined(separator: " ")
-    }
-
-    private func legacyPatchPreview(from params: [String: JSONValue]) -> String? {
-        if let grantRoot = params.stringValue(at: ["grantRoot"]), grantRoot.isEmpty == false {
-            return grantRoot
-        }
-
-        guard let fileChanges = params.objectValue(at: ["fileChanges"]) else {
-            return nil
-        }
-
-        for (path, change) in fileChanges.sorted(by: { $0.key < $1.key }) {
-            if let unifiedDiff = change.objectValue?.stringValue(at: ["unified_diff"]), unifiedDiff.isEmpty == false {
-                return unifiedDiff
-            }
-            if let content = change.objectValue?.stringValue(at: ["content"]), content.isEmpty == false {
-                return "\(path)\n\(content)"
-            }
-        }
-
-        return nil
-    }
 }

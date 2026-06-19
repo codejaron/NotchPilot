@@ -6,8 +6,6 @@ enum CodexDesktopApprovalMethod: String {
     case permissions = "item/permissions/requestApproval"
     case toolRequestUserInput = "item/tool/requestUserInput"
     case mcpServerElicitation = "mcpServer/elicitation/request"
-    case legacyExecCommand = "execCommandApproval"
-    case legacyApplyPatch = "applyPatchApproval"
 }
 
 enum CodexDesktopApprovalDelivery: Equatable {
@@ -31,9 +29,7 @@ enum CodexDesktopApprovalRequestRouter {
         case .commandExecution,
              .fileChange,
              .permissions,
-             .toolRequestUserInput,
-             .legacyExecCommand,
-             .legacyApplyPatch:
+             .toolRequestUserInput:
             return true
         }
     }
@@ -62,8 +58,6 @@ enum CodexDesktopApprovalRequestRouter {
             }
 
             return .threadFollower(ownerClientID: ownerClientID, conversationID: conversationID, version: 1)
-        case .legacyExecCommand, .legacyApplyPatch:
-            return nil
         }
     }
 

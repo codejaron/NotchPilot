@@ -54,7 +54,6 @@ public final class SettingsStore: ObservableObject {
         static let devinPluginEnabled = "devin.enabled"
         static let interfaceLanguage = "app.interfaceLanguage"
         static let soundEnabled = "sound.enabled"
-        static let soundVolume = "sound.volume"
         static let soundTaskCompleteVolume = "sound.taskCompleteVolume"
         static let soundInputRequiredVolume = "sound.inputRequiredVolume"
         static let soundActivePackID = "sound.activePackID"
@@ -306,18 +305,10 @@ public final class SettingsStore: ObservableObject {
             defaults.object(forKey: Key.devinPluginEnabled) as? Bool ?? true
         self.soundEnabled =
             defaults.object(forKey: Key.soundEnabled) as? Bool ?? true
-        // Migrate the legacy unified `sound.volume` value: if the user had a
-        // single volume previously, reuse it as the default for both new
-        // sliders so their preference carries over on first launch.
-        let legacySoundVolume = defaults.object(forKey: Key.soundVolume) as? Double
         self.soundTaskCompleteVolume =
-            defaults.object(forKey: Key.soundTaskCompleteVolume) as? Double
-            ?? legacySoundVolume
-            ?? 0.6
+            defaults.object(forKey: Key.soundTaskCompleteVolume) as? Double ?? 0.6
         self.soundInputRequiredVolume =
-            defaults.object(forKey: Key.soundInputRequiredVolume) as? Double
-            ?? legacySoundVolume
-            ?? 0.6
+            defaults.object(forKey: Key.soundInputRequiredVolume) as? Double ?? 0.6
         self.soundActivePackID =
             defaults.string(forKey: Key.soundActivePackID) ?? ""
     }

@@ -331,6 +331,20 @@ public struct HookInstaller {
     }
 
     private func isManagedEntry(_ entry: [String: Any], bridgeScript: String?) -> Bool {
+        managedEntryContainsHook(entry, bridgeScript: bridgeScript)
+    }
+
+    private func managedEntryContainsTimeout(_ entry: [String: Any], bridgeScript: String?) -> Bool {
+        managedEntryContainsHook(entry, bridgeScript: bridgeScript) { hook in
+            hook["timeout"] != nil
+        }
+    }
+
+    private func managedEntryContainsHook(
+        _ entry: [String: Any],
+        bridgeScript: String?,
+        matching predicate: ([String: Any]) -> Bool = { _ in true }
+    ) -> Bool {
         guard let hooks = entry["hooks"] as? [[String: Any]] else {
             return false
         }
@@ -340,23 +354,7 @@ public struct HookInstaller {
             guard let command = hook["command"] as? String else {
                 return false
             }
-            return command.contains(commandNeedle)
-        }
-    }
-
-    private func managedEntryContainsTimeout(_ entry: [String: Any], bridgeScript: String?) -> Bool {
-        guard let hooks = entry["hooks"] as? [[String: Any]] else {
-            return false
-        }
-
-        let commandNeedle = bridgeScript?.isEmpty == false ? bridgeScript! : "notch-bridge.py"
-        return hooks.contains { hook in
-            guard let command = hook["command"] as? String,
-                  command.contains(commandNeedle)
-            else {
-                return false
-            }
-            return hook["timeout"] != nil
+            return command.contains(commandNeedle) && predicate(hook)
         }
     }
 

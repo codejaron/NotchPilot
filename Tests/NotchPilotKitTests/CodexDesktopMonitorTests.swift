@@ -21,22 +21,6 @@ final class CodexDesktopMonitorTests: XCTestCase {
             targetClientID: nil,
             version: 1
         )
-        let legacyExecRequest = CodexDesktopIPCRequestFrame(
-            requestID: "req-1legacy",
-            method: "execCommandApproval",
-            params: [:],
-            sourceClientID: "desktop-client",
-            targetClientID: nil,
-            version: 1
-        )
-        let legacyPatchRequest = CodexDesktopIPCRequestFrame(
-            requestID: "req-1patch",
-            method: "applyPatchApproval",
-            params: [:],
-            sourceClientID: "desktop-client",
-            targetClientID: nil,
-            version: 1
-        )
         let userInputRequest = CodexDesktopIPCRequestFrame(
             requestID: "req-1input",
             method: "item/tool/requestUserInput",
@@ -84,8 +68,6 @@ final class CodexDesktopMonitorTests: XCTestCase {
 
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(approvalRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(fileChangeRequest))
-        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyExecRequest))
-        XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(legacyPatchRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(userInputRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(permissionsRequest))
         XCTAssertTrue(CodexDesktopMonitor.canHandleDiscoveryRequest(mcpToolApprovalRequest))

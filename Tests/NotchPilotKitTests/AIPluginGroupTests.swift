@@ -27,25 +27,6 @@ final class AIPluginGroupTests: XCTestCase {
         XCTAssertTrue(nonAIPlugins.contains(where: { $0.id == "system-monitor" }))
     }
 
-    func testResolvedActivePluginIDMapsLegacyIDsToVirtualTabID() {
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("claude"), "ai")
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("codex"), "ai")
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("devin"), "ai")
-    }
-
-    func testResolvedActivePluginIDPassesThroughOtherIDs() {
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("system-monitor"), "system-monitor")
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("media-playback"), "media-playback")
-    }
-
-    func testResolvedActivePluginIDPassesThroughNil() {
-        XCTAssertNil(AIPluginGroup.resolvedActivePluginID(nil))
-    }
-
-    func testResolvedActivePluginIDIsIdempotentForVirtualTabID() {
-        XCTAssertEqual(AIPluginGroup.resolvedActivePluginID("ai"), "ai")
-    }
-
     func testDockOrderTakesMinimum() {
         let plugins: [any AIPluginRendering] = [ClaudePlugin(), CodexPlugin()]
         XCTAssertEqual(AIPluginGroup.dockOrder(of: plugins), 100)

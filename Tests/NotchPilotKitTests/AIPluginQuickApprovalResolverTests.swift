@@ -141,33 +141,6 @@ final class AIPluginQuickApprovalResolverTests: XCTestCase {
         XCTAssertFalse(quickActions.shouldRender)
     }
 
-    func testCodexLegacyExecQuickRejectUsesDeniedOptionInsteadOfAbortCancel() throws {
-        let controller = CodexDesktopApprovalController()
-        let surface = controller.handle(
-            request: CodexDesktopIPCRequestFrame(
-                requestID: "legacy-exec-quick",
-                method: "execCommandApproval",
-                params: [
-                    "command": .array([.string("swift"), .string("test")]),
-                ],
-                sourceClientID: "desktop-client",
-                targetClientID: nil,
-                version: 1
-            )
-        )
-
-        let quickActions = AIPluginQuickApprovalResolver.actions(for: try XCTUnwrap(surface))
-
-        XCTAssertEqual(
-            quickActions.approve,
-            .codex(optionID: "codex-ipc-legacy-exec-quick-option-0", action: .primary)
-        )
-        XCTAssertEqual(
-            quickActions.reject,
-            .codex(optionID: "codex-ipc-legacy-exec-quick-option-3", action: .primary)
-        )
-    }
-
     private func makeClaudeApproval(
         requestID: String,
         actions: [ApprovalAction]

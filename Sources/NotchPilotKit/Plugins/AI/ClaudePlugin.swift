@@ -651,20 +651,13 @@ public final class ClaudePlugin: AIPluginRendering, AIBridgeFrameHandling {
     }
 
     private func presentSneakPeek(for requestID: String, kind: SneakPeekRequestKind) {
-        guard sneakPeekIDs[requestID] == nil else {
-            return
-        }
-
-        let request = SneakPeekRequest(
+        AIPluginSneakPeekPresenter.present(
             pluginID: id,
-            priority: SneakPeekRequestPriority.ai(for: kind),
-            target: .activeScreen,
+            requestID: requestID,
             kind: kind,
-            isInteractive: true,
-            autoDismissAfter: nil
+            sneakPeekIDs: &sneakPeekIDs,
+            bus: bus
         )
-        sneakPeekIDs[requestID] = request.id
-        bus?.emit(.sneakPeekRequested(request))
     }
 
     private func dismissSneakPeek(for requestID: String) {

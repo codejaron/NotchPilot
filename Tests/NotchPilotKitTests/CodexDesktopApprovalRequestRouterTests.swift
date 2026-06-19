@@ -43,16 +43,6 @@ final class CodexDesktopApprovalRequestRouterTests: XCTestCase {
             targetClientID: nil,
             version: 3
         )
-        let legacyRequest = CodexDesktopIPCRequestFrame(
-            requestID: "legacy-live",
-            method: "execCommandApproval",
-            params: [
-                "threadId": .string("thread-1"),
-            ],
-            sourceClientID: "desktop-client",
-            targetClientID: nil,
-            version: 3
-        )
         let missingThreadRequest = CodexDesktopIPCRequestFrame(
             requestID: "command-no-thread",
             method: "item/commandExecution/requestApproval",
@@ -66,7 +56,6 @@ final class CodexDesktopApprovalRequestRouterTests: XCTestCase {
             CodexDesktopApprovalRequestRouter.liveDelivery(for: liveRequest),
             .threadFollower(ownerClientID: "desktop-client", conversationID: "thread-1", version: 1)
         )
-        XCTAssertNil(CodexDesktopApprovalRequestRouter.liveDelivery(for: legacyRequest))
         XCTAssertNil(CodexDesktopApprovalRequestRouter.liveDelivery(for: missingThreadRequest))
     }
 }

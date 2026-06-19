@@ -169,33 +169,6 @@ public final class CodexPlugin: AIPluginRendering {
         bus = nil
     }
 
-    public func preview(context: NotchContext) -> NotchPluginPreview? {
-        guard isEnabled, shouldRenderCompactPreview else {
-            return nil
-        }
-        guard let metrics = compactMetrics(context: context) else {
-            return nil
-        }
-        let approvalNotice = approvalSneakNotice()
-        let noticeLayout = AIPluginCompactApprovalNoticeLayout(
-            notice: approvalNotice,
-            baseTotalWidth: metrics.totalWidth
-        )
-
-        return NotchPluginPreview(
-            width: noticeLayout.totalWidth,
-            height: context.notchGeometry.compactSize.height + noticeLayout.height,
-            view: AnyView(
-                AIPluginCompactView(
-                    plugin: self,
-                    context: context,
-                    approvalNotice: approvalNotice,
-                    noticeLayout: noticeLayout
-                )
-            )
-        )
-    }
-
     var currentCompactActivity: AIPluginCompactActivity? {
         currentCompactActivity(
             approvalSneakNotificationsEnabled: approvalSneakNotificationsEnabled,
@@ -503,20 +476,13 @@ public final class CodexPlugin: AIPluginRendering {
     }
 
     private func presentSneakPeek(for requestID: String, kind: SneakPeekRequestKind) {
-        guard sneakPeekIDs[requestID] == nil else {
-            return
-        }
-
-        let request = SneakPeekRequest(
+        AIPluginSneakPeekPresenter.present(
             pluginID: id,
-            priority: SneakPeekRequestPriority.ai(for: kind),
-            target: .activeScreen,
+            requestID: requestID,
             kind: kind,
-            isInteractive: true,
-            autoDismissAfter: nil
+            sneakPeekIDs: &sneakPeekIDs,
+            bus: bus
         )
-        sneakPeekIDs[requestID] = request.id
-        bus?.emit(.sneakPeekRequested(request))
     }
 
     private func dismissSneakPeek(for requestID: String) {

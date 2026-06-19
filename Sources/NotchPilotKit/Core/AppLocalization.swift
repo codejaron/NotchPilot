@@ -286,6 +286,15 @@ enum AppStrings {
     }
 
     static func systemMonitorMetricTitle(_ metric: SystemMonitorMetric, language: AppLanguage) -> String {
+        systemMonitorTitle(metric, language: language, zhDiskTitle: "磁盘剩余", englishDiskTitle: "Disk Free")
+    }
+
+    private static func systemMonitorTitle(
+        _ metric: SystemMonitorMetric,
+        language: AppLanguage,
+        zhDiskTitle: String,
+        englishDiskTitle: String
+    ) -> String {
         switch (language, metric) {
         case (_, .cpu):
             return "CPU"
@@ -294,7 +303,7 @@ enum AppStrings {
         case (.zhHans, .network):
             return "网络"
         case (.zhHans, .disk):
-            return "磁盘剩余"
+            return zhDiskTitle
         case (.zhHans, .temperature):
             return "温度"
         case (.zhHans, .battery):
@@ -304,7 +313,7 @@ enum AppStrings {
         case (.english, .network):
             return "Network"
         case (.english, .disk):
-            return "Disk Free"
+            return englishDiskTitle
         case (.english, .temperature):
             return "Temperature"
         case (.english, .battery):
@@ -340,30 +349,7 @@ enum AppStrings {
     }
 
     static func systemMonitorBlockTitle(_ metric: SystemMonitorMetric, language: AppLanguage) -> String {
-        switch (language, metric) {
-        case (_, .cpu):
-            return "CPU"
-        case (.zhHans, .memory):
-            return "内存"
-        case (.zhHans, .network):
-            return "网络"
-        case (.zhHans, .disk):
-            return "系统"
-        case (.zhHans, .temperature):
-            return "温度"
-        case (.zhHans, .battery):
-            return "电量"
-        case (.english, .memory):
-            return "Memory"
-        case (.english, .network):
-            return "Network"
-        case (.english, .disk):
-            return "System"
-        case (.english, .temperature):
-            return "Temperature"
-        case (.english, .battery):
-            return "Battery"
-        }
+        systemMonitorTitle(metric, language: language, zhDiskTitle: "系统", englishDiskTitle: "System")
     }
 
     static func systemMonitorTopItemName(_ name: String, language: AppLanguage) -> String {

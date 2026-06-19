@@ -119,14 +119,6 @@ final class ScratchpadNotesViewModel: ObservableObject {
         try refreshNotes()
     }
 
-    func deleteSelectedNote() throws {
-        guard let noteID = selectedNote?.id else {
-            return
-        }
-
-        try deleteNote(id: noteID)
-    }
-
     func deleteNote(id noteID: String) throws {
         if pendingSave?.noteID == noteID {
             cancelPendingSave()

@@ -103,13 +103,6 @@ public final class SoundManager: ObservableObject {
         }
     }
 
-    /// Changes the active pack and persists the choice.
-    public func setActivePack(id: String) {
-        guard let match = installedPacks.first(where: { $0.id == id }) else { return }
-        activePack = match
-        store.soundActivePackID = id
-    }
-
     /// Validates the folder at `sourceURL` as a CESP pack, copies it into
     /// `~/.openpeon/packs/<id>/`, and rescans installed packs so the new pack
     /// appears in the picker. Returns the loaded pack on success.

@@ -2,6 +2,48 @@ import AppKit
 import SwiftUI
 
 @MainActor
+enum AIPluginSneakPeekPresenter {
+    static func present(
+        pluginID: String,
+        requestID: String,
+        kind: SneakPeekRequestKind,
+        sneakPeekIDs: inout [String: UUID],
+        bus: EventBus?
+    ) {
+        guard sneakPeekIDs[requestID] == nil else {
+            return
+        }
+
+        let request = SneakPeekRequest(
+            pluginID: pluginID,
+            priority: SneakPeekRequestPriority.ai(for: kind),
+            target: .activeScreen,
+            kind: kind,
+            isInteractive: true,
+            autoDismissAfter: nil
+        )
+        sneakPeekIDs[requestID] = request.id
+        bus?.emit(.sneakPeekRequested(request))
+    }
+}
+
+enum AIPluginTokenFormatter {
+    static func compactCount(_ value: Int?) -> String {
+        guard let value else {
+            return "--"
+        }
+
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        }
+        return "\(value)"
+    }
+}
+
+@MainActor
 protocol AIPluginRendering: NotchPlugin, NotchPluginTabGroupRendering {
     var sessions: [AISession] { get }
     var pendingApprovals: [PendingApproval] { get }
@@ -195,17 +237,7 @@ extension AIPluginRendering {
     }
 
     func formattedTokenCount(_ value: Int?) -> String {
-        guard let value else {
-            return "--"
-        }
-
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return "\(value)"
+        AIPluginTokenFormatter.compactCount(value)
     }
 
     private func tokenWidth(symbol: String, value: Int?) -> CGFloat {

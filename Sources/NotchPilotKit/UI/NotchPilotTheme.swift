@@ -57,28 +57,6 @@ enum NotchPilotTheme {
         }
     }
 
-    static func settingsCanvas(for colorScheme: ColorScheme) -> LinearGradient {
-        LinearGradient(
-            colors: colorScheme == .dark
-                ? [
-                    Color(nsColor: .windowBackgroundColor),
-                    Color(red: 0.08, green: 0.09, blue: 0.12),
-                ]
-                : [
-                    Color(red: 0.95, green: 0.96, blue: 0.98),
-                    Color(red: 0.9, green: 0.93, blue: 0.97),
-                ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    static func settingsSidebarFill(for colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark
-            ? Color(red: 0.11, green: 0.12, blue: 0.15)
-            : Color.white.opacity(0.8)
-    }
-
     static func settingsPanelFill(for colorScheme: ColorScheme) -> LinearGradient {
         LinearGradient(
             colors: colorScheme == .dark
@@ -129,14 +107,6 @@ enum NotchPilotTheme {
     static func settingsDivider(for colorScheme: ColorScheme) -> Color {
         Color(nsColor: .separatorColor)
             .opacity(colorScheme == .dark ? 0.55 : 0.35)
-    }
-
-    static func settingsSelectionFill(accent: Color, colorScheme: ColorScheme) -> Color {
-        accent.opacity(colorScheme == .dark ? 0.22 : 0.16)
-    }
-
-    static func settingsSelectionStroke(accent: Color, colorScheme: ColorScheme) -> Color {
-        accent.opacity(colorScheme == .dark ? 0.42 : 0.26)
     }
 
     static func statusFill(for color: Color) -> Color {
