@@ -506,8 +506,8 @@ enum AppStrings {
             return "始终允许"
         case "Don't ask again":
             return "不再询问"
-        case "Yes, and don't ask again for these files":
-            return "是，且不再询问这些文件"
+        case "Yes, and don't ask again this session":
+            return "是，且本次会话不再询问"
         case "No, continue without running it":
             return "否，继续但不运行"
         case "No, continue without applying them":

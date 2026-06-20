@@ -1233,4 +1233,85 @@ final class CodexDesktopApprovalControllerTests: XCTestCase {
             version: 1
         )
     }
+
+    func testFileChangeApprovalUsesCodexSessionApprovalLabel() {
+        let controller = CodexDesktopApprovalController()
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "approval-file-session",
+                method: "item/fileChange/requestApproval",
+                params: [
+                    "threadId": .string("thread-1"),
+                    "turnId": .string("turn-1"),
+                    "itemId": .string("item-1"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("acceptForSession"),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            )
+        )
+
+        XCTAssertEqual(
+            surface?.options.map(\.title),
+            [
+                "Yes",
+                "Yes, and don't ask again this session",
+            ]
+        )
+    }
+
+    func testFileChangeApprovalRetainsResolvedFileChangesAcrossSelection() {
+        let controller = CodexDesktopApprovalController()
+        let changes = [
+            CodexFileChange(
+                id: "item-1-0",
+                path: "/Users/jaron/proj/Sources/App/Main.swift",
+                displayPath: "Sources/App/Main.swift",
+                kind: .update,
+                addedLines: 12,
+                removedLines: 3
+            ),
+            CodexFileChange(
+                id: "item-1-1",
+                path: "/Users/jaron/proj/Sources/App/New.swift",
+                displayPath: "Sources/App/New.swift",
+                kind: .add,
+                addedLines: 40,
+                removedLines: 0
+            ),
+        ]
+
+        let surface = controller.handle(
+            request: CodexDesktopIPCRequestFrame(
+                requestID: "approval-file-changes",
+                method: "item/fileChange/requestApproval",
+                params: [
+                    "threadId": .string("thread-1"),
+                    "itemId": .string("item-1"),
+                    "availableDecisions": .array([
+                        .string("accept"),
+                        .string("acceptForSession"),
+                        .string("decline"),
+                    ]),
+                ],
+                sourceClientID: "desktop-client",
+                targetClientID: nil,
+                version: 1
+            ),
+            fileChanges: changes
+        )
+
+        XCTAssertEqual(surface?.fileChanges, changes)
+
+        let updated = controller.selectOption(
+            "codex-ipc-approval-file-changes-option-1",
+            on: "codex-ipc-approval-file-changes"
+        )
+        XCTAssertEqual(updated?.fileChanges, changes)
+    }
 }

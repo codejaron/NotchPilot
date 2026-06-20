@@ -34,6 +34,7 @@ public struct CodexDesktopEventReducer {
 
     private var conversationStates: [String: JSONValue] = [:]
     private var conversationApprovalRequests: [String: CodexDesktopIPCRequestFrame] = [:]
+    private var conversationApprovalFileChanges: [String: [CodexFileChange]] = [:]
     private var conversationOwnerClientIDs: [String: String] = [:]
     private var lastKnownConversationTitles: [String: String] = [:]
     private var conversationRecency: [String] = []
@@ -58,6 +59,118 @@ public struct CodexDesktopEventReducer {
         case .unknown:
             return nil
         }
+    }
+
+    func fileChanges(
+        for approval: CodexDesktopIPCRequestFrame,
+        conversationID: String
+    ) -> [CodexFileChange] {
+        guard approval.method == CodexDesktopApprovalMethod.fileChange.rawValue,
+              let itemID = approval.params.stringValue(at: ["itemId"])?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              itemID.isEmpty == false,
+              let state = conversationStates[conversationID]?.objectValue,
+              let item = fileChangeItem(withID: itemID, in: state),
+              let changes = item.arrayValue(at: ["changes"])
+        else {
+            return []
+        }
+
+        let cwd = state.stringValue(at: ["cwd"])
+        return changes.enumerated().compactMap { index, changeValue in
+            makeFileChange(from: changeValue, cwd: cwd, id: "\(itemID)-\(index)")
+        }
+    }
+
+    private func fileChangeItem(
+        withID itemID: String,
+        in state: [String: JSONValue]
+    ) -> [String: JSONValue]? {
+        guard let turns = state.arrayValue(at: ["turns"]) else {
+            return nil
+        }
+
+        for turn in turns.compactMap(\.objectValue) {
+            guard let items = turn.arrayValue(at: ["items"]) else {
+                continue
+            }
+
+            for item in items.compactMap(\.objectValue)
+            where item.stringValue(at: ["id"]) == itemID
+                && item.stringValue(at: ["type"]) == "fileChange" {
+                return item
+            }
+        }
+
+        return nil
+    }
+
+    private func makeFileChange(
+        from value: JSONValue,
+        cwd: String?,
+        id: String
+    ) -> CodexFileChange? {
+        guard let change = value.objectValue,
+              let path = change.stringValue(at: ["path"])?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              path.isEmpty == false
+        else {
+            return nil
+        }
+
+        let counts = diffLineCounts(change.stringValue(at: ["diff"]) ?? "")
+        return CodexFileChange(
+            id: id,
+            path: path,
+            displayPath: displayPath(for: path, cwd: cwd),
+            kind: fileChangeKind(from: change),
+            addedLines: counts.added,
+            removedLines: counts.removed
+        )
+    }
+
+    private func fileChangeKind(from change: [String: JSONValue]) -> CodexFileChange.Kind {
+        let hasMovePath = change.stringValue(at: ["kind", "move_path"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+
+        switch change.stringValue(at: ["kind", "type"])?.lowercased() {
+        case "add":
+            return .add
+        case "delete", "remove":
+            return .delete
+        default:
+            return hasMovePath ? .move : .update
+        }
+    }
+
+    private func diffLineCounts(_ diff: String) -> (added: Int, removed: Int) {
+        var added = 0
+        var removed = 0
+        for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("+"), line.hasPrefix("+++") == false {
+                added += 1
+            } else if line.hasPrefix("-"), line.hasPrefix("---") == false {
+                removed += 1
+            }
+        }
+        return (added, removed)
+    }
+
+    private func displayPath(for path: String, cwd: String?) -> String {
+        guard let cwd = cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              cwd.isEmpty == false
+        else {
+            return path
+        }
+
+        let normalizedCwd = cwd.hasSuffix("/") ? String(cwd.dropLast()) : cwd
+        let prefix = normalizedCwd + "/"
+        guard path.hasPrefix(prefix) else {
+            return path
+        }
+
+        let relative = String(path.dropFirst(prefix.count))
+        return relative.isEmpty ? path : relative
     }
 
     public mutating func consume(frame: CodexDesktopIPCFrame) throws -> [CodexDesktopReducerOutput] {
@@ -212,6 +325,7 @@ public struct CodexDesktopEventReducer {
             let evictedConversationID = conversationRecency.removeFirst()
             conversationStates.removeValue(forKey: evictedConversationID)
             conversationApprovalRequests.removeValue(forKey: evictedConversationID)
+            conversationApprovalFileChanges.removeValue(forKey: evictedConversationID)
             conversationOwnerClientIDs.removeValue(forKey: evictedConversationID)
             lastKnownConversationTitles.removeValue(forKey: evictedConversationID)
         }
@@ -231,11 +345,17 @@ public struct CodexDesktopEventReducer {
             ownerClientID: conversationOwnerClientIDs[conversationID]
         )
         let previousApproval = conversationApprovalRequests[conversationID]
+        let currentFileChanges = currentApproval.map {
+            fileChanges(for: $0, conversationID: conversationID)
+        } ?? []
+        let previousFileChanges = conversationApprovalFileChanges[conversationID] ?? []
 
         if let currentApproval {
             conversationApprovalRequests[conversationID] = currentApproval
+            conversationApprovalFileChanges[conversationID] = currentFileChanges
         } else {
             conversationApprovalRequests.removeValue(forKey: conversationID)
+            conversationApprovalFileChanges.removeValue(forKey: conversationID)
         }
 
         var outputs: [CodexDesktopReducerOutput] = [
@@ -245,7 +365,7 @@ public struct CodexDesktopEventReducer {
             ),
         ]
 
-        if currentApproval != previousApproval {
+        if currentApproval != previousApproval || currentFileChanges != previousFileChanges {
             outputs.append(.approvalRequestChanged(conversationID: conversationID, request: currentApproval))
         }
 
@@ -803,10 +923,13 @@ public struct CodexDesktopEventReducer {
                         return false
                     }
                 case "replace":
-                    guard index < array.count else {
+                    if index < array.count {
+                        array[index] = value ?? .null
+                    } else if index == array.count {
+                        array.append(value ?? .null)
+                    } else {
                         return false
                     }
-                    array[index] = value ?? .null
                 case "remove":
                     guard index < array.count else {
                         return false

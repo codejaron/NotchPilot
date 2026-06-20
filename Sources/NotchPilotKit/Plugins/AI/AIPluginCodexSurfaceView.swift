@@ -120,11 +120,140 @@ struct AIPluginCodexSurfaceView: View {
         presentation: CodexApprovalDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: CodexApprovalCompactLayout.primaryColumnSpacing) {
-            AIPluginApprovalCommandView(
-                text: AppStrings.codexSurfaceSummary(presentation.commandText, language: generalSettings.interfaceLanguage),
-                compact: true
-            )
+            if surface.fileChanges.isEmpty {
+                AIPluginApprovalCommandView(
+                    text: AppStrings.codexSurfaceSummary(presentation.commandText, language: generalSettings.interfaceLanguage),
+                    compact: true
+                )
+            } else {
+                codexFileChangeSection(surface, presentation: presentation)
+            }
             codexSurfaceControls(surface)
+        }
+    }
+
+    @ViewBuilder
+    private func codexFileChangeSection(
+        _ surface: CodexActionableSurface,
+        presentation: CodexApprovalDetailPresentation
+    ) -> some View {
+        let caption = presentation.summaryText == nil
+            ? AppStrings.codexSurfaceSummary(presentation.commandText, language: generalSettings.interfaceLanguage)
+            : ""
+
+        VStack(alignment: .leading, spacing: 5) {
+            if caption.isEmpty == false {
+                Text(caption)
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.headerSummaryFontSize,
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary)
+                    .lineLimit(CodexApprovalCompactLayout.headerSummaryLineLimit)
+                    .minimumScaleFactor(0.86)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            codexFileChangeList(surface.fileChanges)
+        }
+    }
+
+    private func codexFileChangeList(_ changes: [CodexFileChange]) -> some View {
+        let maxVisible = 8
+        let visible = Array(changes.prefix(maxVisible))
+        let overflow = changes.count - visible.count
+
+        return VStack(alignment: .leading, spacing: 3) {
+            ForEach(visible) { change in
+                codexFileChangeRow(change)
+            }
+
+            if overflow > 0 {
+                Text(generalSettings.interfaceLanguage == .zhHans
+                    ? "还有 \(overflow) 个文件"
+                    : "+\(overflow) more files")
+                    .font(.system(size: CodexApprovalCompactLayout.commandFontSize, weight: .medium))
+                    .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.55))
+                    .padding(.top, 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, CodexApprovalCompactLayout.commandHorizontalPadding)
+        .padding(.vertical, CodexApprovalCompactLayout.commandVerticalPadding)
+        .background(
+            RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.commandCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CodexApprovalCompactLayout.commandCornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func codexFileChangeRow(_ change: CodexFileChange) -> some View {
+        HStack(spacing: 6) {
+            Text(codexFileChangeGlyph(change.kind))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(codexFileChangeTint(change.kind))
+                .frame(width: 12, alignment: .center)
+
+            Text(change.displayPath)
+                .font(.system(
+                    size: CodexApprovalCompactLayout.commandFontSize,
+                    weight: .medium,
+                    design: .monospaced
+                ))
+                .foregroundStyle(NotchPilotTheme.islandTextPrimary.opacity(0.88))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if change.addedLines > 0 {
+                Text("+\(change.addedLines)")
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.commandFontSize,
+                        weight: .semibold,
+                        design: .monospaced
+                    ))
+                    .foregroundStyle(Color(red: 0.36, green: 0.78, blue: 0.45))
+            }
+
+            if change.removedLines > 0 {
+                Text("-\(change.removedLines)")
+                    .font(.system(
+                        size: CodexApprovalCompactLayout.commandFontSize,
+                        weight: .semibold,
+                        design: .monospaced
+                    ))
+                    .foregroundStyle(Color(red: 0.90, green: 0.40, blue: 0.42))
+            }
+        }
+    }
+
+    private func codexFileChangeGlyph(_ kind: CodexFileChange.Kind) -> String {
+        switch kind {
+        case .add:
+            return "A"
+        case .update:
+            return "M"
+        case .delete:
+            return "D"
+        case .move:
+            return "R"
+        }
+    }
+
+    private func codexFileChangeTint(_ kind: CodexFileChange.Kind) -> Color {
+        switch kind {
+        case .add:
+            return Color(red: 0.36, green: 0.78, blue: 0.45)
+        case .update:
+            return Color(red: 0.55, green: 0.70, blue: 0.98)
+        case .delete:
+            return Color(red: 0.90, green: 0.40, blue: 0.42)
+        case .move:
+            return Color(red: 0.82, green: 0.66, blue: 0.40)
         }
     }
 

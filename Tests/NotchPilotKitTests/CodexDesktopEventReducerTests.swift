@@ -1434,4 +1434,191 @@ final class CodexDesktopEventReducerTests: XCTestCase {
             )
         )
     }
+
+    func testFileChangeApprovalResolvesFileChangesFromConversationItem() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-file-change"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-file-change"),
+                                "cwd": .string("/Users/jaron/proj"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "items": .array([
+                                            .object([
+                                                "id": .string("file-item-1"),
+                                                "type": .string("fileChange"),
+                                                "status": .string("completed"),
+                                                "changes": .array([
+                                                    .object([
+                                                        "path": .string("/Users/jaron/proj/Sources/App/Main.swift"),
+                                                        "kind": .object([
+                                                            "type": .string("update"),
+                                                            "move_path": .null,
+                                                        ]),
+                                                        "diff": .string("@@ -1,2 +1,4 @@\n context\n+added one\n+added two\n-removed one\n"),
+                                                    ]),
+                                                    .object([
+                                                        "path": .string("/Users/jaron/proj/Sources/App/New.swift"),
+                                                        "kind": .object([
+                                                            "type": .string("add"),
+                                                        ]),
+                                                        "diff": .string("@@ -0,0 +1,1 @@\n+brand new\n"),
+                                                    ]),
+                                                ]),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                                "requests": .array([
+                                    .object([
+                                        "method": .string("item/fileChange/requestApproval"),
+                                        "id": .integer(7),
+                                        "params": .object([
+                                            "threadId": .string("conv-file-change"),
+                                            "itemId": .string("file-item-1"),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .approvalRequestChanged(conversationID, request)? = outputs.last else {
+            return XCTFail("expected approval request output")
+        }
+
+        let frame = try XCTUnwrap(request)
+        let resolved = reducer.fileChanges(for: frame, conversationID: conversationID)
+
+        XCTAssertEqual(resolved.count, 2)
+        XCTAssertEqual(resolved.first?.displayPath, "Sources/App/Main.swift")
+        XCTAssertEqual(resolved.first?.kind, .update)
+        XCTAssertEqual(resolved.first?.addedLines, 2)
+        XCTAssertEqual(resolved.first?.removedLines, 1)
+        XCTAssertEqual(resolved.last?.displayPath, "Sources/App/New.swift")
+        XCTAssertEqual(resolved.last?.kind, .add)
+        XCTAssertEqual(resolved.last?.addedLines, 1)
+        XCTAssertEqual(resolved.last?.removedLines, 0)
+    }
+
+    func testThreadStreamReplaceAtArrayEndAppendsItemForFileChangeApproval() throws {
+        var reducer = CodexDesktopEventReducer()
+
+        _ = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-replace-append"),
+                        "change": .object([
+                            "type": .string("snapshot"),
+                            "conversationState": .object([
+                                "id": .string("conv-replace-append"),
+                                "cwd": .string("/Users/jaron/proj"),
+                                "threadRuntimeStatus": .object([
+                                    "type": .string("idle"),
+                                ]),
+                                "turns": .array([
+                                    .object([
+                                        "items": .array([
+                                            .object([
+                                                "id": .string("msg-0"),
+                                                "type": .string("userMessage"),
+                                                "text": .string("hi"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        let outputs = try reducer.consume(
+            frame: .broadcast(
+                CodexDesktopIPCBroadcastFrame(
+                    method: "thread-stream-state-changed",
+                    params: [
+                        "conversationId": .string("conv-replace-append"),
+                        "change": .object([
+                            "type": .string("patches"),
+                            "patches": .array([
+                                .object([
+                                    "op": .string("replace"),
+                                    "path": .array([
+                                        .string("turns"), .integer(0), .string("items"), .integer(1),
+                                    ]),
+                                    "value": .object([
+                                        "id": .string("call_fc1"),
+                                        "type": .string("fileChange"),
+                                        "status": .string("completed"),
+                                        "changes": .array([
+                                            .object([
+                                                "path": .string("/Users/jaron/proj/Sources/A.swift"),
+                                                "kind": .object([
+                                                    "type": .string("update"),
+                                                    "move_path": .null,
+                                                ]),
+                                                "diff": .string("@@ -1 +1,3 @@\n keep\n+one\n+two\n"),
+                                            ]),
+                                        ]),
+                                    ]),
+                                ]),
+                                .object([
+                                    "op": .string("add"),
+                                    "path": .array([.string("requests"), .integer(0)]),
+                                    "value": .object([
+                                        "method": .string("item/fileChange/requestApproval"),
+                                        "id": .integer(11),
+                                        "params": .object([
+                                            "threadId": .string("conv-replace-append"),
+                                            "itemId": .string("call_fc1"),
+                                        ]),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ],
+                    sourceClientID: "desktop-client",
+                    targetClientID: nil,
+                    version: 1
+                )
+            )
+        )
+
+        guard case let .approvalRequestChanged(conversationID, request)? = outputs.last else {
+            return XCTFail("expected approval request output")
+        }
+
+        let frame = try XCTUnwrap(request)
+        let resolved = reducer.fileChanges(for: frame, conversationID: conversationID)
+
+        XCTAssertEqual(resolved.count, 1)
+        XCTAssertEqual(resolved.first?.displayPath, "Sources/A.swift")
+        XCTAssertEqual(resolved.first?.kind, .update)
+        XCTAssertEqual(resolved.first?.addedLines, 2)
+        XCTAssertEqual(resolved.first?.removedLines, 0)
+    }
 }

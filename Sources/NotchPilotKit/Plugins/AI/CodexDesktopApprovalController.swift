@@ -102,21 +102,28 @@ final class CodexDesktopApprovalController {
         CodexDesktopApprovalRequestRouter.canHandle(request)
     }
 
-    func handle(request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
-        handle(request: request, delivery: .response)
+    func handle(
+        request: CodexDesktopIPCRequestFrame,
+        fileChanges: [CodexFileChange] = []
+    ) -> CodexActionableSurface? {
+        handle(request: request, delivery: .response, fileChanges: fileChanges)
     }
 
-    func handleLiveRequest(_ request: CodexDesktopIPCRequestFrame) -> CodexActionableSurface? {
+    func handleLiveRequest(
+        _ request: CodexDesktopIPCRequestFrame,
+        fileChanges: [CodexFileChange] = []
+    ) -> CodexActionableSurface? {
         guard let delivery = liveDelivery(for: request) else {
-            return handle(request: request)
+            return handle(request: request, fileChanges: fileChanges)
         }
 
-        return handle(request: request, delivery: delivery)
+        return handle(request: request, delivery: delivery, fileChanges: fileChanges)
     }
 
     private func handle(
         request: CodexDesktopIPCRequestFrame,
-        delivery: Delivery
+        delivery: Delivery,
+        fileChanges: [CodexFileChange] = []
     ) -> CodexActionableSurface? {
         guard let method = CodexDesktopApprovalRequestRouter.method(for: request) else {
             return nil
@@ -127,7 +134,7 @@ final class CodexDesktopApprovalController {
         case .commandExecution:
             pendingApproval = makeCommandApproval(from: request, delivery: delivery)
         case .fileChange:
-            pendingApproval = makeFileChangeApproval(from: request, delivery: delivery)
+            pendingApproval = makeFileChangeApproval(from: request, delivery: delivery, fileChanges: fileChanges)
         case .permissions:
             pendingApproval = makePermissionsApproval(from: request, delivery: delivery)
         case .toolRequestUserInput:
@@ -308,7 +315,8 @@ final class CodexDesktopApprovalController {
 
     private func makeFileChangeApproval(
         from request: CodexDesktopIPCRequestFrame,
-        delivery: Delivery
+        delivery: Delivery,
+        fileChanges: [CodexFileChange]
     ) -> PendingApproval {
         let decisions = request.params.arrayValue(at: ["availableDecisions"]) ?? [
             .string("accept"),
@@ -337,6 +345,7 @@ final class CodexDesktopApprovalController {
                 text: "",
                 isEditable: true
             ),
+            fileChanges: fileChanges,
             selectionMode: .optionResultsWithOther(
                 Dictionary(uniqueKeysWithValues: positiveOptions.map { ($0.option.id, $0.result) }),
                 negativeResult: negativeResult,
@@ -552,6 +561,7 @@ final class CodexDesktopApprovalController {
         threadID: String?,
         options: [(option: CodexSurfaceOption, result: JSONValue)],
         textInput: CodexSurfaceTextInput?,
+        fileChanges: [CodexFileChange] = [],
         selectionMode: SelectionMode,
         cancelResult: JSONValue,
         delivery: Delivery,
@@ -581,6 +591,7 @@ final class CodexDesktopApprovalController {
                 showsActionButtons: showsActionButtons,
                 options: options.map(\.option),
                 textInput: textInput,
+                fileChanges: fileChanges,
                 threadID: threadID,
                 quickActions: quickActions
             )
@@ -779,7 +790,7 @@ final class CodexDesktopApprovalController {
             case (.commandExecution, "acceptForSession"):
                 return "Yes, and don't ask again for this command in this session"
             case (.fileChange, "acceptForSession"):
-                return "Yes, and don't ask again for these files"
+                return "Yes, and don't ask again this session"
             case (.commandExecution, "decline"):
                 return "No, continue without running it"
             case (.fileChange, "decline"):
@@ -964,6 +975,7 @@ final class CodexDesktopApprovalController {
                 )
             },
             textInput: surface.textInput,
+            fileChanges: surface.fileChanges,
             threadID: surface.threadID,
             threadTitle: surface.threadTitle,
             quickActions: surface.quickActions

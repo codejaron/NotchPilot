@@ -187,7 +187,8 @@ public final class CodexDesktopMonitor: @unchecked Sendable, CodexDesktopContext
                 onThreadContextChanged?(CodexThreadUpdate(context: context, marksActivity: marksActivity))
             case let .approvalRequestChanged(conversationID, request):
                 if let request {
-                    emitSurface(approvalController.handleLiveRequest(request))
+                    let fileChanges = reducer.fileChanges(for: request, conversationID: conversationID)
+                    emitSurface(approvalController.handleLiveRequest(request, fileChanges: fileChanges))
                 } else {
                     approvalController.reset(conversationID: conversationID)
                     emitSurface(approvalController.currentSurface)

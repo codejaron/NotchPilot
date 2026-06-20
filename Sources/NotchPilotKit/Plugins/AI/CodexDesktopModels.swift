@@ -128,6 +128,38 @@ public struct CodexSurfaceQuickActions: Equatable, Sendable {
     public static let none = CodexSurfaceQuickActions()
 }
 
+public struct CodexFileChange: Equatable, Sendable, Identifiable {
+    public enum Kind: String, Equatable, Sendable {
+        case add
+        case update
+        case delete
+        case move
+    }
+
+    public let id: String
+    public let path: String
+    public let displayPath: String
+    public let kind: Kind
+    public let addedLines: Int
+    public let removedLines: Int
+
+    public init(
+        id: String,
+        path: String,
+        displayPath: String,
+        kind: Kind,
+        addedLines: Int,
+        removedLines: Int
+    ) {
+        self.id = id
+        self.path = path
+        self.displayPath = displayPath
+        self.kind = kind
+        self.addedLines = addedLines
+        self.removedLines = removedLines
+    }
+}
+
 public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let id: String
     public let summary: String
@@ -137,6 +169,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
     public let showsActionButtons: Bool
     public let options: [CodexSurfaceOption]
     public let textInput: CodexSurfaceTextInput?
+    public let fileChanges: [CodexFileChange]
     public let threadID: String?
     public let threadTitle: String?
     public let quickActions: CodexSurfaceQuickActions
@@ -150,6 +183,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         showsActionButtons: Bool = true,
         options: [CodexSurfaceOption] = [],
         textInput: CodexSurfaceTextInput? = nil,
+        fileChanges: [CodexFileChange] = [],
         threadID: String? = nil,
         threadTitle: String? = nil,
         quickActions: CodexSurfaceQuickActions = .none
@@ -162,6 +196,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
         self.showsActionButtons = showsActionButtons
         self.options = options
         self.textInput = textInput
+        self.fileChanges = fileChanges
         self.threadID = threadID
         self.threadTitle = threadTitle
         self.quickActions = quickActions
@@ -185,6 +220,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
             showsActionButtons: showsActionButtons,
             options: options,
             textInput: textInput,
+            fileChanges: fileChanges,
             threadID: threadID ?? context.threadID,
             threadTitle: resolvedThreadTitle,
             quickActions: quickActions
@@ -212,6 +248,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
                 )
             },
             textInput: textInput,
+            fileChanges: fileChanges,
             threadID: threadID,
             threadTitle: threadTitle,
             quickActions: quickActions
@@ -237,6 +274,7 @@ public struct CodexActionableSurface: Equatable, Sendable, Identifiable {
                 isEditable: textInput.isEditable,
                 attachedOptionID: textInput.attachedOptionID
             ),
+            fileChanges: fileChanges,
             threadID: threadID,
             threadTitle: threadTitle,
             quickActions: quickActions
